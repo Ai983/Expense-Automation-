@@ -46,12 +46,18 @@ const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (mobile apps, Postman)
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error(`CORS: origin ${origin} not allowed`));
+      // Allow requests with no origin (mobile apps, Postman, React Native)
+      if (!origin) return callback(null, true);
+      // Allow any vercel.app or railway.app deployment (covers preview URLs too)
+      if (
+        allowedOrigins.includes(origin) ||
+        origin.endsWith('.vercel.app') ||
+        origin.endsWith('.railway.app')
+      ) {
+        return callback(null, true);
       }
+      // Deny but return null (not an Error) to avoid 500
+      return callback(null, false);
     },
     credentials: true,
   })
