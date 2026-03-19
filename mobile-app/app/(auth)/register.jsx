@@ -66,7 +66,10 @@ export default function RegisterScreen() {
       <ScrollView contentContainerStyle={styles.inner} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
           <Text style={styles.title}>Create Account</Text>
-          <Text style={styles.subtitle}>HagerStone Employee Registration</Text>
+          <Text style={styles.subtitle}>Site Engineer Registration</Text>
+          <View style={styles.roleBadge}>
+            <Text style={styles.roleBadgeText}>Role: Site Engineer</Text>
+          </View>
         </View>
 
         <View style={styles.form}>
@@ -121,6 +124,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9fafb' },
   inner: { flexGrow: 1, padding: 24 },
   header: { alignItems: 'center', marginBottom: 28, marginTop: 40 },
+  roleBadge: { backgroundColor: '#fef3c7', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 4, marginTop: 8, borderWidth: 1, borderColor: '#f59e0b' },
+  roleBadgeText: { color: '#92400e', fontWeight: '600', fontSize: 12 },
   title: { fontSize: 24, fontWeight: '800', color: '#111827' },
   subtitle: { fontSize: 13, color: '#6b7280', marginTop: 4 },
   form: { backgroundColor: '#fff', borderRadius: 16, padding: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
