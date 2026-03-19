@@ -6,11 +6,11 @@ const api = axios.create({
   timeout: 30000,
 });
 
-// Attach current Supabase session token to every request
-api.interceptors.request.use(async (config) => {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session?.access_token) {
-    config.headers.Authorization = `Bearer ${session.access_token}`;
+// Attach stored token to every request
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('hs_access_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
