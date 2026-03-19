@@ -32,6 +32,11 @@
       ],
       "expo-secure-store"
     ],
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/icon.png"
+    },
     "experiments": {
       "typedRoutes": false
     }
