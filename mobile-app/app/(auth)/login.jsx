@@ -19,7 +19,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const { login } = useAuth();
+  const { login, logout } = useAuth();
   const router = useRouter();
 
   async function handleLogin() {
@@ -32,7 +32,9 @@ export default function LoginScreen() {
     try {
       const data = await login(email.trim().toLowerCase(), password);
       if (data.employee.role !== 'employee') {
-        return showAlert('Access', 'Finance team: use the web dashboard instead.');
+        await logout();
+        setError('This app is for site engineers only. Finance & admin: use the web dashboard.');
+        return showAlert('Wrong App', 'This app is for site engineers only.\n\nFinance & admin team: please use the Finance Dashboard web URL instead.');
       }
       router.replace('/(app)/submit');
     } catch (err) {
