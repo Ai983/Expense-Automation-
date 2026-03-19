@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
+import { supabase } from '../../src/supabaseClient';
 
 function showAlert(title, message) {
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
@@ -19,8 +20,23 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [resetSent, setResetSent] = useState(false);
   const { login, logout } = useAuth();
   const router = useRouter();
+
+  async function handleForgotPassword() {
+    if (!email.trim()) {
+      return showAlert('Enter Email', 'Please enter your email address first, then tap Forgot Password.');
+    }
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase());
+      if (error) throw error;
+      setResetSent(true);
+      showAlert('Email Sent', `Password reset link sent to ${email}. Check your inbox.`);
+    } catch {
+      showAlert('Error', 'Could not send reset email. Check the email address and try again.');
+    }
+  }
 
   async function handleLogin() {
     if (!email || !password) {
@@ -89,6 +105,10 @@ export default function LoginScreen() {
             <Text style={styles.btnText}>{loading ? 'Signing in...' : 'Sign In'}</Text>
           </TouchableOpacity>
 
+          <TouchableOpacity onPress={handleForgotPassword} style={styles.link}>
+            <Text style={styles.forgotText}>{resetSent ? 'Reset email sent ✓' : 'Forgot Password?'}</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity onPress={() => router.push('/(auth)/register')} style={styles.link}>
             <Text style={styles.linkText}>Don't have an account? Register</Text>
           </TouchableOpacity>
@@ -111,6 +131,7 @@ const styles = StyleSheet.create({
   btn: { backgroundColor: '#e8a24a', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 24 },
   btnDisabled: { opacity: 0.6 },
   btnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  link: { alignItems: 'center', marginTop: 20 },
+  link: { alignItems: 'center', marginTop: 16 },
   linkText: { color: '#e8a24a', fontSize: 14, fontWeight: '500' },
+  forgotText: { color: '#6b7280', fontSize: 13 },
 });
