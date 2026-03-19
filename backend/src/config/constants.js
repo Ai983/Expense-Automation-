@@ -1,6 +1,45 @@
-export const SITES = ['Mumbai', 'Delhi', 'Bangalore', 'Pune', 'Hyderabad'];
+export const SITES = [
+  'Head Office',
+  'Andritz',
+  'Theon Lifescience',
+  'Consern Pharma',
+  'Bhuj',
+  'Kotputli Project',
+  'Bansal Tower Gurugram',
+  'VinFast',
+  'Minebea Mitsumi',
+  'Chattargarh',
+  'Valorium',
+  'Jasrasar',
+  'Hanumangarh',
+  'Himalaya',
+  'Microsave',
+  'Bangalore Branch Office',
+  'Vinfast-Ghaziabad',
+  'AU Space Office Ludhiana',
+  'Vinfast - Patparganj',
+  'Auma India Bengaluru',
+  'Vaneet Infra',
+  'MAX Hospital, Saket Delhi',
+  'Dee Foundation Omaxe, Faridabad',
+  'Hero Homes Ludhiana',
+  'Delhi NCR',
+];
 
-export const CATEGORIES = ['Vendor', 'Labour', 'Material', 'Transport', 'Other'];
+export const CATEGORIES = [
+  'Food Expense',
+  'Site Room',
+  'Travelling',
+  'Software',
+  'Labour Expense',
+  'Material Expense',
+  'Site Expense',
+  'Office Expense',
+  'Employee Welfare',
+  'DA- Expense',
+  'BT- Expense',
+  'Porter Expenses',
+];
 
 export const ROLES = ['employee', 'finance', 'manager', 'admin'];
 
