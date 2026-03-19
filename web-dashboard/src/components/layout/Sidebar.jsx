@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 const NAV_ITEMS = [
   { to: '/queue', label: 'Expense Queue', icon: '📋' },
   { to: '/dashboard', label: 'Dashboard', icon: '📊' },
+  { to: '/reports', label: 'Employee Report', icon: '👥' },
 ];
 
 export default function Sidebar() {

@@ -5,6 +5,7 @@ import Toast from './components/layout/Toast';
 import Login from './pages/Login';
 import ExpenseQueuePage from './pages/ExpenseQueuePage';
 import DashboardPage from './pages/DashboardPage';
+import EmployeeReportPage from './pages/EmployeeReportPage';
 
 function ProtectedLayout({ children }) {
   const { user, loading } = useAuth();
@@ -59,6 +60,14 @@ function AppRoutes() {
         element={
           <ProtectedLayout>
             <DashboardPage />
+          </ProtectedLayout>
+        }
+      />
+      <Route
+        path="/reports"
+        element={
+          <ProtectedLayout>
+            <EmployeeReportPage />
           </ProtectedLayout>
         }
       />

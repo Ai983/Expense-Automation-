@@ -141,4 +141,65 @@ router.get('/recent-activity', async (req, res, next) => {
   }
 });
 
+// GET /api/dashboard/by-employee — per-employee expense breakdown
+router.get('/by-employee', async (req, res, next) => {
+  try {
+    const { site, from, to } = req.query;
+
+    let query = supabaseAdmin
+      .from('expenses')
+      .select('id, amount, status, site, category, submitted_at, employee:employee_id (id, name, email, site, role)');
+
+    if (site) query = query.eq('site', site);
+    if (from) query = query.gte('submitted_at', from);
+    if (to) query = query.lte('submitted_at', to + 'T23:59:59');
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const empMap = {};
+    for (const exp of data) {
+      const emp = exp.employee;
+      if (!emp) continue;
+      if (!empMap[emp.id]) {
+        empMap[emp.id] = {
+          id: emp.id,
+          name: emp.name,
+          email: emp.email,
+          site: emp.site,
+          role: emp.role,
+          total: 0,
+          totalAmount: 0,
+          verified: 0,
+          approved: 0,
+          pending: 0,
+          manual_review: 0,
+          rejected: 0,
+          blocked: 0,
+          lastSubmitted: null,
+        };
+      }
+      const e = empMap[emp.id];
+      e.total++;
+      e.totalAmount += parseFloat(exp.amount);
+      e[exp.status] = (e[exp.status] || 0) + 1;
+      if (!e.lastSubmitted || exp.submitted_at > e.lastSubmitted) {
+        e.lastSubmitted = exp.submitted_at;
+      }
+    }
+
+    const result = Object.values(empMap)
+      .map((e) => ({
+        ...e,
+        totalAmount: Math.round(e.totalAmount * 100) / 100,
+        autoVerifyRate: e.total > 0 ? Math.round(((e.verified + e.approved) / e.total) * 100) : 0,
+      }))
+      .sort((a, b) => b.total - a.total);
+
+    return ok(res, result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
