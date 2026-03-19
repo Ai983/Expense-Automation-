@@ -8,7 +8,29 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
 import { SITES } from '../../src/constants';
 
-// On web, Alert.alert often doesn't show; use window.alert so user always sees feedback
+const ENGINEER_NAMES = [
+  'Sonu',
+  'Ajay Dhiman',
+  'Dilip Parashar',
+  'Shivam',
+  'Dilkhush',
+  'Mukul Tyagi',
+  'Mohit Sharma',
+  'Hari Shankar',
+  'Shashank Pandey',
+  'Akhil',
+  'Shubham',
+  'Arvind',
+  'Vinay Tyagi',
+  'Shiv Tyagi',
+  'Praveen Kumar',
+  'Rishabh Singh',
+  'Sanjeev Kumar Upadhyay',
+  'Arman Ali',
+  'Vishal Tyagi',
+  'Other (type below)',
+];
+
 function showAlert(title, message) {
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
     window.alert(`${title}\n\n${message}`);
@@ -18,11 +40,16 @@ function showAlert(title, message) {
 }
 
 export default function RegisterScreen() {
-  const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', site: SITES[0] });
+  const [selectedName, setSelectedName] = useState(ENGINEER_NAMES[0]);
+  const [customName, setCustomName]     = useState('');
+  const [form, setForm] = useState({ email: '', phone: '', password: '', site: SITES[0] });
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError]     = useState('');
   const { register } = useAuth();
   const router = useRouter();
+
+  const isOther   = selectedName === 'Other (type below)';
+  const finalName = isOther ? customName.trim() : selectedName;
 
   function set(key, value) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -30,9 +57,13 @@ export default function RegisterScreen() {
   }
 
   async function handleRegister() {
-    if (!form.name || !form.email || !form.password || !form.site) {
+    if (!finalName || !form.email || !form.password || !form.site) {
       setError('All fields are required');
       return showAlert('Error', 'All fields are required');
+    }
+    if (isOther && finalName.length < 2) {
+      setError('Please enter your full name');
+      return showAlert('Error', 'Please enter your full name');
     }
     if (form.password.length < 6) {
       setError('Password must be at least 6 characters');
@@ -42,7 +73,7 @@ export default function RegisterScreen() {
     setError('');
     try {
       await register({
-        name: form.name.trim(),
+        name: finalName,
         email: form.email.trim().toLowerCase(),
         phone: form.phone.trim() || undefined,
         password: form.password,
@@ -52,7 +83,7 @@ export default function RegisterScreen() {
     } catch (err) {
       const msg = err.response?.data?.error
         || (err.code === 'ECONNABORTED' || err.message?.includes('timeout')
-          ? 'Connection timed out. Is the backend running? (npm run dev in backend folder, port 4000)'
+          ? 'Connection timed out. Check your internet connection.'
           : err.message || 'Please try again');
       setError(msg);
       showAlert('Registration Failed', msg);
@@ -73,28 +104,69 @@ export default function RegisterScreen() {
         </View>
 
         <View style={styles.form}>
-          {[
-            { key: 'name', label: 'Full Name', placeholder: 'Raj Kumar', autoCapitalize: 'words' },
-            { key: 'email', label: 'Email', placeholder: 'raj@hagerstone.com', keyboard: 'email-address', autoCapitalize: 'none' },
-            { key: 'phone', label: 'Phone (optional)', placeholder: '+91-9000000000', keyboard: 'phone-pad' },
-            { key: 'password', label: 'Password (min 6 chars)', placeholder: '••••••••', secure: true },
-          ].map(({ key, label, placeholder, keyboard, autoCapitalize, secure }) => (
-            <View key={key}>
-              <Text style={styles.label}>{label}</Text>
-              <TextInput
-                style={styles.input}
-                placeholder={placeholder}
-                placeholderTextColor="#9ca3af"
-                value={form[key]}
-                onChangeText={(v) => set(key, v)}
-                keyboardType={keyboard || 'default'}
-                autoCapitalize={autoCapitalize || 'none'}
-                secureTextEntry={secure}
-              />
-            </View>
-          ))}
+          {/* Name dropdown */}
+          <Text style={styles.label}>Full Name *</Text>
+          <View style={styles.pickerWrapper}>
+            <Picker
+              selectedValue={selectedName}
+              onValueChange={(v) => { setSelectedName(v); setCustomName(''); setError(''); }}
+              style={styles.picker}
+            >
+              {ENGINEER_NAMES.map((n) => (
+                <Picker.Item key={n} label={n} value={n} />
+              ))}
+            </Picker>
+          </View>
 
-          <Text style={styles.label}>Site</Text>
+          {/* Custom name input — shown only when "Other" is selected */}
+          {isOther && (
+            <TextInput
+              style={[styles.input, styles.customNameInput]}
+              placeholder="Type your full name..."
+              placeholderTextColor="#9ca3af"
+              value={customName}
+              onChangeText={(v) => { setCustomName(v); setError(''); }}
+              autoCapitalize="words"
+              autoFocus
+            />
+          )}
+
+          {/* Email */}
+          <Text style={styles.label}>Email *</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="raj@hagerstone.com"
+            placeholderTextColor="#9ca3af"
+            value={form.email}
+            onChangeText={(v) => set('email', v)}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+
+          {/* Phone */}
+          <Text style={styles.label}>Phone (optional)</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="+91-9000000000"
+            placeholderTextColor="#9ca3af"
+            value={form.phone}
+            onChangeText={(v) => set('phone', v)}
+            keyboardType="phone-pad"
+          />
+
+          {/* Password */}
+          <Text style={styles.label}>Password (min 6 chars) *</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="••••••••"
+            placeholderTextColor="#9ca3af"
+            value={form.password}
+            onChangeText={(v) => set('password', v)}
+            secureTextEntry
+          />
+
+          {/* Site */}
+          <Text style={styles.label}>Site *</Text>
           <View style={styles.pickerWrapper}>
             <Picker selectedValue={form.site} onValueChange={(v) => set('site', v)} style={styles.picker}>
               {SITES.map((s) => <Picker.Item key={s} label={s} value={s} />)}
@@ -131,6 +203,7 @@ const styles = StyleSheet.create({
   form: { backgroundColor: '#fff', borderRadius: 16, padding: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
   label: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6, marginTop: 16 },
   input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: '#111827', backgroundColor: '#fafafa' },
+  customNameInput: { marginTop: 8, borderColor: '#e8a24a', borderWidth: 2, backgroundColor: '#fffbf5' },
   pickerWrapper: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, backgroundColor: '#fafafa', marginBottom: 4 },
   picker: { height: 48 },
   errorText: { color: '#dc2626', fontSize: 13, marginTop: 12, textAlign: 'center' },
