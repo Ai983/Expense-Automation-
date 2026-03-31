@@ -54,6 +54,15 @@ export const EXPENSE_STATUSES = [
   'blocked',
 ];
 
+export const IMPREST_CATEGORIES = [
+  'Food Expense',
+  'Site Room',
+  'Travelling',
+  'Labour Expense',
+  'Material Expense',
+  'Other',
+];
+
 export const STORAGE_BUCKET = 'expense-screenshots';
 
 export const SIGNED_URL_EXPIRY_SECONDS = 3600; // 1 hour

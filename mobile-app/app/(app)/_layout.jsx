@@ -36,6 +36,22 @@ export default function AppLayout() {
           tabBarIcon: ({ color, size }) => <Ionicons name="person-outline" color={color} size={size} />,
         }}
       />
+      <Tabs.Screen
+        name="imprest"
+        options={{
+          title: 'Request Imprest',
+          tabBarLabel: 'Imprest',
+          tabBarIcon: ({ color, size }) => <Ionicons name="wallet-outline" color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="my-imprest"
+        options={{
+          title: 'My Imprest',
+          tabBarLabel: 'Advances',
+          tabBarIcon: ({ color, size }) => <Ionicons name="time-outline" color={color} size={size} />,
+        }}
+      />
     </Tabs>
   );
 }

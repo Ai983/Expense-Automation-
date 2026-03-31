@@ -6,9 +6,10 @@ const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:4000';
 /**
  * Maintains a WebSocket connection to the backend.
  * Calls onNewExpense(data) whenever a NEW_EXPENSE event arrives.
+ * Calls onNewImprest(data) whenever a new_imprest event arrives.
  * Automatically reconnects with exponential backoff.
  */
-export function useWebSocket(onNewExpense) {
+export function useWebSocket(onNewExpense, onNewImprest) {
   const wsRef = useRef(null);
   const reconnectTimerRef = useRef(null);
   const reconnectDelay = useRef(1000);
@@ -35,6 +36,9 @@ export function useWebSocket(onNewExpense) {
           if (msg.type === 'NEW_EXPENSE' && onNewExpense) {
             onNewExpense(msg.data);
           }
+          if (msg.type === 'new_imprest' && onNewImprest) {
+            onNewImprest(msg.data);
+          }
         } catch {
           // ignore malformed messages
         }
@@ -60,5 +64,5 @@ export function useWebSocket(onNewExpense) {
       clearTimeout(reconnectTimerRef.current);
       wsRef.current?.close();
     };
-  }, [onNewExpense]);
+  }, [onNewExpense, onNewImprest]);
 }

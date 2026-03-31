@@ -4,6 +4,7 @@ import Sidebar from './components/layout/Sidebar';
 import Toast from './components/layout/Toast';
 import Login from './pages/Login';
 import ExpenseQueuePage from './pages/ExpenseQueuePage';
+import ImprestQueuePage from './pages/ImprestQueuePage';
 import DashboardPage from './pages/DashboardPage';
 import EmployeeReportPage from './pages/EmployeeReportPage';
 
@@ -52,6 +53,14 @@ function AppRoutes() {
         element={
           <ProtectedLayout>
             <ExpenseQueuePage />
+          </ProtectedLayout>
+        }
+      />
+      <Route
+        path="/imprest-queue"
+        element={
+          <ProtectedLayout>
+            <ImprestQueuePage />
           </ProtectedLayout>
         }
       />

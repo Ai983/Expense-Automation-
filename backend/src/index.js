@@ -8,6 +8,7 @@ import authRoutes from './routes/auth.js';
 import expenseRoutes from './routes/expenses.js';
 import dashboardRoutes from './routes/dashboard.js';
 import employeeRoutes from './routes/employees.js';
+import imprestRoutes from './routes/imprest.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 const app = express();
@@ -34,6 +35,16 @@ export function broadcastNewExpense(expenseData) {
   for (const ws of financeClients) {
     if (ws.readyState === 1) {
       ws.send(message);
+    }
+  }
+}
+
+/** Broadcast a new imprest request event to all connected finance dashboard clients */
+export function broadcastNewImprest(data) {
+  const payload = JSON.stringify({ type: 'new_imprest', data });
+  for (const ws of financeClients) {
+    if (ws.readyState === 1) {
+      ws.send(payload);
     }
   }
 }
@@ -83,6 +94,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/employees', employeeRoutes);
+app.use('/api/imprest', imprestRoutes);
 
 // ── 404 handler ───────────────────────────────────────────────────────────────
 app.use((_req, res) => {
