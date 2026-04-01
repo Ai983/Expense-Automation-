@@ -57,9 +57,13 @@ export default function RegisterScreen() {
   }
 
   async function handleRegister() {
-    if (!finalName || !form.email || !form.password || !form.site) {
+    if (!finalName || !form.email || !form.password || !form.site || !form.phone.trim()) {
       setError('All fields are required');
       return showAlert('Error', 'All fields are required');
+    }
+    if (form.phone.trim().replace(/[\s\-\+]/g, '').length < 10) {
+      setError('Enter a valid phone number');
+      return showAlert('Error', 'Enter a valid phone number');
     }
     if (isOther && finalName.length < 2) {
       setError('Please enter your full name');
@@ -75,7 +79,7 @@ export default function RegisterScreen() {
       await register({
         name: finalName,
         email: form.email.trim().toLowerCase(),
-        phone: form.phone.trim() || undefined,
+        phone: form.phone.trim(),
         password: form.password,
         site: form.site,
       });
@@ -144,7 +148,7 @@ export default function RegisterScreen() {
           />
 
           {/* Phone */}
-          <Text style={styles.label}>Phone (optional)</Text>
+          <Text style={styles.label}>Phone *</Text>
           <TextInput
             style={styles.input}
             placeholder="+91-9000000000"
