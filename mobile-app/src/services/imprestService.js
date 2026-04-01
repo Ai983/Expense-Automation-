@@ -21,3 +21,12 @@ export async function getMyImprestRequests(employeeId, page = 1) {
   });
   return data.data;
 }
+
+export async function getMyReminders(employeeId) {
+  const { data } = await api.get(`/api/imprest/my-reminders/${employeeId}`);
+  return data.data; // { reminders: [...] }
+}
+
+export async function fulfillReminder(reminderId) {
+  await api.post(`/api/imprest/reminders/${reminderId}/fulfill`);
+}

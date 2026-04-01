@@ -89,8 +89,8 @@ function ImprestCard({ request }) {
 
       <View style={styles.cardFooter}>
         <Text style={styles.amount}>₹{Number(request.amount_requested).toLocaleString('en-IN')}</Text>
-        {request.status === 'partially_approved' && request.approved_amount && (
-          <Text style={styles.approvedAmount}>
+        {(request.status === 'approved' || request.status === 'partially_approved') && request.approved_amount && (
+          <Text style={[styles.approvedAmount, request.status === 'approved' && { color: '#16a34a' }]}>
             Approved: ₹{Number(request.approved_amount).toLocaleString('en-IN')}
           </Text>
         )}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, Alert, Image, ActivityIndicator, KeyboardAvoidingView, Platform,
@@ -7,19 +7,49 @@ import * as ImagePicker from 'expo-image-picker';
 import { Picker } from '@react-native-picker/picker';
 import { useAuth } from '../../src/context/AuthContext';
 import { submitExpense } from '../../src/services/expenseService';
+import { getMyReminders, fulfillReminder } from '../../src/services/imprestService';
 import { SITES, CATEGORIES } from '../../src/constants';
 
 const INITIAL_FORM = { site: SITES[0], amount: '', category: CATEGORIES[0], description: '' };
 
 export default function SubmitExpenseScreen() {
   const [form, setForm] = useState(INITIAL_FORM);
-  const [image, setImage] = useState(null); // { uri, mimeType }
+  const [image, setImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+  const [reminders, setReminders] = useState([]);
+  const [activeReminderId, setActiveReminderId] = useState(null); // reminder being fulfilled
   const { user } = useAuth();
+
+  const fetchReminders = useCallback(async () => {
+    if (!user) return;
+    try {
+      const res = await getMyReminders(user.id);
+      setReminders(res.reminders || []);
+    } catch { /* silently ignore */ }
+  }, [user]);
+
+  useEffect(() => { fetchReminders(); }, [fetchReminders]);
 
   function set(key, value) {
     setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  function applyReminder(reminder) {
+    const imp = reminder.imprest;
+    const approvedAmt = imp?.approved_amount || imp?.amount_requested || '';
+    const site = imp?.site && SITES.includes(imp.site) ? imp.site : SITES[0];
+    const category = imp?.category && CATEGORIES.includes(imp.category) ? imp.category : CATEGORIES[0];
+
+    setForm({
+      site,
+      amount: approvedAmt ? String(approvedAmt) : '',
+      category,
+      description: `Expense for imprest ${imp?.ref_id || ''}`,
+    });
+    setActiveReminderId(reminder.id);
+    setImage(null);
+    setResult(null);
   }
 
   async function pickImage(source) {
@@ -70,6 +100,13 @@ export default function SubmitExpenseScreen() {
       setResult(res);
       setForm(INITIAL_FORM);
       setImage(null);
+
+      // Mark the linked reminder as fulfilled
+      if (activeReminderId) {
+        try { await fulfillReminder(activeReminderId); } catch { /* ignore */ }
+        setActiveReminderId(null);
+        fetchReminders(); // refresh reminder list
+      }
     } catch (err) {
       const msg = err.response?.data?.error || 'Submission failed. Check your connection.';
       if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
@@ -85,7 +122,56 @@ export default function SubmitExpenseScreen() {
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView style={styles.container} contentContainerStyle={styles.inner} keyboardShouldPersistTaps="handled">
-        {/* Success result */}
+
+        {/* ── Imprest Reminders ────────────────────────────────────── */}
+        {reminders.length > 0 && (
+          <View style={styles.remindersSection}>
+            <Text style={styles.remindersTitle}>⏰ Pending Imprest Expenses</Text>
+            <Text style={styles.remindersSubtitle}>
+              Tap a card to fill the expense for that imprest
+            </Text>
+            {reminders.map((r) => {
+              const imp = r.imprest;
+              const deadline = new Date(r.deadline);
+              const msLeft = deadline - Date.now();
+              const hoursLeft = Math.floor(msLeft / (1000 * 60 * 60));
+              const daysLeft = Math.floor(hoursLeft / 24);
+              const isActive = activeReminderId === r.id;
+
+              return (
+                <TouchableOpacity
+                  key={r.id}
+                  style={[styles.reminderCard, isActive && styles.reminderCardActive]}
+                  onPress={() => applyReminder(r)}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.reminderRow}>
+                    <Text style={styles.reminderRef}>{imp?.ref_id}</Text>
+                    <View style={[styles.reminderBadge, hoursLeft < 24 && styles.reminderBadgeUrgent]}>
+                      <Text style={[styles.reminderBadgeText, hoursLeft < 24 && styles.reminderBadgeTextUrgent]}>
+                        {daysLeft > 0 ? `${daysLeft}d left` : hoursLeft > 0 ? `${hoursLeft}h left` : 'Due today'}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.reminderDetail}>
+                    {imp?.category} · {imp?.site}
+                  </Text>
+                  <Text style={styles.reminderAmount}>
+                    Approved: ₹{Number(imp?.approved_amount || imp?.amount_requested || 0).toLocaleString('en-IN')}
+                  </Text>
+                  <Text style={styles.reminderDeadline}>
+                    Submit by {deadline.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </Text>
+                  {isActive && (
+                    <Text style={styles.reminderActive}>✓ Form pre-filled — add screenshot & submit</Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+
+        {/* ── Success result ───────────────────────────────────────── */}
         {result && (
           <View style={[styles.resultCard, { borderColor: result.status === 'blocked' ? '#ef4444' : '#10b981' }]}>
             <Text style={styles.resultTitle}>
@@ -102,7 +188,18 @@ export default function SubmitExpenseScreen() {
           </View>
         )}
 
-        {/* Site */}
+        {/* ── Form ─────────────────────────────────────────────────── */}
+        {activeReminderId && (
+          <View style={styles.prefilledBanner}>
+            <Text style={styles.prefilledText}>
+              Form pre-filled from imprest · You can edit any field
+            </Text>
+            <TouchableOpacity onPress={() => { setActiveReminderId(null); setForm(INITIAL_FORM); }}>
+              <Text style={styles.prefilledClear}>Clear</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <Text style={styles.label}>Site *</Text>
         <View style={styles.pickerWrapper}>
           <Picker selectedValue={form.site} onValueChange={(v) => set('site', v)} style={styles.picker}>
@@ -110,7 +207,6 @@ export default function SubmitExpenseScreen() {
           </Picker>
         </View>
 
-        {/* Amount */}
         <Text style={styles.label}>Amount (₹) *</Text>
         <TextInput
           style={styles.input}
@@ -121,7 +217,6 @@ export default function SubmitExpenseScreen() {
           keyboardType="numeric"
         />
 
-        {/* Category */}
         <Text style={styles.label}>Category *</Text>
         <View style={styles.pickerWrapper}>
           <Picker selectedValue={form.category} onValueChange={(v) => set('category', v)} style={styles.picker}>
@@ -129,7 +224,6 @@ export default function SubmitExpenseScreen() {
           </Picker>
         </View>
 
-        {/* Description */}
         <Text style={styles.label}>Description</Text>
         <TextInput
           style={[styles.input, styles.textarea]}
@@ -141,7 +235,6 @@ export default function SubmitExpenseScreen() {
           numberOfLines={3}
         />
 
-        {/* Screenshot */}
         <Text style={styles.label}>Payment Screenshot *</Text>
         {image ? (
           <View style={styles.imagePreview}>
@@ -161,7 +254,6 @@ export default function SubmitExpenseScreen() {
           </View>
         )}
 
-        {/* Submit */}
         <TouchableOpacity
           style={[styles.submitBtn, loading && styles.btnDisabled]}
           onPress={handleSubmit}
@@ -210,4 +302,35 @@ const styles = StyleSheet.create({
   resultMsg: { fontSize: 13, color: '#374151', marginBottom: 4 },
   resultConf: { fontSize: 12, color: '#3b82f6', fontWeight: '600' },
   resultWarn: { fontSize: 12, color: '#f97316', marginTop: 4 },
+
+  // Reminders
+  remindersSection: { marginBottom: 20 },
+  remindersTitle: { fontSize: 15, fontWeight: '700', color: '#92400e', marginBottom: 2 },
+  remindersSubtitle: { fontSize: 12, color: '#78716c', marginBottom: 10 },
+  reminderCard: {
+    backgroundColor: '#fffbeb', borderWidth: 1.5, borderColor: '#fbbf24',
+    borderRadius: 12, padding: 14, marginBottom: 10,
+  },
+  reminderCardActive: {
+    borderColor: '#e8a24a', backgroundColor: '#fff7ed', borderWidth: 2,
+  },
+  reminderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  reminderRef: { fontSize: 13, fontWeight: '700', color: '#e8a24a', fontFamily: 'monospace' },
+  reminderBadge: { backgroundColor: '#fef3c7', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
+  reminderBadgeUrgent: { backgroundColor: '#fee2e2' },
+  reminderBadgeText: { fontSize: 11, fontWeight: '600', color: '#92400e' },
+  reminderBadgeTextUrgent: { color: '#dc2626' },
+  reminderDetail: { fontSize: 13, color: '#374151', marginBottom: 2 },
+  reminderAmount: { fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 2 },
+  reminderDeadline: { fontSize: 11, color: '#6b7280' },
+  reminderActive: { fontSize: 12, color: '#16a34a', fontWeight: '600', marginTop: 6 },
+
+  // Pre-filled banner
+  prefilledBanner: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: '#f0fdf4', borderWidth: 1, borderColor: '#86efac',
+    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, marginTop: 4, marginBottom: 4,
+  },
+  prefilledText: { fontSize: 12, color: '#15803d', flex: 1 },
+  prefilledClear: { fontSize: 12, color: '#dc2626', fontWeight: '600', marginLeft: 8 },
 });

@@ -5,6 +5,120 @@ import FilterBar from './FilterBar';
 import StatusBadge from './StatusBadge';
 import ExpenseDetailModal from './ExpenseDetailModal';
 import { showToast } from '../layout/Toast';
+import api from '../../services/api';
+
+// ── Imprest Reminders Panel ───────────────────────────────────────────────────
+function ImprestRemindersPanel() {
+  const [reminders, setReminders] = useState([]);
+  const [unblocking, setUnblocking] = useState(null);
+
+  const fetchReminders = useCallback(async () => {
+    try {
+      const { data } = await api.get('/api/imprest/finance/reminders');
+      setReminders(data.data.reminders || []);
+    } catch { /* silently fail */ }
+  }, []);
+
+  useEffect(() => { fetchReminders(); }, [fetchReminders]);
+
+  const handleUnblock = async (employeeId) => {
+    setUnblocking(employeeId);
+    try {
+      await api.post(`/api/imprest/finance/unblock/${employeeId}`);
+      showToast('Employee unblocked successfully', 'success');
+      fetchReminders();
+    } catch {
+      showToast('Failed to unblock employee', 'error');
+    } finally {
+      setUnblocking(null);
+    }
+  };
+
+  if (reminders.length === 0) return null;
+
+  return (
+    <div className="mb-6">
+      <h3 className="text-sm font-semibold text-gray-700 mb-2">
+        ⏰ Imprest Expense Reminders
+        <span className="ml-2 text-xs font-normal text-gray-500">
+          Employees must submit expense within 3 days of imprest approval
+        </span>
+      </h3>
+      <div className="bg-white rounded-xl border border-amber-200 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-amber-50 border-b border-amber-100">
+            <tr>
+              <th className="px-4 py-2 text-left text-xs font-semibold text-amber-800">Imprest Ref</th>
+              <th className="px-4 py-2 text-left text-xs font-semibold text-amber-800">Employee</th>
+              <th className="px-4 py-2 text-left text-xs font-semibold text-amber-800">Site</th>
+              <th className="px-4 py-2 text-right text-xs font-semibold text-amber-800">Approved ₹</th>
+              <th className="px-4 py-2 text-left text-xs font-semibold text-amber-800">Deadline</th>
+              <th className="px-4 py-2 text-left text-xs font-semibold text-amber-800">Status</th>
+              <th className="px-4 py-2 text-left text-xs font-semibold text-amber-800">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-amber-50">
+            {reminders.map((r) => {
+              const deadline = new Date(r.deadline);
+              const msLeft = deadline - Date.now();
+              const hoursLeft = Math.floor(msLeft / (1000 * 60 * 60));
+              const isExpired = r.status === 'expired' || msLeft <= 0;
+
+              return (
+                <tr key={r.id} className={isExpired ? 'bg-red-50' : 'hover:bg-amber-50 transition-colors'}>
+                  <td className="px-4 py-2 font-mono text-xs font-semibold text-amber-700">{r.imprest_ref_id}</td>
+                  <td className="px-4 py-2">
+                    <div className="font-medium text-gray-900">{r.employee?.name || '—'}</div>
+                    <div className="text-xs text-gray-500">{r.employee?.site}</div>
+                  </td>
+                  <td className="px-4 py-2 text-xs text-gray-600">{r.imprest?.site}</td>
+                  <td className="px-4 py-2 text-right font-semibold text-gray-900">
+                    ₹{Number(r.imprest?.approved_amount || r.imprest?.amount_requested || 0).toLocaleString('en-IN')}
+                  </td>
+                  <td className="px-4 py-2">
+                    <div className="text-xs text-gray-700">
+                      {deadline.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </div>
+                    {!isExpired && (
+                      <div className={`text-xs font-semibold ${hoursLeft < 24 ? 'text-red-600' : 'text-orange-600'}`}>
+                        {hoursLeft > 0 ? `${hoursLeft}h remaining` : 'Due very soon'}
+                      </div>
+                    )}
+                    {isExpired && (
+                      <div className="text-xs text-red-600 font-semibold">Overdue</div>
+                    )}
+                  </td>
+                  <td className="px-4 py-2">
+                    {isExpired ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-700">
+                        Blocked
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-yellow-100 text-yellow-800">
+                        Pending
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2">
+                    {isExpired && r.employee?.imprest_blocked && (
+                      <button
+                        onClick={() => handleUnblock(r.employee.id)}
+                        disabled={unblocking === r.employee.id}
+                        className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors"
+                      >
+                        {unblocking === r.employee.id ? 'Unblocking…' : 'Unblock'}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 function VerificationBadge({ expense }) {
   const conf = expense.screenshot_metadata?.confidence;
@@ -139,6 +253,8 @@ export default function ExpenseQueue() {
 
   return (
     <div>
+      <ImprestRemindersPanel />
+
       {/* Live update banner */}
       {liveCount > 0 && (
         <button

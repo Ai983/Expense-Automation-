@@ -8,11 +8,11 @@ import { generateImprestRefId } from '../utils/refIdGenerator.js';
 import { ok, fail } from '../utils/responseHelper.js';
 import { FINANCE_ROLES } from '../config/constants.js';
 import { broadcastNewImprest } from '../index.js';
+import { sendImprestApprovalReminder } from '../services/whatsappService.js';
 
 const router = Router();
 
 // ── GET /api/imprest/food-rates ───────────────────────────────────────────────
-// Returns all food rates — used by mobile app to lock amounts
 router.get('/food-rates', authMiddleware, async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin.from('food_rates').select('*');
@@ -22,7 +22,6 @@ router.get('/food-rates', authMiddleware, async (req, res, next) => {
 });
 
 // ── POST /api/imprest/estimate-travel ─────────────────────────────────────────
-// AI estimates travel cost before submission
 router.post('/estimate-travel', authMiddleware, roleGuard(['employee']), async (req, res, next) => {
   try {
     const { from, to, peopleCount } = req.body;
@@ -35,12 +34,17 @@ router.post('/estimate-travel', authMiddleware, roleGuard(['employee']), async (
 // ── POST /api/imprest/submit ──────────────────────────────────────────────────
 router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res, next) => {
   try {
+    // Check if employee is blocked from raising imprests
+    const { data: empCheck } = await supabaseAdmin
+      .from('employees').select('imprest_blocked').eq('id', req.user.id).single();
+    if (empCheck?.imprest_blocked) {
+      return fail(res, 'You are blocked from raising new imprest requests. Please contact your finance team.', 403);
+    }
+
     const {
       site, category, peopleCount, amountRequested, purpose,
       requestedTo,
-      // Food fields
       perPersonRate,
-      // Travel fields
       travelFrom, travelTo, aiEstimatedAmount, aiEstimatedDistanceKm, userEditedAmount,
     } = req.body;
 
@@ -93,7 +97,6 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       ipAddress: req.ip,
     });
 
-    // Broadcast to finance dashboard
     try {
       broadcastNewImprest({
         id: imprest.id, refId,
@@ -111,6 +114,48 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       refId, status: 'pending',
       message: 'Imprest request submitted. Awaiting approval.',
     }, 201);
+  } catch (err) { next(err); }
+});
+
+// ── GET /api/imprest/my-reminders/:employeeId ─────────────────────────────────
+// Employee sees their own pending expense reminders
+router.get('/my-reminders/:employeeId', authMiddleware, async (req, res, next) => {
+  try {
+    if (req.user.role === 'employee' && req.user.id !== req.params.employeeId) {
+      return fail(res, 'Access denied', 403);
+    }
+    const { data, error } = await supabaseAdmin
+      .from('imprest_expense_reminders')
+      .select(`
+        *,
+        imprest:imprest_id (ref_id, amount_requested, approved_amount, site, category, approved_at)
+      `)
+      .eq('employee_id', req.params.employeeId)
+      .eq('status', 'pending')
+      .order('deadline', { ascending: true });
+    if (error) throw error;
+    return ok(res, { reminders: data || [] });
+  } catch (err) { next(err); }
+});
+
+// ── POST /api/imprest/reminders/:reminderId/fulfill ───────────────────────────
+// Mark a reminder as fulfilled after expense is submitted
+router.post('/reminders/:reminderId/fulfill', authMiddleware, async (req, res, next) => {
+  try {
+    const { data: reminder, error: fetchErr } = await supabaseAdmin
+      .from('imprest_expense_reminders')
+      .select('id, employee_id, status')
+      .eq('id', req.params.reminderId)
+      .single();
+    if (fetchErr || !reminder) return fail(res, 'Reminder not found', 404);
+    if (req.user.role === 'employee' && req.user.id !== reminder.employee_id) {
+      return fail(res, 'Access denied', 403);
+    }
+    await supabaseAdmin
+      .from('imprest_expense_reminders')
+      .update({ status: 'fulfilled' })
+      .eq('id', req.params.reminderId);
+    return ok(res, { message: 'Reminder marked as fulfilled' });
   } catch (err) { next(err); }
 });
 
@@ -136,8 +181,19 @@ router.get('/my-requests/:employeeId', authMiddleware, async (req, res, next) =>
 // ── GET /api/imprest/finance/queue ────────────────────────────────────────────
 router.get('/finance/queue', authMiddleware, roleGuard(FINANCE_ROLES), async (req, res, next) => {
   try {
-    const { status, site, category, dateFrom, dateTo, page = 1, limit = 50 } = req.query;
+    const { status, site, category, dateFrom, dateTo, employeeName, page = 1, limit = 50 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Filter by employee name: find matching employee IDs first
+    let employeeIds = null;
+    if (employeeName && employeeName.trim()) {
+      const { data: matchingEmps } = await supabaseAdmin
+        .from('employees').select('id').ilike('name', `%${employeeName.trim()}%`);
+      employeeIds = matchingEmps?.map((e) => e.id) || [];
+      if (employeeIds.length === 0) {
+        return ok(res, { requests: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
+      }
+    }
 
     let query = supabaseAdmin
       .from('imprest_requests')
@@ -155,10 +211,81 @@ router.get('/finance/queue', authMiddleware, roleGuard(FINANCE_ROLES), async (re
     if (category && category !== 'all') query = query.eq('category', category);
     if (dateFrom) query = query.gte('submitted_at', dateFrom);
     if (dateTo) query = query.lte('submitted_at', dateTo + 'T23:59:59Z');
+    if (employeeIds) query = query.in('employee_id', employeeIds);
 
     const { data, error, count } = await query;
     if (error) throw error;
     return ok(res, { requests: data, total: count, page: parseInt(page), limit: parseInt(limit) });
+  } catch (err) { next(err); }
+});
+
+// ── GET /api/imprest/finance/reminders ───────────────────────────────────────
+// Returns all active reminders; auto-expires overdue ones and blocks employees
+router.get('/finance/reminders', authMiddleware, roleGuard(FINANCE_ROLES), async (req, res, next) => {
+  try {
+    const now = new Date().toISOString();
+
+    // Find overdue pending reminders
+    const { data: expired } = await supabaseAdmin
+      .from('imprest_expense_reminders')
+      .select('id, employee_id')
+      .eq('status', 'pending')
+      .lt('deadline', now);
+
+    if (expired?.length) {
+      // Mark them expired
+      await supabaseAdmin
+        .from('imprest_expense_reminders')
+        .update({ status: 'expired' })
+        .in('id', expired.map((r) => r.id));
+
+      // Block each affected employee
+      const uniqueEmpIds = [...new Set(expired.map((r) => r.employee_id))];
+      for (const empId of uniqueEmpIds) {
+        await supabaseAdmin.from('employees').update({
+          imprest_blocked: true,
+          imprest_blocked_at: now,
+          imprest_blocked_reason: 'Expense not submitted within 3 days of imprest approval',
+        }).eq('id', empId);
+      }
+    }
+
+    // Fetch all active reminders (pending + expired)
+    const { data, error } = await supabaseAdmin
+      .from('imprest_expense_reminders')
+      .select(`
+        *,
+        employee:employee_id (id, name, email, site, imprest_blocked),
+        imprest:imprest_id (ref_id, amount_requested, approved_amount, site, category, approved_at)
+      `)
+      .in('status', ['pending', 'expired'])
+      .order('deadline', { ascending: true });
+
+    if (error) throw error;
+    return ok(res, { reminders: data || [] });
+  } catch (err) { next(err); }
+});
+
+// ── POST /api/imprest/finance/unblock/:employeeId ────────────────────────────
+router.post('/finance/unblock/:employeeId', authMiddleware, roleGuard(FINANCE_ROLES), async (req, res, next) => {
+  try {
+    const { employeeId } = req.params;
+    const { error } = await supabaseAdmin
+      .from('employees')
+      .update({ imprest_blocked: false, imprest_blocked_reason: null, imprest_blocked_at: null })
+      .eq('id', employeeId);
+    if (error) throw error;
+
+    await logAudit({
+      userId: req.user.id,
+      action: 'unblock_employee_imprest',
+      entityType: 'employee',
+      entityId: employeeId,
+      newValue: { imprest_blocked: false },
+      ipAddress: req.ip,
+    });
+
+    return ok(res, { message: 'Employee imprest access restored successfully' });
   } catch (err) { next(err); }
 });
 
@@ -167,20 +294,50 @@ router.post('/:id/approve', authMiddleware, roleGuard(FINANCE_ROLES), async (req
   try {
     const { approvedAmount } = req.body;
     const { data: imp, error: fetchErr } = await supabaseAdmin
-      .from('imprest_requests').select('id, ref_id, status, amount_requested')
+      .from('imprest_requests').select('id, ref_id, status, amount_requested, employee_id, category')
       .eq('id', req.params.id).single();
     if (fetchErr || !imp) return fail(res, 'Imprest request not found', 404);
     if (imp.status !== 'pending') return fail(res, 'Only pending requests can be approved');
 
     const finalAmount = approvedAmount ? parseFloat(approvedAmount) : imp.amount_requested;
     const isPartial = finalAmount < imp.amount_requested;
+    const approvedAt = new Date().toISOString();
 
     await supabaseAdmin.from('imprest_requests').update({
       status: isPartial ? 'partially_approved' : 'approved',
       approved_amount: finalAmount,
       approved_by: req.user.id,
-      approved_at: new Date().toISOString(),
+      approved_at: approvedAt,
     }).eq('id', req.params.id);
+
+    // Create 3-day expense reminder
+    const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+    try {
+      await supabaseAdmin.from('imprest_expense_reminders').insert({
+        imprest_id: imp.id,
+        employee_id: imp.employee_id,
+        imprest_ref_id: imp.ref_id,
+        deadline,
+        status: 'pending',
+      });
+    } catch (e) { console.warn('Failed to create imprest reminder:', e.message); }
+
+    // Send WhatsApp notification to employee
+    try {
+      const { data: emp } = await supabaseAdmin
+        .from('employees').select('name, phone, site').eq('id', imp.employee_id).single();
+      if (emp) {
+        await sendImprestApprovalReminder({
+          name: emp.name,
+          phone: emp.phone,
+          refId: imp.ref_id,
+          approvedAmount: finalAmount,
+          site: emp.site,
+          category: imp.category || '',
+          deadline,
+        });
+      }
+    } catch (e) { console.warn('WhatsApp notification failed:', e.message); }
 
     await logAudit({
       userId: req.user.id, action: 'approve',

@@ -51,6 +51,7 @@ export default function ImprestQueuePage() {
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
+  const [filterEmployeeName, setFilterEmployeeName] = useState('');
 
   // Modal state
   const [selected, setSelected] = useState(null);
@@ -69,6 +70,7 @@ export default function ImprestQueuePage() {
       if (filterCategory !== 'all') params.category = filterCategory;
       if (filterDateFrom) params.dateFrom = filterDateFrom;
       if (filterDateTo) params.dateTo = filterDateTo;
+      if (filterEmployeeName.trim()) params.employeeName = filterEmployeeName.trim();
 
       const { data } = await api.get('/api/imprest/finance/queue', { params });
       setRequests(data.data.requests || []);
@@ -78,7 +80,7 @@ export default function ImprestQueuePage() {
     } finally {
       setLoading(false);
     }
-  }, [page, filterStatus, filterSite, filterCategory, filterDateFrom, filterDateTo]);
+  }, [page, filterStatus, filterSite, filterCategory, filterDateFrom, filterDateTo, filterEmployeeName]);
 
   useEffect(() => { fetchQueue(); }, [fetchQueue]);
 
@@ -159,6 +161,13 @@ export default function ImprestQueuePage() {
 
       {/* Filters */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6 flex flex-wrap gap-3">
+        <input
+          type="text"
+          placeholder="Search employee name..."
+          value={filterEmployeeName}
+          onChange={(e) => { setFilterEmployeeName(e.target.value); setPage(1); }}
+          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 w-48"
+        />
         <select
           value={filterStatus}
           onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}
@@ -190,7 +199,7 @@ export default function ImprestQueuePage() {
         />
 
         <button
-          onClick={() => { setFilterStatus('all'); setFilterCategory('all'); setFilterSite('all'); setFilterDateFrom(''); setFilterDateTo(''); setPage(1); }}
+          onClick={() => { setFilterStatus('all'); setFilterCategory('all'); setFilterSite('all'); setFilterDateFrom(''); setFilterDateTo(''); setFilterEmployeeName(''); setPage(1); }}
           className="text-sm text-gray-500 hover:text-gray-700 px-2"
         >
           Clear
@@ -217,6 +226,7 @@ export default function ImprestQueuePage() {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Category</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">People</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Requested</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Approved</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">AI / Deviation</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Submitted</th>
@@ -235,6 +245,15 @@ export default function ImprestQueuePage() {
                     <td className="px-4 py-3 text-right text-gray-700">{req.people_count}</td>
                     <td className="px-4 py-3 text-right font-semibold text-gray-900">
                       ₹{Number(req.amount_requested).toLocaleString('en-IN')}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {req.approved_amount != null ? (
+                        <span className={`font-semibold ${Number(req.approved_amount) < Number(req.amount_requested) ? 'text-blue-600' : 'text-green-600'}`}>
+                          ₹{Number(req.approved_amount).toLocaleString('en-IN')}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400 text-xs">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       {req.category === 'Travelling' && req.ai_estimated_amount ? (

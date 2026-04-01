@@ -2,7 +2,16 @@ import { useEffect, useState } from 'react';
 import { getEmployees } from '../../services/employeeService';
 
 const STATUSES = ['all', 'pending', 'verified', 'manual_review', 'approved', 'rejected', 'blocked'];
-const SITES = ['all', 'Mumbai', 'Delhi', 'Bangalore', 'Pune', 'Hyderabad'];
+const SITES = [
+  'all',
+  'MAX Hospital, Saket Delhi',
+  'Bhuj',
+  'Vaneet Infra',
+  'Dee Foundation Omaxe, Faridabad',
+  'Auma India Bengaluru',
+  'Minebea Mitsumi',
+  'Hero Homes Ludhiana',
+];
 
 export default function FilterBar({ filters, onChange }) {
   const [employees, setEmployees] = useState([]);

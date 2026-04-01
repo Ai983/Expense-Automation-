@@ -10,19 +10,16 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Restore session on mount using stored token
+    // Restore session on mount using stored token — only one fetch on load
     const token = localStorage.getItem('hs_access_token');
     if (token) fetchProfile();
     else setLoading(false);
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session) fetchProfile();
-      else { setUser(null); setLoading(false); }
+      // Only re-fetch profile on explicit sign-in, not on token refresh or initial session
+      if (event === 'SIGNED_IN') fetchProfile();
+      if (event === 'SIGNED_OUT') { setUser(null); setLoading(false); }
     });
 
     return () => subscription.unsubscribe();
@@ -33,6 +30,7 @@ export function AuthProvider({ children }) {
       const { data } = await api.get('/api/auth/me');
       setUser(data.data);
     } catch {
+      localStorage.removeItem('hs_access_token');
       setUser(null);
     } finally {
       setLoading(false);
