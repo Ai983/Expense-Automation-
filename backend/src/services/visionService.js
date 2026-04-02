@@ -81,30 +81,44 @@ Rules:
 
 /**
  * Sends image buffer to Claude Vision API and extracts payment receipt fields.
+ * Handles both image types and PDFs (using Claude's native document block for PDF).
  * Returns: { rawText, transactionId, amount, date, paymentStatus, ocrConfidence }
  */
 export async function extractReceiptData(imageBuffer, mimeType = 'image/jpeg') {
   const client = getClient();
 
-  // Normalise mime type — Claude supports image/jpeg, image/png, image/gif, image/webp
-  const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-  const mediaType = supportedTypes.includes(mimeType) ? mimeType : 'image/jpeg';
+  // Route PDFs to document block, images to image block
+  let contentBlock;
+  if (mimeType === 'application/pdf') {
+    contentBlock = {
+      type: 'document',
+      source: {
+        type: 'base64',
+        media_type: 'application/pdf',
+        data: imageBuffer.toString('base64'),
+      },
+    };
+  } else {
+    const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    const mediaType = supportedTypes.includes(mimeType) ? mimeType : 'image/jpeg';
+    contentBlock = {
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: mediaType,
+        data: imageBuffer.toString('base64'),
+      },
+    };
+  }
 
   const response = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001', // fast + cheap, sufficient for structured extraction
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 1024,
     messages: [
       {
         role: 'user',
         content: [
-          {
-            type: 'image',
-            source: {
-              type: 'base64',
-              media_type: mediaType,
-              data: imageBuffer.toString('base64'),
-            },
-          },
+          contentBlock,
           {
             type: 'text',
             text: EXTRACTION_PROMPT,

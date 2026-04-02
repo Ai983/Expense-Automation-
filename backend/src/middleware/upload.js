@@ -1,7 +1,7 @@
 import multer from 'multer';
 
 const MAX_SIZE_MB = parseInt(process.env.MAX_FILE_SIZE_MB || '10');
-const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'application/pdf'];
 
 // Use memory storage — buffer is passed directly to Vision API and Supabase Storage
 const storage = multer.memoryStorage();

@@ -100,8 +100,13 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
             {/* OCR / AI Verification Data */}
             <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-3">AI Verification</h3>
+              {meta.attachmentType === 'pdf' && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mb-3 text-xs text-blue-800">
+                  📄 <strong>PDF attachment</strong> — Standard payment receipt checks (transaction ID, payment status) do not apply to document uploads. Finance review required.
+                </div>
+              )}
               <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
-                <Row label="Confidence" value={`${meta.confidence || 0}%`} highlight={meta.confidence >= 94 ? 'green' : meta.confidence >= 70 ? 'orange' : 'red'} />
+                <Row label="Confidence" value={`${meta.confidence || 0}%`} highlight={meta.attachmentType === 'pdf' ? null : meta.confidence >= 94 ? 'green' : meta.confidence >= 70 ? 'orange' : 'red'} />
                 <Row label="Transaction ID" value={meta.transactionId || '—'} />
                 <Row label="Extracted Amount" value={meta.extractedAmount ? `₹${meta.extractedAmount}` : '—'} />
                 <Row label="Receipt Date" value={meta.date || '—'} />
@@ -129,18 +134,34 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
               </div>
             )}
 
-            {/* Screenshot */}
+            {/* Attachment — screenshot or PDF */}
             {expense.screenshotSignedUrl && (
               <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Payment Screenshot</h3>
-                <a href={expense.screenshotSignedUrl} target="_blank" rel="noopener noreferrer">
-                  <img
-                    src={expense.screenshotSignedUrl}
-                    alt="Payment screenshot"
-                    className="rounded-lg border max-h-80 object-contain cursor-pointer hover:opacity-90 transition"
-                  />
-                </a>
-                <p className="text-xs text-gray-400 mt-1">Click to open full size</p>
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">
+                  {meta.attachmentType === 'pdf' ? 'PDF Attachment' : 'Payment Screenshot'}
+                </h3>
+                {meta.attachmentType === 'pdf' ? (
+                  <a
+                    href={expense.screenshotSignedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 hover:bg-blue-100 transition text-blue-700 font-medium text-sm"
+                  >
+                    <span className="text-2xl">📄</span>
+                    <span>Open PDF Document</span>
+                  </a>
+                ) : (
+                  <>
+                    <a href={expense.screenshotSignedUrl} target="_blank" rel="noopener noreferrer">
+                      <img
+                        src={expense.screenshotSignedUrl}
+                        alt="Payment screenshot"
+                        className="rounded-lg border max-h-80 object-contain cursor-pointer hover:opacity-90 transition"
+                      />
+                    </a>
+                    <p className="text-xs text-gray-400 mt-1">Click to open full size</p>
+                  </>
+                )}
               </div>
             )}
 

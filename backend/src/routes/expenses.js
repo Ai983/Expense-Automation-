@@ -63,6 +63,8 @@ router.post(
       let verificationChecks = [];
       let autoAction = 'manual_review'; // safe default if Vision API fails
 
+      const isPdf = file.mimetype === 'application/pdf';
+
       try {
         verification = await verifyExpense(file.buffer, {
           amount: parsedAmount,
@@ -71,7 +73,11 @@ router.post(
         });
         ocrData = verification.ocrData;
         verificationChecks = verification.checks;
-        autoAction = verification.autoAction;
+        // PDFs are documents (invoices, tickets) — standard payment receipt checks don't apply.
+        // Cap at manual_review so finance can review; never auto-block based on PDF OCR results.
+        autoAction = isPdf && verification.autoAction === 'blocked'
+          ? 'manual_review'
+          : verification.autoAction;
       } catch (visionErr) {
         console.warn('Vision API unavailable, falling back to manual_review:', visionErr.message);
         verificationChecks = [{ step: 'ocr', result: 'warn', score: 0, detail: 'Vision API unavailable' }];
@@ -100,6 +106,7 @@ router.post(
 
       // 6. Build screenshot_metadata JSONB
       const screenshotMetadata = {
+        attachmentType: isPdf ? 'pdf' : 'image',
         transactionId: ocrData?.transactionId || null,
         extractedAmount: ocrData?.amount || null,
         date: ocrData?.date || null,

@@ -4,6 +4,7 @@ import {
   ScrollView, Alert, Image, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { Picker } from '@react-native-picker/picker';
 import { useAuth } from '../../src/context/AuthContext';
 import { submitExpense } from '../../src/services/expenseService';
@@ -52,9 +53,25 @@ export default function SubmitExpenseScreen() {
     setResult(null);
   }
 
+  async function pickPdf() {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf',
+        copyToCacheDirectory: true,
+      });
+      if (!result.canceled && result.assets?.[0]) {
+        const asset = result.assets[0];
+        setImage({ uri: asset.uri, mimeType: 'application/pdf', name: asset.name });
+        setResult(null);
+      }
+    } catch {
+      Alert.alert('Error', 'Could not open document picker');
+    }
+  }
+
   async function pickImage(source) {
     const options = {
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       quality: 0.85,
       allowsEditing: false,
     };
@@ -82,7 +99,7 @@ export default function SubmitExpenseScreen() {
       return Alert.alert('Error', 'Enter a valid amount');
     }
     if (!image) {
-      return Alert.alert('Error', 'Upload a payment screenshot');
+      return Alert.alert('Error', 'Upload a payment screenshot or PDF');
     }
 
     setLoading(true);
@@ -235,10 +252,18 @@ export default function SubmitExpenseScreen() {
           numberOfLines={3}
         />
 
-        <Text style={styles.label}>Payment Screenshot *</Text>
+        <Text style={styles.label}>Payment Proof *</Text>
         {image ? (
           <View style={styles.imagePreview}>
-            <Image source={{ uri: image.uri }} style={styles.previewImg} resizeMode="contain" />
+            {image.mimeType === 'application/pdf' ? (
+              <View style={styles.pdfPreview}>
+                <Text style={styles.pdfIcon}>📄</Text>
+                <Text style={styles.pdfName} numberOfLines={2}>{image.name || 'document.pdf'}</Text>
+                <Text style={styles.pdfNote}>PDF will be parsed by AI to extract amount</Text>
+              </View>
+            ) : (
+              <Image source={{ uri: image.uri }} style={styles.previewImg} resizeMode="contain" />
+            )}
             <TouchableOpacity onPress={() => setImage(null)} style={styles.removeImg}>
               <Text style={styles.removeImgText}>Remove</Text>
             </TouchableOpacity>
@@ -250,6 +275,9 @@ export default function SubmitExpenseScreen() {
             </TouchableOpacity>
             <TouchableOpacity style={styles.imgBtn} onPress={() => pickImage('gallery')}>
               <Text style={styles.imgBtnText}>🖼 Gallery</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.imgBtn} onPress={pickPdf}>
+              <Text style={styles.imgBtnText}>📄 PDF</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -292,6 +320,10 @@ const styles = StyleSheet.create({
   previewImg: { width: '100%', height: 200, borderRadius: 12, marginBottom: 8 },
   removeImg: { backgroundColor: '#fee2e2', paddingHorizontal: 16, paddingVertical: 6, borderRadius: 8 },
   removeImgText: { color: '#ef4444', fontWeight: '600', fontSize: 13 },
+  pdfPreview: { width: '100%', backgroundColor: '#eff6ff', borderWidth: 1.5, borderColor: '#93c5fd', borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 8 },
+  pdfIcon: { fontSize: 36, marginBottom: 6 },
+  pdfName: { fontSize: 14, fontWeight: '600', color: '#1d4ed8', textAlign: 'center', marginBottom: 4 },
+  pdfNote: { fontSize: 11, color: '#3b82f6', textAlign: 'center' },
   submitBtn: { backgroundColor: '#e8a24a', borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 28 },
   btnDisabled: { opacity: 0.6 },
   submitBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
