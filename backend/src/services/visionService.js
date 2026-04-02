@@ -32,6 +32,54 @@ Rules:
 - Return ONLY the JSON. No other text.`;
 
 /**
+ * Extracts the fare/amount from a ride-hailing app screenshot (Ola, Uber, Rapido).
+ * Returns: { amount, confidence }
+ */
+export async function extractRideFare(imageBuffer, mimeType = 'image/jpeg') {
+  const client = getClient();
+  const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  const mediaType = supportedTypes.includes(mimeType) ? mimeType : 'image/jpeg';
+
+  const prompt = `You are extracting the total fare from a ride-hailing app screenshot (Ola, Uber, Rapido, etc).
+Look for the total fare, bill amount, or amount charged for the ride.
+Return ONLY a valid JSON object with no extra text:
+{
+  "amount": <number in rupees as plain number, e.g. 245, or null if not found>,
+  "confidence": <"high" | "medium" | "low">
+}
+Rules:
+- Look for labels like "Total", "Fare", "Bill Amount", "Amount Charged", "Total Fare", "Your fare", "Trip fare"
+- Return the final total amount after all discounts and surcharges
+- Return null if you cannot find a clear fare amount
+- Return ONLY the JSON, no other text`;
+
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 256,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBuffer.toString('base64') } },
+        { type: 'text', text: prompt },
+      ],
+    }],
+  });
+
+  const raw = response.content[0]?.text?.trim() || '{}';
+  const jsonStr = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+
+  try {
+    const parsed = JSON.parse(jsonStr);
+    const amount = typeof parsed.amount === 'number' ? parsed.amount
+      : parsed.amount != null ? parseFloat(String(parsed.amount).replace(/,/g, '')) || null
+      : null;
+    return { amount, confidence: parsed.confidence || 'low' };
+  } catch {
+    return { amount: null, confidence: 'low' };
+  }
+}
+
+/**
  * Sends image buffer to Claude Vision API and extracts payment receipt fields.
  * Returns: { rawText, transactionId, amount, date, paymentStatus, ocrConfidence }
  */

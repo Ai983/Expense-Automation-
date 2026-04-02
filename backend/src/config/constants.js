@@ -54,12 +54,29 @@ export const EXPENSE_STATUSES = [
   'blocked',
 ];
 
+export const IMPREST_SITES = [
+  'MAX Hospital, Saket Delhi',
+  'Bhuj',
+  'Vaneet Infra',
+  'Dee Foundation Omaxe, Faridabad',
+  'Auma India Bengaluru',
+  'Minebea Mitsumi',
+  'Hero Homes Ludhiana',
+  'Bansal Tower',
+  'KOKO Town, Chandigarh',
+  'Head Office',
+  'Bangalore Office',
+  'Others',
+];
+
 export const IMPREST_CATEGORIES = [
   'Food Expense',
-  'Site Room',
+  'Site Room Rent',
   'Travelling',
+  'Conveyance',
   'Labour Expense',
-  'Material Expense',
+  'Porter',
+  'Hotel Expense',
   'Other',
 ];
 

@@ -3,7 +3,14 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { roleGuard } from '../middleware/roleGuard.js';
 import { logAudit } from '../services/auditService.js';
-import { estimateTravelCost } from '../services/travelService.js';
+import { upload } from '../middleware/upload.js';
+import {
+  estimateTravelCost,
+  estimatePublicTransportCost,
+  estimateContractualCabCost,
+  estimateOwnVehicleCost,
+} from '../services/travelService.js';
+import { extractRideFare } from '../services/visionService.js';
 import { generateImprestRefId } from '../utils/refIdGenerator.js';
 import { ok, fail } from '../utils/responseHelper.js';
 import { FINANCE_ROLES } from '../config/constants.js';
@@ -24,17 +31,42 @@ router.get('/food-rates', authMiddleware, async (req, res, next) => {
 // ── POST /api/imprest/estimate-travel ─────────────────────────────────────────
 router.post('/estimate-travel', authMiddleware, roleGuard(['employee']), async (req, res, next) => {
   try {
-    const { from, to, peopleCount } = req.body;
+    const { from, to, peopleCount, mode, travelDate, vehicleType } = req.body;
     if (!from || !to) return fail(res, 'from and to locations are required');
-    const estimate = await estimateTravelCost(from, to, parseInt(peopleCount) || 1);
+
+    let estimate;
+    if (mode === 'Own Vehicle') {
+      estimate = await estimateOwnVehicleCost({ from, to, vehicleType: vehicleType || 'Bike' });
+    } else if (['Flight', 'Train', 'Bus'].includes(mode)) {
+      estimate = await estimatePublicTransportCost({
+        from, to, mode, travelDate,
+        peopleCount: parseInt(peopleCount) || 1,
+      });
+    } else if (mode === 'Contractual Cab') {
+      estimate = await estimateContractualCabCost({ from, to, peopleCount: parseInt(peopleCount) || 1 });
+    } else {
+      estimate = await estimateTravelCost(from, to, parseInt(peopleCount) || 1);
+    }
+
     return ok(res, estimate);
+  } catch (err) { next(err); }
+});
+
+// ── POST /api/imprest/scan-conveyance ─────────────────────────────────────────
+// Accepts an Ola/Uber/Rapido screenshot and returns the extracted fare amount
+router.post('/scan-conveyance', authMiddleware, roleGuard(['employee']), upload.single('screenshot'), async (req, res, next) => {
+  try {
+    if (!req.file) return fail(res, 'No image provided');
+    const result = await extractRideFare(req.file.buffer, req.file.mimetype);
+    if (!result.amount) return fail(res, 'Could not extract amount from screenshot. Please enter manually.');
+    return ok(res, result);
   } catch (err) { next(err); }
 });
 
 // ── POST /api/imprest/submit ──────────────────────────────────────────────────
 router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res, next) => {
   try {
-    // Check if employee is blocked from raising imprests
+    // Check if employee is blocked
     const { data: empCheck } = await supabaseAdmin
       .from('employees').select('imprest_blocked').eq('id', req.user.id).single();
     if (empCheck?.imprest_blocked) {
@@ -43,9 +75,17 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
 
     const {
       site, category, peopleCount, amountRequested, purpose,
-      requestedTo,
+      // Date range (food, site room rent, hotel)
+      dateFrom, dateTo,
+      // Food
       perPersonRate,
-      travelFrom, travelTo, aiEstimatedAmount, aiEstimatedDistanceKm, userEditedAmount,
+      // Travel
+      travelSubtype, travelFrom, travelTo, travelDate,
+      aiEstimatedAmount, aiEstimatedDistanceKm, userEditedAmount,
+      // Conveyance
+      conveyanceMode, vehicleType,
+      // Labour
+      labourSubcategory,
     } = req.body;
 
     if (!site || !category || !peopleCount || !amountRequested) {
@@ -59,6 +99,12 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       ? parseFloat(amountRequested) - parseFloat(aiEstimatedAmount)
       : null;
 
+    // Determine rate source
+    let rateSource = 'user_entered';
+    if (category === 'Food Expense' && perPersonRate) rateSource = 'system_fixed';
+    if (category === 'Travelling' && aiEstimatedAmount) rateSource = 'ai_estimated';
+    if (conveyanceMode === 'Own Vehicle' || travelSubtype === 'Contractual Cab') rateSource = 'system_calculated';
+
     const { data: imprest, error } = await supabaseAdmin
       .from('imprest_requests')
       .insert({
@@ -69,11 +115,8 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
         people_count: parseInt(peopleCount),
         amount_requested: parseFloat(amountRequested),
         purpose: purpose || null,
-        requested_to: requestedTo || null,
         per_person_rate: perPersonRate ? parseFloat(perPersonRate) : null,
-        rate_source: category === 'Food Expense' ? 'system_fixed'
-                   : category === 'Travelling' ? 'ai_estimated'
-                   : 'user_entered',
+        rate_source: rateSource,
         travel_from: travelFrom || null,
         travel_to: travelTo || null,
         ai_estimated_amount: aiEstimatedAmount ? parseFloat(aiEstimatedAmount) : null,
@@ -85,6 +128,23 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       })
       .select()
       .single();
+
+    // If insert succeeded, try to patch with new columns (added in migration 011)
+    // Silently ignore if columns don't exist yet
+    if (!error && imprest?.id) {
+      const extraFields = {};
+      if (dateFrom) extraFields.date_from = dateFrom;
+      if (dateTo) extraFields.date_to = dateTo;
+      if (travelSubtype) extraFields.travel_subtype = travelSubtype;
+      if (travelDate) extraFields.travel_date = travelDate;
+      if (conveyanceMode) extraFields.conveyance_mode = conveyanceMode;
+      if (vehicleType) extraFields.vehicle_type = vehicleType;
+      if (labourSubcategory) extraFields.labour_subcategory = labourSubcategory;
+      if (Object.keys(extraFields).length > 0) {
+        await supabaseAdmin.from('imprest_requests').update(extraFields).eq('id', imprest.id);
+        // ignore update error — columns may not exist yet until migration runs
+      }
+    }
 
     if (error) throw error;
 
@@ -118,7 +178,6 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
 });
 
 // ── GET /api/imprest/my-reminders/:employeeId ─────────────────────────────────
-// Employee sees their own pending expense reminders
 router.get('/my-reminders/:employeeId', authMiddleware, async (req, res, next) => {
   try {
     if (req.user.role === 'employee' && req.user.id !== req.params.employeeId) {
@@ -139,7 +198,6 @@ router.get('/my-reminders/:employeeId', authMiddleware, async (req, res, next) =
 });
 
 // ── POST /api/imprest/reminders/:reminderId/fulfill ───────────────────────────
-// Mark a reminder as fulfilled after expense is submitted
 router.post('/reminders/:reminderId/fulfill', authMiddleware, async (req, res, next) => {
   try {
     const { data: reminder, error: fetchErr } = await supabaseAdmin
@@ -184,7 +242,6 @@ router.get('/finance/queue', authMiddleware, roleGuard(FINANCE_ROLES), async (re
     const { status, site, category, dateFrom, dateTo, employeeName, page = 1, limit = 50 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
-    // Filter by employee name: find matching employee IDs first
     let employeeIds = null;
     if (employeeName && employeeName.trim()) {
       const { data: matchingEmps } = await supabaseAdmin
@@ -220,12 +277,10 @@ router.get('/finance/queue', authMiddleware, roleGuard(FINANCE_ROLES), async (re
 });
 
 // ── GET /api/imprest/finance/reminders ───────────────────────────────────────
-// Returns all active reminders; auto-expires overdue ones and blocks employees
 router.get('/finance/reminders', authMiddleware, roleGuard(FINANCE_ROLES), async (req, res, next) => {
   try {
     const now = new Date().toISOString();
 
-    // Find overdue pending reminders
     const { data: expired } = await supabaseAdmin
       .from('imprest_expense_reminders')
       .select('id, employee_id')
@@ -233,13 +288,11 @@ router.get('/finance/reminders', authMiddleware, roleGuard(FINANCE_ROLES), async
       .lt('deadline', now);
 
     if (expired?.length) {
-      // Mark them expired
       await supabaseAdmin
         .from('imprest_expense_reminders')
         .update({ status: 'expired' })
         .in('id', expired.map((r) => r.id));
 
-      // Block each affected employee
       const uniqueEmpIds = [...new Set(expired.map((r) => r.employee_id))];
       for (const empId of uniqueEmpIds) {
         await supabaseAdmin.from('employees').update({
@@ -250,7 +303,6 @@ router.get('/finance/reminders', authMiddleware, roleGuard(FINANCE_ROLES), async
       }
     }
 
-    // Fetch all active reminders (pending + expired)
     const { data, error } = await supabaseAdmin
       .from('imprest_expense_reminders')
       .select(`
@@ -310,7 +362,6 @@ router.post('/:id/approve', authMiddleware, roleGuard(FINANCE_ROLES), async (req
       approved_at: approvedAt,
     }).eq('id', req.params.id);
 
-    // Create 3-day expense reminder
     const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
     try {
       await supabaseAdmin.from('imprest_expense_reminders').insert({
@@ -322,7 +373,6 @@ router.post('/:id/approve', authMiddleware, roleGuard(FINANCE_ROLES), async (req
       });
     } catch (e) { console.warn('Failed to create imprest reminder:', e.message); }
 
-    // Send WhatsApp notification to employee
     try {
       const { data: emp } = await supabaseAdmin
         .from('employees').select('name, phone, site').eq('id', imp.employee_id).single();

@@ -51,6 +51,11 @@ export const IMPREST_SITES = [
   'Auma India Bengaluru',
   'Minebea Mitsumi',
   'Hero Homes Ludhiana',
+  'Bansal Tower',
+  'KOKO Town, Chandigarh',
+  'Head Office',
+  'Bangalore Office',
+  'Others',
 ];
 
 export const IMPREST_REQUESTED_TO = [
@@ -60,12 +65,19 @@ export const IMPREST_REQUESTED_TO = [
 
 export const IMPREST_CATEGORIES = [
   'Food Expense',
-  'Site Room',
+  'Site Room Rent',
   'Travelling',
+  'Conveyance',
   'Labour Expense',
-  'Material Expense',
+  'Porter',
+  'Hotel Expense',
   'Other',
 ];
+
+export const CONVEYANCE_MODES = ['Public Transport', 'Ola/Rapido/Uber', 'Own Vehicle'];
+export const OWN_VEHICLE_TYPES = ['Bike', 'Car'];
+export const TRAVEL_SUBTYPES = ['Flight', 'Train', 'Bus', 'Contractual Cab'];
+export const LABOUR_SUBCATEGORIES = ['Wage Per Day', 'Food Expense', 'Conveyance'];
 
 export const IMPREST_STATUS_LABELS = {
   pending: 'Awaiting Approval',

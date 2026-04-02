@@ -3,8 +3,15 @@ import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 
 const IMPREST_CATEGORIES = [
-  'Food Expense', 'Site Room', 'Travelling',
-  'Labour Expense', 'Material Expense', 'Other',
+  'Food Expense', 'Site Room Rent', 'Travelling', 'Conveyance',
+  'Labour Expense', 'Porter', 'Hotel Expense', 'Other',
+];
+
+const IMPREST_SITES = [
+  'MAX Hospital, Saket Delhi', 'Bhuj', 'Vaneet Infra',
+  'Dee Foundation Omaxe, Faridabad', 'Auma India Bengaluru',
+  'Minebea Mitsumi', 'Hero Homes Ludhiana', 'Bansal Tower',
+  'KOKO Town, Chandigarh', 'Head Office', 'Bangalore Office', 'Others',
 ];
 
 const STATUS_OPTIONS = [
@@ -174,6 +181,15 @@ export default function ImprestQueuePage() {
           className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
         >
           {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+
+        <select
+          value={filterSite}
+          onChange={(e) => { setFilterSite(e.target.value); setPage(1); }}
+          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+        >
+          <option value="all">All Sites</option>
+          {IMPREST_SITES.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
 
         <select
