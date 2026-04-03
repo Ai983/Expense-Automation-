@@ -83,6 +83,10 @@ function getStepLabels(category) {
       return [...base, 'labour_sub', 'people', 'amount', 'purpose', 'review'];
     case 'Porter':
       return [...base, 'people', 'amount', 'purpose', 'review'];
+    case 'Site Expense':
+      return [...base, 'requirement', 'amount', 'purpose', 'review'];
+    case 'Material Expense':
+      return [...base, 'requirement', 'amount', 'purpose', 'review'];
     default:
       return [...base, 'people', 'amount', 'purpose', 'review'];
   }
@@ -134,6 +138,9 @@ export default function ImprestScreen() {
 
   // Labour
   const [labourSub, setLabourSub] = useState(LABOUR_SUBCATEGORIES[0]);
+
+  // Site Expense / Material Expense — requirement description
+  const [requirement, setRequirement] = useState('');
 
   // ── Derived step list ────────────────────────────────────────────────────────
   const steps = getStepLabels(category);
@@ -317,6 +324,9 @@ export default function ImprestScreen() {
           if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required', 'Please enter amount.'); return false; }
         }
         return true;
+      case 'requirement':
+        if (!requirement.trim()) { showAlert('Required', 'Please describe the requirement.'); return false; }
+        return true;
       case 'labour_sub':
         if (!labourSub) { showAlert('Required', 'Please select sub-category.'); return false; }
         return true;
@@ -380,6 +390,8 @@ export default function ImprestScreen() {
         vehicleType: conveyanceMode === 'Own Vehicle' ? vehicleType : undefined,
         // Labour
         labourSubcategory: category === 'Labour Expense' ? labourSub : undefined,
+        // Site Expense / Material Expense
+        requirement: ['Site Expense', 'Material Expense'].includes(category) ? requirement.trim() : undefined,
       };
       const res = await submitImprest(payload);
       setResult(res);
@@ -411,6 +423,7 @@ export default function ImprestScreen() {
     setConvFrom(''); setConvTo('');
     setOwnVehicleEstimate(null);
     setLabourSub(LABOUR_SUBCATEGORIES[0]);
+    setRequirement('');
   };
 
   // ── Result screen ────────────────────────────────────────────────────────────
@@ -861,6 +874,32 @@ export default function ImprestScreen() {
           </View>
         );
 
+      // ── Site Expense / Material Expense — requirement ───────────────────────
+      case 'requirement':
+        return (
+          <View style={styles.stepContent}>
+            <Text style={styles.stepTitle}>
+              {category === 'Site Expense' ? 'Site Expense Requirement *' : 'Material Expense Requirement *'}
+            </Text>
+            <Text style={styles.stepSubtitle}>
+              {category === 'Site Expense'
+                ? 'Describe what the site expense is for'
+                : 'Describe what material is needed'}
+            </Text>
+            <TextInput
+              style={[styles.input, styles.textarea]}
+              value={requirement}
+              onChangeText={setRequirement}
+              placeholder={category === 'Site Expense'
+                ? 'e.g. Electrical wiring repair, plumbing work...'
+                : 'e.g. Cement bags, steel rods, paint...'}
+              placeholderTextColor="#9ca3af"
+              multiline
+              numberOfLines={4}
+            />
+          </View>
+        );
+
       // ── Labour ───────────────────────────────────────────────────────────────
       case 'labour_sub':
         return (
@@ -926,6 +965,9 @@ export default function ImprestScreen() {
               )}
               {category === 'Labour Expense' && (
                 <SummaryRow label="Sub-type" value={labourSub} />
+              )}
+              {['Site Expense', 'Material Expense'].includes(category) && requirement && (
+                <SummaryRow label="Requirement" value={requirement} />
               )}
               {category === 'Food Expense' && effectiveRate > 0 && (
                 <SummaryRow label="Rate/person/day" value={`₹${effectiveRate}`} />
