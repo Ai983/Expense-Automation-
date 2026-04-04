@@ -140,11 +140,11 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       const extraFields = {};
       if (dateFrom) extraFields.date_from = dateFrom;
       if (dateTo) extraFields.date_to = dateTo;
-      if (travelSubtype) extraFields.travel_subtype = travelSubtype;
-      if (travelDate) extraFields.travel_date = travelDate;
-      if (conveyanceMode) extraFields.conveyance_mode = conveyanceMode;
-      if (vehicleType) extraFields.vehicle_type = vehicleType;
-      if (labourSubcategory) extraFields.labour_subcategory = labourSubcategory;
+      if (category === 'Travelling' && travelSubtype) extraFields.travel_subtype = travelSubtype;
+      if (category === 'Travelling' && travelDate) extraFields.travel_date = travelDate;
+      if (category === 'Conveyance' && conveyanceMode) extraFields.conveyance_mode = conveyanceMode;
+      if (category === 'Conveyance' && vehicleType) extraFields.vehicle_type = vehicleType;
+      if (category === 'Labour Expense' && labourSubcategory) extraFields.labour_subcategory = labourSubcategory;
       // Founder approval fields (migration 013)
       if (requestedToName) extraFields.requested_to_name = requestedToName;
       if (needsFounderApproval) {

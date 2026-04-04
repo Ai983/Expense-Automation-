@@ -56,12 +56,12 @@ function deviationClass(deviation, requested) {
 // Returns a one-line summary of category-specific details
 function categoryDetail(req) {
   const parts = [];
-  if (req.travel_subtype) parts.push(req.travel_subtype);
-  if (req.travel_from && req.travel_to) parts.push(`${req.travel_from} → ${req.travel_to}`);
-  if (req.travel_date) parts.push(`on ${fmtDate(req.travel_date)}`);
-  if (req.conveyance_mode) parts.push(req.conveyance_mode);
-  if (req.vehicle_type) parts.push(req.vehicle_type);
-  if (req.labour_subcategory) parts.push(req.labour_subcategory);
+  if (req.category === 'Travelling' && req.travel_subtype) parts.push(req.travel_subtype);
+  if (req.category === 'Travelling' && req.travel_from && req.travel_to) parts.push(`${req.travel_from} → ${req.travel_to}`);
+  if (req.category === 'Travelling' && req.travel_date) parts.push(`on ${fmtDate(req.travel_date)}`);
+  if (req.category === 'Conveyance' && req.conveyance_mode) parts.push(req.conveyance_mode);
+  if (req.category === 'Conveyance' && req.vehicle_type) parts.push(req.vehicle_type);
+  if (req.category === 'Labour Expense' && req.labour_subcategory) parts.push(req.labour_subcategory);
   if (req.date_from && req.date_to) parts.push(`${fmtDate(req.date_from)} – ${fmtDate(req.date_to)}`);
   if (req.per_person_rate) parts.push(`₹${req.per_person_rate}/person/day`);
   return parts.join(' · ');
