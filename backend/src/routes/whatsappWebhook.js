@@ -23,16 +23,24 @@ router.post('/incoming', async (req, res) => {
   // Always respond 200 immediately
   res.json({ status: 'received' });
 
-  // Log full payload for debugging
-  console.log('[WhatsApp Incoming]', JSON.stringify(body, null, 2));
+  // Log payload type for debugging
+  console.log('[WhatsApp Incoming] type:', body?.type, 'from:', body?.user?.phone || 'unknown');
 
-  // Maytapi payload fields: message, user, conversation, type, reply, etc.
-  const msgText = body?.message || '';
-  const senderPhone = body?.user?.phone || body?.sender || '';
-  const quotedMsg = body?.reply?.message || body?.quotedMsg?.body || '';
-  const conversationType = body?.conversation || '';
+  // Skip non-message payloads (ack, delivery receipts, etc.)
+  if (body?.type !== 'message') {
+    console.log('[WhatsApp] Skipping non-message type:', body?.type);
+    // Still forward to existing webhook
+    if (EXISTING_WEBHOOK_URL) {
+      fetch(EXISTING_WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {});
+    }
+    return;
+  }
 
-  // Only process direct messages (not group), and only YES/NO replies
+  // Maytapi message payload: message.text has the actual text, user.phone has sender
+  const msgText = body?.message?.text || body?.message || '';
+  const senderPhone = body?.user?.phone || '';
+  const quotedMsg = body?.message?.quotedMsg?.body || body?.message?.quotedMsg?.text || '';
+
   const upperMsg = (typeof msgText === 'string' ? msgText : '').trim().toUpperCase();
   const isApprovalReply = upperMsg.startsWith('YES') || upperMsg.startsWith('NO');
 
@@ -43,8 +51,9 @@ router.post('/incoming', async (req, res) => {
 
   if (isApprovalReply && isFounderOrDirector) {
     try {
-      // Try to extract ReplyID from quoted message or the reply itself
-      let replyTo = extractReplyId(quotedMsg) || extractReplyId(msgText);
+      // Try to extract ReplyID from the message text, quoted message, or both
+      let replyTo = extractReplyId(msgText) || extractReplyId(quotedMsg);
+      console.log('[WhatsApp] Message:', msgText, '| Quoted:', quotedMsg, '| ReplyTo:', replyTo);
       let imprestId = '';
 
       if (replyTo) {
