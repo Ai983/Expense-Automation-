@@ -16,6 +16,7 @@ import { ok, fail } from '../utils/responseHelper.js';
 import { FINANCE_ROLES } from '../config/constants.js';
 import { broadcastNewImprest } from '../index.js';
 import { sendImprestApprovalReminder } from '../services/whatsappService.js';
+import { triggerSubmissionConfirmation, triggerFounderApproval } from '../services/n8nService.js';
 
 const router = Router();
 
@@ -86,6 +87,8 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       conveyanceMode, vehicleType,
       // Labour
       labourSubcategory,
+      // Requested to (Dhruv Sir / Bhaskar Sir)
+      requestedToName,
     } = req.body;
 
     if (!site || !category || !peopleCount || !amountRequested) {
@@ -129,6 +132,8 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       .select()
       .single();
 
+    const needsFounderApproval = parseFloat(amountRequested) >= 5000 && !!requestedToName;
+
     // If insert succeeded, try to patch with new columns (added in migration 011)
     // Silently ignore if columns don't exist yet
     if (!error && imprest?.id) {
@@ -140,6 +145,12 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       if (conveyanceMode) extraFields.conveyance_mode = conveyanceMode;
       if (vehicleType) extraFields.vehicle_type = vehicleType;
       if (labourSubcategory) extraFields.labour_subcategory = labourSubcategory;
+      // Founder approval fields (migration 013)
+      if (requestedToName) extraFields.requested_to_name = requestedToName;
+      if (needsFounderApproval) {
+        extraFields.requires_founder_approval = true;
+        extraFields.founder_review_status = 'pending';
+      }
       if (Object.keys(extraFields).length > 0) {
         await supabaseAdmin.from('imprest_requests').update(extraFields).eq('id', imprest.id);
         // ignore update error — columns may not exist yet until migration runs
@@ -170,9 +181,71 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       });
     } catch (e) { console.warn('WebSocket broadcast failed:', e.message); }
 
+    // ── n8n triggers (non-blocking) ──────────────────────────────────────
+    // WF1: Send submission confirmation WhatsApp to employee
+    try {
+      const { data: emp } = await supabaseAdmin
+        .from('employees').select('name, phone, site').eq('id', req.user.id).single();
+      if (emp?.phone) {
+        triggerSubmissionConfirmation({
+          employeeName: emp.name,
+          phone: emp.phone,
+          refId,
+          amount: parseFloat(amountRequested),
+          category,
+          site,
+          purpose: purpose || '',
+        }).catch((e) => console.warn('WF1 trigger failed:', e.message));
+      }
+    } catch (e) { console.warn('WF1 employee lookup failed:', e.message); }
+
+    // WF2: Founder/Director approval for amount >= 5000
+    if (needsFounderApproval) {
+      try {
+        // Calculate employee's old balance for the approval message
+        let oldBalance = 0;
+        const { data: empImprests } = await supabaseAdmin
+          .from('imprest_requests')
+          .select('id, approved_amount, amount_requested')
+          .eq('employee_id', req.user.id)
+          .in('status', ['approved', 'partially_approved']);
+        if (empImprests?.length) {
+          const impIds = empImprests.map((i) => i.id);
+          const { data: linkedExp } = await supabaseAdmin
+            .from('expenses')
+            .select('imprest_id, amount, status')
+            .in('imprest_id', impIds)
+            .not('status', 'in', '("rejected","blocked")');
+          const expByImp = {};
+          for (const ex of (linkedExp || [])) {
+            expByImp[ex.imprest_id] = (expByImp[ex.imprest_id] || 0) + parseFloat(ex.amount);
+          }
+          for (const imp2 of empImprests) {
+            const approved = parseFloat(imp2.approved_amount || imp2.amount_requested);
+            oldBalance += Math.max(0, approved - (expByImp[imp2.id] || 0));
+          }
+        }
+
+        triggerFounderApproval({
+          imprestId: imprest.id,
+          refId,
+          requestedTo: requestedToName,
+          employeeName: req.user.name,
+          employeeSite: site,
+          amount: parseFloat(amountRequested),
+          category,
+          purpose: purpose || '',
+          oldBalance: Math.round(oldBalance * 100) / 100,
+          submittedAt,
+        }).catch((e) => console.warn('WF2 trigger failed:', e.message));
+      } catch (e) { console.warn('WF2 balance calc failed:', e.message); }
+    }
+
     return ok(res, {
       refId, status: 'pending',
-      message: 'Imprest request submitted. Awaiting approval.',
+      message: needsFounderApproval
+        ? 'Imprest request submitted. Approval request sent to ' + requestedToName + '.'
+        : 'Imprest request submitted. Awaiting approval.',
     }, 201);
   } catch (err) { next(err); }
 });
@@ -524,6 +597,58 @@ router.post('/:id/reject', authMiddleware, roleGuard(FINANCE_ROLES), async (req,
     });
 
     return ok(res, { refId: imp.ref_id, status: 'rejected' });
+  } catch (err) { next(err); }
+});
+
+// ── POST /api/imprest/:id/founder-review ─────────────────────────────────────
+// Called by n8n WF2 when founder/director replies YES/NO on WhatsApp
+const N8N_SECRET = process.env.N8N_INTERNAL_SECRET || '';
+
+router.post('/:id/founder-review', async (req, res, next) => {
+  try {
+    // Authenticate via shared secret (n8n sends x-n8n-secret header)
+    const secret = req.headers['x-n8n-secret'];
+    if (!N8N_SECRET || secret !== N8N_SECRET) {
+      return fail(res, 'Unauthorized', 401);
+    }
+
+    const { decision, comment, reviewerPhone } = req.body;
+    if (!decision || !['approved', 'rejected'].includes(decision)) {
+      return fail(res, 'decision must be "approved" or "rejected"');
+    }
+
+    const { data: imp, error: fetchErr } = await supabaseAdmin
+      .from('imprest_requests')
+      .select('id, ref_id, status, requires_founder_approval')
+      .eq('id', req.params.id)
+      .single();
+
+    if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
+
+    // Update founder review fields (silently ignore if columns don't exist yet)
+    await supabaseAdmin.from('imprest_requests').update({
+      founder_review_status: decision,
+      founder_review_comment: comment || null,
+      founder_review_at: new Date().toISOString(),
+      founder_review_phone: reviewerPhone || null,
+    }).eq('id', req.params.id);
+
+    // Broadcast update to finance dashboard
+    try {
+      broadcastNewImprest({
+        id: imp.id,
+        refId: imp.ref_id,
+        type: 'founder_review',
+        founderDecision: decision,
+        founderComment: comment || '',
+      });
+    } catch (e) { console.warn('WebSocket broadcast failed:', e.message); }
+
+    return ok(res, {
+      refId: imp.ref_id,
+      founderDecision: decision,
+      message: `Founder review recorded: ${decision}`,
+    });
   } catch (err) { next(err); }
 });
 

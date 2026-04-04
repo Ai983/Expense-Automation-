@@ -7,7 +7,7 @@ import { Picker } from '@react-native-picker/picker';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../src/context/AuthContext';
 import {
-  IMPREST_SITES, IMPREST_CATEGORIES,
+  IMPREST_SITES, IMPREST_CATEGORIES, IMPREST_REQUESTED_TO,
   CONVEYANCE_MODES, OWN_VEHICLE_TYPES, TRAVEL_SUBTYPES, LABOUR_SUBCATEGORIES,
 } from '../../src/constants';
 import {
@@ -70,25 +70,25 @@ function getStepLabels(category) {
   const base = ['intro', 'site', 'category'];
   switch (category) {
     case 'Food Expense':
-      return [...base, 'people', 'food_dates', 'food_amount', 'purpose', 'review'];
+      return [...base, 'people', 'food_dates', 'food_amount', 'purpose', 'requested_to', 'review'];
     case 'Site Room Rent':
-      return [...base, 'people', 'dates', 'amount', 'purpose', 'review'];
+      return [...base, 'people', 'dates', 'amount', 'purpose', 'requested_to', 'review'];
     case 'Hotel Expense':
-      return [...base, 'people', 'dates', 'amount', 'purpose', 'review'];
+      return [...base, 'people', 'dates', 'amount', 'purpose', 'requested_to', 'review'];
     case 'Travelling':
-      return [...base, 'travel_subtype', 'people', 'travel_route', 'travel_amount', 'purpose', 'review'];
+      return [...base, 'travel_subtype', 'people', 'travel_route', 'travel_amount', 'purpose', 'requested_to', 'review'];
     case 'Conveyance':
-      return [...base, 'conveyance_mode', 'conveyance_detail', 'purpose', 'review'];
+      return [...base, 'conveyance_mode', 'conveyance_detail', 'purpose', 'requested_to', 'review'];
     case 'Labour Expense':
-      return [...base, 'labour_sub', 'people', 'amount', 'purpose', 'review'];
+      return [...base, 'labour_sub', 'people', 'amount', 'purpose', 'requested_to', 'review'];
     case 'Porter':
-      return [...base, 'people', 'amount', 'purpose', 'review'];
+      return [...base, 'people', 'amount', 'purpose', 'requested_to', 'review'];
     case 'Site Expense':
-      return [...base, 'requirement', 'amount', 'purpose', 'review'];
+      return [...base, 'requirement', 'amount', 'purpose', 'requested_to', 'review'];
     case 'Material Expense':
-      return [...base, 'requirement', 'amount', 'purpose', 'review'];
+      return [...base, 'requirement', 'amount', 'purpose', 'requested_to', 'review'];
     default:
-      return [...base, 'people', 'amount', 'purpose', 'review'];
+      return [...base, 'people', 'amount', 'purpose', 'requested_to', 'review'];
   }
 }
 
@@ -109,6 +109,7 @@ export default function ImprestScreen() {
   const [peopleCount, setPeopleCount] = useState('1');
   const [amountRequested, setAmountRequested] = useState('');
   const [purpose, setPurpose] = useState('');
+  const [requestedTo, setRequestedTo] = useState(IMPREST_REQUESTED_TO[0]);
 
   // Food / Site Room Rent / Hotel — date range
   const [dateFrom, setDateFrom] = useState('');
@@ -333,6 +334,9 @@ export default function ImprestScreen() {
       case 'purpose':
         if (!purpose.trim()) { showAlert('Required', 'Purpose / notes are required.'); return false; }
         return true;
+      case 'requested_to':
+        if (!requestedTo) { showAlert('Required', 'Please select who to request approval from.'); return false; }
+        return true;
       default:
         return true;
     }
@@ -392,6 +396,8 @@ export default function ImprestScreen() {
         labourSubcategory: category === 'Labour Expense' ? labourSub : undefined,
         // Site Expense / Material Expense
         requirement: ['Site Expense', 'Material Expense'].includes(category) ? requirement.trim() : undefined,
+        // Requested to
+        requestedToName: requestedTo,
       };
       const res = await submitImprest(payload);
       setResult(res);
@@ -424,6 +430,7 @@ export default function ImprestScreen() {
     setOwnVehicleEstimate(null);
     setLabourSub(LABOUR_SUBCATEGORIES[0]);
     setRequirement('');
+    setRequestedTo(IMPREST_REQUESTED_TO[0]);
   };
 
   // ── Result screen ────────────────────────────────────────────────────────────
@@ -935,6 +942,46 @@ export default function ImprestScreen() {
           </View>
         );
 
+      // ── Requested To ───────────────────────────────────────────────────────
+      case 'requested_to': {
+        const amt = parseFloat(amountRequested) || 0;
+        return (
+          <View style={styles.stepContent}>
+            <Text style={styles.stepTitle}>Request Approval From *</Text>
+            <Text style={styles.stepSubtitle}>
+              {amt >= 5000
+                ? 'Amount is ₹5,000 or above — approval request will be sent via WhatsApp'
+                : 'Amount is below ₹5,000 — will go to admin portal for approval'}
+            </Text>
+            {IMPREST_REQUESTED_TO.map((person) => (
+              <TouchableOpacity
+                key={person}
+                style={[
+                  styles.optionCard,
+                  requestedTo === person && styles.optionCardSelected,
+                ]}
+                onPress={() => setRequestedTo(person)}
+                activeOpacity={0.8}
+              >
+                <View style={styles.optionRow}>
+                  <View style={[styles.radioOuter, requestedTo === person && styles.radioOuterSelected]}>
+                    {requestedTo === person && <View style={styles.radioInner} />}
+                  </View>
+                  <View>
+                    <Text style={[styles.optionLabel, requestedTo === person && styles.optionLabelSelected]}>
+                      {person}
+                    </Text>
+                    <Text style={styles.optionHint}>
+                      {person === 'Dhruv Sir' ? 'Founder — Office requests' : 'Director Operations — Site requests'}
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        );
+      }
+
       // ── Review & Submit ──────────────────────────────────────────────────────
       case 'review': {
         const effectiveRate = site === 'Others' ? parseFloat(customFoodRate) || 0 : foodRate;
@@ -974,6 +1021,10 @@ export default function ImprestScreen() {
               )}
               <SummaryRow label="Amount" value={`₹${amountRequested}`} highlight />
               {purpose ? <SummaryRow label="Purpose" value={purpose} /> : null}
+              <SummaryRow label="Requested To" value={requestedTo} />
+              {parseFloat(amountRequested) >= 5000 && (
+                <SummaryRow label="WhatsApp Approval" value="Yes — will be sent" />
+              )}
             </View>
             <TouchableOpacity
               style={[styles.primaryBtn, submitting && styles.btnDisabled]}
@@ -1105,4 +1156,23 @@ const styles = StyleSheet.create({
   resultTitle: { fontSize: 22, fontWeight: '700', color: '#111827', marginBottom: 8 },
   resultRef: { fontSize: 16, color: '#e8a24a', fontWeight: '700', marginBottom: 12 },
   resultMessage: { fontSize: 14, color: '#6b7280', textAlign: 'center', marginBottom: 32, lineHeight: 20 },
+
+  // Requested To step — radio card styles
+  optionCard: {
+    borderWidth: 1.5, borderColor: '#d1d5db', borderRadius: 12,
+    padding: 16, marginBottom: 12, backgroundColor: '#fff',
+  },
+  optionCardSelected: {
+    borderColor: '#e8a24a', backgroundColor: '#fffbeb',
+  },
+  optionRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  radioOuter: {
+    width: 22, height: 22, borderRadius: 11, borderWidth: 2,
+    borderColor: '#d1d5db', alignItems: 'center', justifyContent: 'center',
+  },
+  radioOuterSelected: { borderColor: '#e8a24a' },
+  radioInner: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#e8a24a' },
+  optionLabel: { fontSize: 16, fontWeight: '600', color: '#374151' },
+  optionLabelSelected: { color: '#92400e' },
+  optionHint: { fontSize: 12, color: '#9ca3af', marginTop: 2 },
 });

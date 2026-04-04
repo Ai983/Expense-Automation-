@@ -3,7 +3,8 @@ import api from '../services/api';
 
 const IMPREST_CATEGORIES = [
   'Food Expense', 'Site Room Rent', 'Travelling', 'Conveyance',
-  'Labour Expense', 'Porter', 'Hotel Expense', 'Other',
+  'Labour Expense', 'Porter', 'Hotel Expense', 'Site Expense',
+  'Material Expense', 'Other',
 ];
 
 const IMPREST_SITES = [
@@ -212,6 +213,7 @@ export default function ImprestQueuePage() {
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Approved</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Old Balance</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Founder Review</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Submitted</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions</th>
                 </tr>
@@ -284,6 +286,38 @@ export default function ImprestQueuePage() {
                           <div className="text-xs text-red-500 mt-1 max-w-[120px] line-clamp-1" title={req.rejection_reason}>
                             {req.rejection_reason}
                           </div>
+                        )}
+                      </td>
+                      {/* Founder Review */}
+                      <td className="px-4 py-3">
+                        {req.requires_founder_approval ? (
+                          <div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-gray-500">{req.requested_to_name || '—'}</span>
+                            </div>
+                            {req.founder_review_status === 'approved' && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-700 mt-1">
+                                Approved
+                              </span>
+                            )}
+                            {req.founder_review_status === 'rejected' && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-700 mt-1">
+                                Rejected
+                              </span>
+                            )}
+                            {req.founder_review_status === 'pending' && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-yellow-100 text-yellow-800 mt-1">
+                                Awaiting
+                              </span>
+                            )}
+                            {req.founder_review_comment && (
+                              <div className="text-xs text-gray-500 mt-1 max-w-[140px] line-clamp-2" title={req.founder_review_comment}>
+                                "{req.founder_review_comment}"
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-300">N/A</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-500">
@@ -359,6 +393,7 @@ export default function ImprestQueuePage() {
               {/* Request Info */}
               <Section title="Request Details">
                 <Row label="Category" value={detailReq.category} />
+                {detailReq.requested_to_name && <Row label="Requested To" value={detailReq.requested_to_name} />}
                 <Row label="People Count" value={detailReq.people_count} />
                 <Row label="Amount Requested" value={fmt(detailReq.amount_requested)} bold />
                 {detailReq.per_person_rate && (
@@ -424,6 +459,33 @@ export default function ImprestQueuePage() {
               {detailReq.category === 'Labour Expense' && detailReq.labour_subcategory && (
                 <Section title="Labour Details">
                   <Row label="Sub-Category" value={detailReq.labour_subcategory} />
+                </Section>
+              )}
+
+              {/* Founder / Director Review */}
+              {detailReq.requires_founder_approval && (
+                <Section title="Founder / Director Review">
+                  <Row label="Requested To" value={detailReq.requested_to_name || '—'} />
+                  <Row
+                    label="Review Status"
+                    value={
+                      detailReq.founder_review_status === 'approved' ? 'Approved'
+                      : detailReq.founder_review_status === 'rejected' ? 'Rejected'
+                      : 'Awaiting Review'
+                    }
+                    className={
+                      detailReq.founder_review_status === 'approved' ? 'text-green-600'
+                      : detailReq.founder_review_status === 'rejected' ? 'text-red-600'
+                      : 'text-yellow-600'
+                    }
+                    bold
+                  />
+                  {detailReq.founder_review_comment && (
+                    <Row label="Comment" value={detailReq.founder_review_comment} />
+                  )}
+                  {detailReq.founder_review_at && (
+                    <Row label="Reviewed On" value={fmtDate(detailReq.founder_review_at)} />
+                  )}
                 </Section>
               )}
 
