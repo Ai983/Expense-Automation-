@@ -1,0 +1,134 @@
+import { Router } from 'express';
+import { supabaseAdmin } from '../config/supabase.js';
+
+const router = Router();
+
+const EXISTING_WEBHOOK_URL = process.env.MAYTAPI_EXISTING_WEBHOOK || '';
+const N8N_FOUNDER_REPLY_URL = process.env.N8N_WEBHOOK_FOUNDER_REPLY || '';
+
+// Founder/Director phone numbers for matching
+const FOUNDER_PHONE = process.env.FOUNDER_PHONE || '';
+const DIRECTOR_PHONE = process.env.DIRECTOR_PHONE || '';
+
+/**
+ * POST /api/whatsapp/incoming
+ *
+ * Central router for ALL incoming Maytapi WhatsApp messages.
+ * Maytapi webhook URL should be set to:
+ *   https://your-backend.railway.app/api/whatsapp/incoming
+ */
+router.post('/incoming', async (req, res) => {
+  const body = req.body;
+
+  // Always respond 200 immediately
+  res.json({ status: 'received' });
+
+  // Log full payload for debugging
+  console.log('[WhatsApp Incoming]', JSON.stringify(body, null, 2));
+
+  // Maytapi payload fields: message, user, conversation, type, reply, etc.
+  const msgText = body?.message || '';
+  const senderPhone = body?.user?.phone || body?.sender || '';
+  const quotedMsg = body?.reply?.message || body?.quotedMsg?.body || '';
+  const conversationType = body?.conversation || '';
+
+  // Only process direct messages (not group), and only YES/NO replies
+  const upperMsg = (typeof msgText === 'string' ? msgText : '').trim().toUpperCase();
+  const isApprovalReply = upperMsg.startsWith('YES') || upperMsg.startsWith('NO');
+
+  // Check if sender is founder or director
+  const cleanPhone = senderPhone.replace(/\D/g, '');
+  const isFounderOrDirector = cleanPhone === FOUNDER_PHONE || cleanPhone === DIRECTOR_PHONE
+    || cleanPhone.endsWith(FOUNDER_PHONE.slice(-10)) || cleanPhone.endsWith(DIRECTOR_PHONE.slice(-10));
+
+  if (isApprovalReply && isFounderOrDirector) {
+    try {
+      // Try to extract ReplyID from quoted message or the reply itself
+      let replyTo = extractReplyId(quotedMsg) || extractReplyId(msgText);
+      let imprestId = '';
+
+      if (replyTo) {
+        imprestId = replyTo.split('||')[1] || '';
+      }
+
+      // If no ReplyID found, find the latest pending imprest awaiting founder review
+      if (!imprestId) {
+        console.log('[WhatsApp] No ReplyID found, looking up latest pending imprest...');
+        const { data: latestPending } = await supabaseAdmin
+          .from('imprest_requests')
+          .select('id, ref_id')
+          .eq('requires_founder_approval', true)
+          .eq('founder_review_status', 'pending')
+          .order('submitted_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (latestPending) {
+          imprestId = latestPending.id;
+          console.log('[WhatsApp] Found pending imprest:', latestPending.ref_id);
+        }
+      }
+
+      if (imprestId) {
+        const decision = upperMsg.startsWith('YES') ? 'approved' : 'rejected';
+        const comment = msgText.trim().indexOf(' ') > 0
+          ? msgText.trim().substring(msgText.trim().indexOf(' ') + 1)
+          : '';
+
+        // Update founder review directly in the database
+        const { error: updateErr } = await supabaseAdmin
+          .from('imprest_requests')
+          .update({
+            founder_review_status: decision,
+            founder_review_comment: comment || null,
+            founder_review_at: new Date().toISOString(),
+            founder_review_phone: cleanPhone,
+          })
+          .eq('id', imprestId);
+
+        if (updateErr) {
+          console.error('[WhatsApp] Failed to update imprest:', updateErr.message);
+        } else {
+          console.log(`[WhatsApp] Founder review saved: ${decision} for imprest ${imprestId}`);
+        }
+      } else {
+        console.log('[WhatsApp] No pending imprest found to process');
+      }
+
+      // Also forward to n8n if configured (for logging/additional processing)
+      if (N8N_FOUNDER_REPLY_URL) {
+        fetch(N8N_FOUNDER_REPLY_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ body: { message: msgText, from: cleanPhone, replyTo: replyTo || '' } }),
+        }).catch((e) => console.warn('[WhatsApp] n8n forward failed:', e.message));
+      }
+    } catch (e) {
+      console.error('[WhatsApp] Error processing founder reply:', e.message);
+    }
+  }
+
+  // Forward to existing webhook for other processing
+  if (EXISTING_WEBHOOK_URL) {
+    try {
+      await fetch(EXISTING_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      console.warn('[WhatsApp] Failed to forward to existing webhook:', e.message);
+    }
+  }
+});
+
+function extractReplyId(text) {
+  if (!text) return '';
+  const match = text.match(/ReplyID:\s*(IMP-[^\s]+\|\|[a-f0-9-]+)/i);
+  if (match) return match[1];
+  const match2 = text.match(/(IMP-\d{8}-\d{4}\|\|[a-f0-9-]+)/);
+  if (match2) return match2[1];
+  return '';
+}
+
+export default router;
