@@ -184,7 +184,7 @@ export default function ExpenseQueue() {
   const [expenses, setExpenses] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ status: 'all', site: 'all', employeeId: 'all', dateFrom: '', dateTo: '' });
+  const [filters, setFilters] = useState({ status: 'all', site: 'all', employeeId: 'all', dateFrom: '', dateTo: '', search: '' });
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState(new Set());
   const [detailId, setDetailId] = useState(null);
@@ -248,8 +248,19 @@ export default function ExpenseQueue() {
     }
   }
 
+  // Client-side search filter
+  const searchQuery = (filters.search || '').toLowerCase().trim();
+  const displayedExpenses = searchQuery
+    ? expenses.filter((e) =>
+        (e.ref_id || '').toLowerCase().includes(searchQuery) ||
+        (e.employee?.name || '').toLowerCase().includes(searchQuery) ||
+        (e.category || '').toLowerCase().includes(searchQuery) ||
+        (e.site || '').toLowerCase().includes(searchQuery)
+      )
+    : expenses;
+
   const totalPages = Math.ceil(total / LIMIT);
-  const approvableExpenses = expenses.filter((e) => ['pending', 'verified', 'manual_review', 'blocked'].includes(e.status));
+  const approvableExpenses = displayedExpenses.filter((e) => ['pending', 'verified', 'manual_review', 'blocked'].includes(e.status));
 
   return (
     <div>
@@ -281,7 +292,9 @@ export default function ExpenseQueue() {
       )}
 
       {/* Summary */}
-      <p className="text-xs text-gray-400 mb-3">{total} expense{total !== 1 ? 's' : ''} found</p>
+      <p className="text-xs text-gray-400 mb-3">
+        {searchQuery ? `${displayedExpenses.length} of ${total}` : total} expense{total !== 1 ? 's' : ''} found
+      </p>
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
@@ -311,10 +324,10 @@ export default function ExpenseQueue() {
             <tbody className="divide-y divide-gray-50">
               {loading ? (
                 <tr><td colSpan={10} className="text-center py-12 text-gray-400">Loading expenses...</td></tr>
-              ) : expenses.length === 0 ? (
+              ) : displayedExpenses.length === 0 ? (
                 <tr><td colSpan={10} className="text-center py-12 text-gray-400">No expenses found</td></tr>
               ) : (
-                expenses.map((exp) => {
+                displayedExpenses.map((exp) => {
                   const canSelect = ['pending', 'verified', 'manual_review'].includes(exp.status);
                   return (
                     <tr key={exp.id} className="hover:bg-gray-50 transition-colors">

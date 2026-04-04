@@ -26,6 +26,18 @@ export default function FilterBar({ filters, onChange }) {
 
   return (
     <div className="flex flex-wrap gap-3 mb-5">
+      {/* Search */}
+      <div>
+        <label className="text-xs text-gray-500 block mb-1">Search</label>
+        <input
+          type="text"
+          className="input w-52 text-sm"
+          placeholder="Ref ID, employee name..."
+          value={filters.search || ''}
+          onChange={(e) => set('search', e.target.value)}
+        />
+      </div>
+
       {/* Employee */}
       <div>
         <label className="text-xs text-gray-500 block mb-1">Employee</label>
@@ -83,7 +95,7 @@ export default function FilterBar({ filters, onChange }) {
       <div className="flex items-end">
         <button
           className="btn-secondary text-sm"
-          onClick={() => onChange({ status: 'all', site: 'all', employeeId: 'all', dateFrom: '', dateTo: '' })}
+          onClick={() => onChange({ status: 'all', site: 'all', employeeId: 'all', dateFrom: '', dateTo: '', search: '' })}
         >
           Clear filters
         </button>
