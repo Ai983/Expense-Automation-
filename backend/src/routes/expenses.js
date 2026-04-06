@@ -20,12 +20,15 @@ router.post(
   '/submit',
   authMiddleware,
   roleGuard(['employee']),
-  upload.array('screenshots', 5),
+  upload.fields([{ name: 'screenshots', maxCount: 5 }, { name: 'screenshot', maxCount: 1 }]),
   async (req, res, next) => {
     try {
       const { site, amount, category, description, imprestId } = req.body;
       // Support both multi-file (screenshots) and legacy single-file (screenshot)
-      const files = req.files?.length ? req.files : (req.file ? [req.file] : []);
+      const files = [
+        ...(req.files?.screenshots || []),
+        ...(req.files?.screenshot || []),
+      ];
 
       // Validation
       if (!site || !amount || !category) {
