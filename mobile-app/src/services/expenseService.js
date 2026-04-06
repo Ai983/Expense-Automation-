@@ -2,10 +2,11 @@ import { Platform } from 'react-native';
 import api from './api';
 
 /**
- * Submits an expense with a payment screenshot image.
- * imageUri is the local file URI from expo-image-picker (or blob/data URL on web).
+ * Submits an expense with one or more payment screenshots.
+ * `images` is an array of { uri, mimeType, name? } objects.
+ * Also supports legacy single-image via imageUri/imageMimeType.
  */
-export async function submitExpense({ site, amount, category, description, imageUri, imageMimeType, imprestId }) {
+export async function submitExpense({ site, amount, category, description, images, imageUri, imageMimeType, imprestId }) {
   const formData = new FormData();
   formData.append('site', site);
   formData.append('amount', String(amount));
@@ -13,27 +14,31 @@ export async function submitExpense({ site, amount, category, description, image
   if (description) formData.append('description', description);
   if (imprestId) formData.append('imprestId', imprestId);
 
-  const mimeType = imageMimeType || 'image/jpeg';
-  const ext = mimeType.split('/').pop() || 'jpg';
-  const filename = `screenshot.${ext}`;
+  // Normalize to array: support both new `images` array and legacy single image
+  const imageList = images?.length ? images : (imageUri ? [{ uri: imageUri, mimeType: imageMimeType || 'image/jpeg' }] : []);
 
-  if (Platform.OS === 'web') {
-    // On web, FormData must receive a real File/Blob; { uri, name, type } is not sent as a file.
-    const blob = await (await fetch(imageUri)).blob();
-    const file = new File([blob], filename, { type: mimeType });
-    formData.append('screenshot', file);
-  } else {
-    // React Native: FormData accepts { uri, name, type } and the native layer sends the file.
-    formData.append('screenshot', {
-      uri: imageUri,
-      name: filename,
-      type: mimeType,
-    });
+  for (let i = 0; i < imageList.length; i++) {
+    const img = imageList[i];
+    const mimeType = img.mimeType || 'image/jpeg';
+    const ext = mimeType.split('/').pop() || 'jpg';
+    const filename = imageList.length > 1 ? `screenshot-${i + 1}.${ext}` : `screenshot.${ext}`;
+
+    if (Platform.OS === 'web') {
+      const blob = await (await fetch(img.uri)).blob();
+      const file = new File([blob], filename, { type: mimeType });
+      formData.append('screenshots', file);
+    } else {
+      formData.append('screenshots', {
+        uri: img.uri,
+        name: filename,
+        type: mimeType,
+      });
+    }
   }
 
-  // Do not set Content-Type; axios adds multipart/form-data with boundary automatically.
+  // Longer timeout for multi-image upload + OCR
   const { data } = await api.post('/api/expenses/submit', formData, {
-    timeout: 60000, // longer timeout for image upload + OCR
+    timeout: 120000,
   });
 
   return data.data;

@@ -52,6 +52,7 @@ function ImprestRemindersPanel() {
               <th className="px-4 py-2 text-left text-xs font-semibold text-amber-800">Employee</th>
               <th className="px-4 py-2 text-left text-xs font-semibold text-amber-800">Site</th>
               <th className="px-4 py-2 text-right text-xs font-semibold text-amber-800">Approved ₹</th>
+              <th className="px-4 py-2 text-right text-xs font-semibold text-amber-800">Spent / Balance</th>
               <th className="px-4 py-2 text-left text-xs font-semibold text-amber-800">Deadline</th>
               <th className="px-4 py-2 text-left text-xs font-semibold text-amber-800">Status</th>
               <th className="px-4 py-2 text-left text-xs font-semibold text-amber-800">Action</th>
@@ -74,6 +75,22 @@ function ImprestRemindersPanel() {
                   <td className="px-4 py-2 text-xs text-gray-600">{r.imprest?.site}</td>
                   <td className="px-4 py-2 text-right font-semibold text-gray-900">
                     ₹{Number(r.imprest?.approved_amount || r.imprest?.amount_requested || 0).toLocaleString('en-IN')}
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    {(() => {
+                      const approved = Number(r.imprest?.approved_amount || r.imprest?.amount_requested || 0);
+                      const fulfilled = Number(r.fulfilled_amount || 0);
+                      const remaining = Math.max(0, approved - fulfilled);
+                      if (fulfilled > 0) return (
+                        <div>
+                          <div className="text-xs text-green-600 font-semibold">Spent: ₹{fulfilled.toLocaleString('en-IN')}</div>
+                          <div className={`text-xs font-bold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                            {remaining > 0 ? `Bal: ₹${remaining.toLocaleString('en-IN')}` : 'Settled'}
+                          </div>
+                        </div>
+                      );
+                      return <span className="text-xs text-gray-400">No expenses yet</span>;
+                    })()}
                   </td>
                   <td className="px-4 py-2">
                     <div className="text-xs text-gray-700">

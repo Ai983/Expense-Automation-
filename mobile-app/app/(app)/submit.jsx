@@ -15,7 +15,7 @@ const INITIAL_FORM = { site: SITES[0], amount: '', category: CATEGORIES[0], desc
 
 export default function SubmitExpenseScreen() {
   const [form, setForm] = useState(INITIAL_FORM);
-  const [image, setImage] = useState(null);
+  const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [reminders, setReminders] = useState([]);
@@ -56,7 +56,7 @@ export default function SubmitExpenseScreen() {
     setActiveReminderId(reminder.id);
     setActiveImprestId(imp?.id || null);
     setImprestApprovedAmount(approvedAmt);
-    setImage(null);
+    setImages([]);
     setResult(null);
   }
 
@@ -68,7 +68,7 @@ export default function SubmitExpenseScreen() {
       });
       if (!result.canceled && result.assets?.[0]) {
         const asset = result.assets[0];
-        setImage({ uri: asset.uri, mimeType: 'application/pdf', name: asset.name });
+        setImages((prev) => [...prev, { uri: asset.uri, mimeType: 'application/pdf', name: asset.name }]);
         setResult(null);
       }
     } catch {
@@ -96,17 +96,21 @@ export default function SubmitExpenseScreen() {
 
     if (!pickerResult.canceled && pickerResult.assets?.[0]) {
       const asset = pickerResult.assets[0];
-      setImage({ uri: asset.uri, mimeType: asset.mimeType || 'image/jpeg' });
+      setImages((prev) => [...prev, { uri: asset.uri, mimeType: asset.mimeType || 'image/jpeg' }]);
       setResult(null);
     }
+  }
+
+  function removeImage(index) {
+    setImages((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function handleSubmit() {
     if (!form.amount || isNaN(parseFloat(form.amount)) || parseFloat(form.amount) <= 0) {
       return Alert.alert('Error', 'Enter a valid amount');
     }
-    if (!image) {
-      return Alert.alert('Error', 'Upload a payment screenshot or PDF');
+    if (images.length === 0) {
+      return Alert.alert('Error', 'Upload at least one payment screenshot or PDF');
     }
 
     setLoading(true);
@@ -119,13 +123,12 @@ export default function SubmitExpenseScreen() {
         amount: expenseAmount,
         category: form.category,
         description: form.description,
-        imageUri: image.uri,
-        imageMimeType: image.mimeType,
+        images,
         imprestId: activeImprestId || undefined,
       });
       setResult(res);
       setForm(INITIAL_FORM);
-      setImage(null);
+      setImages([]);
 
       // Mark the linked reminder as fulfilled (or partially fulfilled)
       if (activeReminderId) {
@@ -237,7 +240,7 @@ export default function SubmitExpenseScreen() {
             <Text style={styles.prefilledText}>
               Form pre-filled from imprest · You can submit partial or full amount
             </Text>
-            <TouchableOpacity onPress={() => { setActiveReminderId(null); setActiveImprestId(null); setImprestApprovedAmount(null); setForm(INITIAL_FORM); }}>
+            <TouchableOpacity onPress={() => { setActiveReminderId(null); setActiveImprestId(null); setImprestApprovedAmount(null); setForm(INITIAL_FORM); setImages([]); }}>
               <Text style={styles.prefilledClear}>Clear</Text>
             </TouchableOpacity>
           </View>
@@ -278,23 +281,31 @@ export default function SubmitExpenseScreen() {
           numberOfLines={3}
         />
 
-        <Text style={styles.label}>Payment Proof *</Text>
-        {image ? (
-          <View style={styles.imagePreview}>
-            {image.mimeType === 'application/pdf' ? (
-              <View style={styles.pdfPreview}>
-                <Text style={styles.pdfIcon}>📄</Text>
-                <Text style={styles.pdfName} numberOfLines={2}>{image.name || 'document.pdf'}</Text>
-                <Text style={styles.pdfNote}>PDF will be parsed by AI to extract amount</Text>
+        <Text style={styles.label}>Payment Proof * {images.length > 0 && `(${images.length} attached)`}</Text>
+
+        {/* Show attached images */}
+        {images.length > 0 && (
+          <View style={{ marginBottom: 12 }}>
+            {images.map((img, idx) => (
+              <View key={idx} style={styles.imagePreview}>
+                {img.mimeType === 'application/pdf' ? (
+                  <View style={styles.pdfPreview}>
+                    <Text style={styles.pdfIcon}>📄</Text>
+                    <Text style={styles.pdfName} numberOfLines={2}>{img.name || 'document.pdf'}</Text>
+                  </View>
+                ) : (
+                  <Image source={{ uri: img.uri }} style={styles.previewImg} resizeMode="contain" />
+                )}
+                <TouchableOpacity onPress={() => removeImage(idx)} style={styles.removeImg}>
+                  <Text style={styles.removeImgText}>Remove</Text>
+                </TouchableOpacity>
               </View>
-            ) : (
-              <Image source={{ uri: image.uri }} style={styles.previewImg} resizeMode="contain" />
-            )}
-            <TouchableOpacity onPress={() => setImage(null)} style={styles.removeImg}>
-              <Text style={styles.removeImgText}>Remove</Text>
-            </TouchableOpacity>
+            ))}
           </View>
-        ) : (
+        )}
+
+        {/* Add more buttons (always visible if < 5 images) */}
+        {images.length < 5 && (
           <View style={styles.imageButtons}>
             <TouchableOpacity style={styles.imgBtn} onPress={() => pickImage('camera')}>
               <Text style={styles.imgBtnText}>📷 Camera</Text>
@@ -306,6 +317,11 @@ export default function SubmitExpenseScreen() {
               <Text style={styles.imgBtnText}>📄 PDF</Text>
             </TouchableOpacity>
           </View>
+        )}
+        {images.length > 0 && images.length < 5 && (
+          <Text style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 4 }}>
+            You can add up to {5 - images.length} more screenshot{5 - images.length !== 1 ? 's' : ''}
+          </Text>
         )}
 
         <TouchableOpacity

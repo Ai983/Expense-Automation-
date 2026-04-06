@@ -134,34 +134,45 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
               </div>
             )}
 
-            {/* Attachment — screenshot or PDF */}
-            {expense.screenshotSignedUrl && (
+            {/* Attachments — one or more screenshots/PDFs */}
+            {(expense.allScreenshotUrls?.length > 0 || expense.screenshotSignedUrl) && (
               <div>
                 <h3 className="text-sm font-semibold text-gray-700 mb-3">
-                  {meta.attachmentType === 'pdf' ? 'PDF Attachment' : 'Payment Screenshot'}
+                  {meta.screenshotCount > 1
+                    ? `Payment Proofs (${meta.screenshotCount} attachments)`
+                    : meta.attachmentType === 'pdf' ? 'PDF Attachment' : 'Payment Screenshot'}
                 </h3>
-                {meta.attachmentType === 'pdf' ? (
-                  <a
-                    href={expense.screenshotSignedUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 hover:bg-blue-100 transition text-blue-700 font-medium text-sm"
-                  >
-                    <span className="text-2xl">📄</span>
-                    <span>Open PDF Document</span>
-                  </a>
-                ) : (
-                  <>
-                    <a href={expense.screenshotSignedUrl} target="_blank" rel="noopener noreferrer">
-                      <img
-                        src={expense.screenshotSignedUrl}
-                        alt="Payment screenshot"
-                        className="rounded-lg border max-h-80 object-contain cursor-pointer hover:opacity-90 transition"
-                      />
-                    </a>
-                    <p className="text-xs text-gray-400 mt-1">Click to open full size</p>
-                  </>
+                {meta.totalExtractedAmount > 0 && meta.screenshotCount > 1 && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 mb-3 text-xs text-blue-800">
+                    Total extracted from {meta.screenshotCount} screenshots: <strong>₹{Number(meta.totalExtractedAmount).toLocaleString('en-IN')}</strong>
+                    {meta.allOcrResults?.map((ocr, i) => (
+                      <span key={i} className="ml-2 text-blue-600">
+                        #{i + 1}: ₹{Number(ocr.extractedAmount || 0).toLocaleString('en-IN')}
+                      </span>
+                    ))}
+                  </div>
                 )}
+                <div className={`${(expense.allScreenshotUrls?.length || 0) > 1 ? 'grid grid-cols-2 gap-3' : ''}`}>
+                  {(expense.allScreenshotUrls || [expense.screenshotSignedUrl]).map((url, i) => (
+                    url && (
+                      <div key={i} className="relative">
+                        {meta.attachmentType === 'pdf' ? (
+                          <a href={url} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 hover:bg-blue-100 transition text-blue-700 font-medium text-sm">
+                            <span className="text-2xl">📄</span>
+                            <span>Open PDF {(expense.allScreenshotUrls?.length || 0) > 1 ? `#${i + 1}` : ''}</span>
+                          </a>
+                        ) : (
+                          <a href={url} target="_blank" rel="noopener noreferrer">
+                            <img src={url} alt={`Screenshot ${i + 1}`}
+                              className="rounded-lg border max-h-60 w-full object-contain cursor-pointer hover:opacity-90 transition" />
+                          </a>
+                        )}
+                      </div>
+                    )
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400 mt-1">Click to open full size</p>
               </div>
             )}
 

@@ -15,16 +15,17 @@ import { broadcastNewExpense } from '../index.js';
 const router = Router();
 
 // ── POST /api/expenses/submit ─────────────────────────────────────────────────
-// Employee submits an expense with a payment screenshot
+// Employee submits an expense with one or more payment screenshots
 router.post(
   '/submit',
   authMiddleware,
   roleGuard(['employee']),
-  upload.single('screenshot'),
+  upload.array('screenshots', 5),
   async (req, res, next) => {
     try {
       const { site, amount, category, description, imprestId } = req.body;
-      const file = req.file;
+      // Support both multi-file (screenshots) and legacy single-file (screenshot)
+      const files = req.files?.length ? req.files : (req.file ? [req.file] : []);
 
       // Validation
       if (!site || !amount || !category) {
@@ -40,8 +41,8 @@ router.post(
       if (isNaN(parsedAmount) || parsedAmount <= 0) {
         return fail(res, 'Amount must be a positive number');
       }
-      if (!file) {
-        return fail(res, 'Payment screenshot is required');
+      if (files.length === 0) {
+        return fail(res, 'At least one payment screenshot is required');
       }
 
       const submittedAt = new Date().toISOString();
@@ -49,38 +50,89 @@ router.post(
       // 1. Generate reference ID
       const refId = await generateRefId();
 
-      // 2. Upload screenshot to Supabase Storage
-      const screenshotPath = await uploadScreenshot(
-        file.buffer,
-        file.mimetype,
-        req.user.id,
-        refId
-      );
+      // 2. Upload all screenshots to Supabase Storage
+      const screenshotPaths = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const suffix = files.length > 1 ? `-${i + 1}` : '';
+        const path = await uploadScreenshot(
+          file.buffer,
+          file.mimetype,
+          req.user.id,
+          `${refId}${suffix}`
+        );
+        screenshotPaths.push(path);
+      }
 
-      // 3. Run AI verification (OCR + validation checks)
+      // 3. Run AI verification on the primary (first) screenshot
+      const primaryFile = files[0];
       let verification = null;
       let ocrData = null;
       let verificationChecks = [];
-      let autoAction = 'manual_review'; // safe default if Vision API fails
+      let autoAction = 'manual_review';
+      let totalExtractedAmount = 0;
+      const allOcrResults = [];
 
-      const isPdf = file.mimetype === 'application/pdf';
+      const isPdf = primaryFile.mimetype === 'application/pdf';
 
-      try {
-        verification = await verifyExpense(file.buffer, {
-          amount: parsedAmount,
-          submittedAt,
-          mimeType: file.mimetype,
-        });
-        ocrData = verification.ocrData;
-        verificationChecks = verification.checks;
-        // PDFs are documents (invoices, tickets) — standard payment receipt checks don't apply.
-        // Cap at manual_review so finance can review; never auto-block based on PDF OCR results.
-        autoAction = isPdf && verification.autoAction === 'blocked'
-          ? 'manual_review'
-          : verification.autoAction;
-      } catch (visionErr) {
-        console.warn('Vision API unavailable, falling back to manual_review:', visionErr.message);
-        verificationChecks = [{ step: 'ocr', result: 'warn', score: 0, detail: 'Vision API unavailable' }];
+      // Run OCR on each screenshot to extract amounts
+      for (const file of files) {
+        try {
+          const v = await verifyExpense(file.buffer, {
+            amount: parsedAmount,
+            submittedAt,
+            mimeType: file.mimetype,
+          });
+          allOcrResults.push({
+            extractedAmount: v.ocrData?.amount || null,
+            transactionId: v.ocrData?.transactionId || null,
+            confidence: v.overallConfidence || 0,
+          });
+          totalExtractedAmount += parseFloat(v.ocrData?.amount || 0);
+
+          // Use first file's full verification as primary
+          if (!verification) {
+            verification = v;
+            ocrData = v.ocrData;
+            verificationChecks = v.checks;
+            const filePdf = file.mimetype === 'application/pdf';
+            autoAction = filePdf && v.autoAction === 'blocked' ? 'manual_review' : v.autoAction;
+          }
+        } catch (visionErr) {
+          console.warn('Vision API failed for a screenshot:', visionErr.message);
+          allOcrResults.push({ extractedAmount: null, transactionId: null, confidence: 0 });
+          if (!verification) {
+            verificationChecks = [{ step: 'ocr', result: 'warn', score: 0, detail: 'Vision API unavailable' }];
+          }
+        }
+      }
+
+      // For multiple screenshots, re-verify using TOTAL extracted amount
+      if (files.length > 1 && totalExtractedAmount > 0 && verification) {
+        const totalDiff = Math.abs(totalExtractedAmount - parsedAmount);
+        const tolerance = parseFloat(process.env.AMOUNT_TOLERANCE_INR || '10');
+        // Override the amount check with total from all screenshots
+        const amountIdx = verificationChecks.findIndex((c) => c.step === 'amount_check');
+        if (amountIdx >= 0) {
+          if (totalDiff <= tolerance) {
+            verificationChecks[amountIdx] = { step: 'amount_check', result: 'pass', score: 1, detail: `Match: Total OCR ₹${totalExtractedAmount} from ${files.length} screenshots vs submitted ₹${parsedAmount} (diff ₹${totalDiff.toFixed(2)})` };
+          } else if (totalDiff <= tolerance * 3) {
+            verificationChecks[amountIdx] = { step: 'amount_check', result: 'warn', score: 0.5, detail: `Close: Total OCR ₹${totalExtractedAmount} from ${files.length} screenshots vs submitted ₹${parsedAmount} (diff ₹${totalDiff.toFixed(2)})` };
+          } else {
+            verificationChecks[amountIdx] = { step: 'amount_check', result: 'fail', score: 0, detail: `Mismatch: Total OCR ₹${totalExtractedAmount} from ${files.length} screenshots vs submitted ₹${parsedAmount} (diff ₹${totalDiff.toFixed(2)})` };
+          }
+        }
+        // Recalculate confidence with updated amount check
+        const scores = { amount_check: 40, date_check: 20, status_check: 30, txn_id_check: 10 };
+        const weightedScore = verificationChecks.reduce((sum, c) => sum + (c.score || 0) * (scores[c.step] || 0), 0);
+        const ocrConf = verification.ocrData?.ocrConfidence || 50;
+        const newConfidence = Math.round(weightedScore * 0.7 + ocrConf * 0.3);
+        verification.overallConfidence = newConfidence;
+        const autoApprove = parseFloat(process.env.CONFIDENCE_AUTO_APPROVE || '94');
+        const manualReview = parseFloat(process.env.CONFIDENCE_MANUAL_REVIEW || '70');
+        if (newConfidence >= autoApprove) autoAction = 'auto_verified';
+        else if (newConfidence >= manualReview) autoAction = 'manual_review';
+        else autoAction = 'blocked';
       }
 
       // 4. Run duplicate detection
@@ -107,13 +159,18 @@ router.post(
       // 6. Build screenshot_metadata JSONB
       const screenshotMetadata = {
         attachmentType: isPdf ? 'pdf' : 'image',
+        screenshotCount: files.length,
+        screenshots: screenshotPaths,
+        allOcrResults,
+        totalExtractedAmount: totalExtractedAmount > 0 ? Math.round(totalExtractedAmount * 100) / 100 : null,
         transactionId: ocrData?.transactionId || null,
         extractedAmount: ocrData?.amount || null,
         date: ocrData?.date || null,
         paymentStatus: ocrData?.paymentStatus || null,
         confidence: verification?.overallConfidence || 0,
-        rawText: ocrData?.rawText ? ocrData.rawText.slice(0, 1000) : null, // cap size
+        rawText: ocrData?.rawText ? ocrData.rawText.slice(0, 1000) : null,
         duplicateWarnings: duplicateResult.warnings,
+        verificationChecks,
       };
 
       // 7. Insert expense
@@ -126,7 +183,7 @@ router.post(
           amount: parsedAmount,
           category,
           description: description || null,
-          screenshot_url: screenshotPath,
+          screenshot_url: screenshotPaths[0],
           screenshot_metadata: screenshotMetadata,
           status: finalStatus,
           duplicate_flag: duplicateResult.isDuplicate,
@@ -145,7 +202,6 @@ router.post(
           .from('expenses')
           .update({ imprest_id: imprestId })
           .eq('id', expense.id);
-        // ignore error — column may not exist yet until migration runs
       }
 
       // 8. Insert verification logs
@@ -303,10 +359,21 @@ router.get('/:expenseId/details', authMiddleware, async (req, res, next) => {
       return fail(res, 'Access denied', 403);
     }
 
-    // Generate signed URL for screenshot
+    // Generate signed URL for primary screenshot
     const screenshotSignedUrl = await getSignedUrl(expense.screenshot_url);
 
-    return ok(res, { ...expense, screenshotSignedUrl });
+    // Generate signed URLs for all screenshots if multiple were uploaded
+    let allScreenshotUrls = [];
+    const meta = expense.screenshot_metadata || {};
+    if (meta.screenshots?.length > 1) {
+      allScreenshotUrls = await Promise.all(
+        meta.screenshots.map((path) => getSignedUrl(path))
+      );
+    } else if (screenshotSignedUrl) {
+      allScreenshotUrls = [screenshotSignedUrl];
+    }
+
+    return ok(res, { ...expense, screenshotSignedUrl, allScreenshotUrls });
   } catch (err) {
     next(err);
   }
@@ -373,7 +440,7 @@ router.post(
 
       const { data: expense, error: fetchErr } = await supabaseAdmin
         .from('expenses')
-        .select('id, ref_id, status')
+        .select('id, ref_id, status, amount, imprest_id')
         .eq('id', req.params.expenseId)
         .single();
 
@@ -394,6 +461,31 @@ router.post(
         .eq('id', req.params.expenseId);
 
       if (updateErr) throw updateErr;
+
+      // If expense was linked to an imprest, reverse the fulfilled amount on the reminder
+      if (expense.imprest_id) {
+        try {
+          const { data: reminder } = await supabaseAdmin
+            .from('imprest_expense_reminders')
+            .select('id, fulfilled_amount')
+            .eq('imprest_id', expense.imprest_id)
+            .single();
+
+          if (reminder) {
+            const newFulfilled = Math.max(0, parseFloat(reminder.fulfilled_amount || 0) - parseFloat(expense.amount));
+            await supabaseAdmin
+              .from('imprest_expense_reminders')
+              .update({
+                fulfilled_amount: newFulfilled,
+                status: 'pending', // re-open the reminder since amount is no longer covered
+              })
+              .eq('id', reminder.id);
+            console.log(`Reversed ₹${expense.amount} on imprest reminder for ${expense.imprest_id}, new fulfilled: ₹${newFulfilled}`);
+          }
+        } catch (e) {
+          console.warn('Failed to reverse imprest fulfilled amount:', e.message);
+        }
+      }
 
       await logAudit({
         userId: req.user.id,
