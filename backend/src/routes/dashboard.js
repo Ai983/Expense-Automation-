@@ -3,15 +3,15 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { roleGuard } from '../middleware/roleGuard.js';
 import { ok } from '../utils/responseHelper.js';
-import { FINANCE_ROLES } from '../config/constants.js';
+import { FINANCE_ROLES, ALL_DASHBOARD_ROLES } from '../config/constants.js';
 
 const router = Router();
 
-// All dashboard routes require finance/manager/admin role
-router.use(authMiddleware, roleGuard(FINANCE_ROLES));
+// All dashboard routes require auth first
+router.use(authMiddleware);
 
-// GET /api/dashboard/metrics — key headline numbers
-router.get('/metrics', async (req, res, next) => {
+// GET /api/dashboard/metrics — key headline numbers (finance only)
+router.get('/metrics', roleGuard(FINANCE_ROLES), async (req, res, next) => {
   try {
     const [totalRes, pendingRes, autoVerifiedRes, totalAmountRes] = await Promise.all([
       supabaseAdmin.from('expenses').select('id', { count: 'exact', head: true }),
@@ -45,7 +45,7 @@ router.get('/metrics', async (req, res, next) => {
 });
 
 // GET /api/dashboard/by-site — expense counts and amounts grouped by site
-router.get('/by-site', async (req, res, next) => {
+router.get('/by-site', roleGuard(FINANCE_ROLES), async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('expenses')
@@ -72,7 +72,7 @@ router.get('/by-site', async (req, res, next) => {
 });
 
 // GET /api/dashboard/by-category
-router.get('/by-category', async (req, res, next) => {
+router.get('/by-category', roleGuard(FINANCE_ROLES), async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('expenses')
@@ -101,7 +101,7 @@ router.get('/by-category', async (req, res, next) => {
 });
 
 // GET /api/dashboard/by-status
-router.get('/by-status', async (req, res, next) => {
+router.get('/by-status', roleGuard(FINANCE_ROLES), async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('expenses')
@@ -123,7 +123,7 @@ router.get('/by-status', async (req, res, next) => {
 });
 
 // GET /api/dashboard/recent-activity — last 20 actions from audit trail
-router.get('/recent-activity', async (req, res, next) => {
+router.get('/recent-activity', roleGuard(FINANCE_ROLES), async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('audit_trail')
@@ -142,7 +142,7 @@ router.get('/recent-activity', async (req, res, next) => {
 });
 
 // GET /api/dashboard/by-employee — per-employee expense breakdown
-router.get('/by-employee', async (req, res, next) => {
+router.get('/by-employee', roleGuard(FINANCE_ROLES), async (req, res, next) => {
   try {
     const { site, from, to } = req.query;
 
@@ -207,7 +207,7 @@ router.get('/by-employee', async (req, res, next) => {
 // ════════════════════════════════════════════════════════════════════════════
 
 // GET /api/dashboard/imprest/metrics — headline numbers for imprest
-router.get('/imprest/metrics', async (req, res, next) => {
+router.get('/imprest/metrics', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
   try {
     const [totalRes, pendingRes, approvedRes, rejectedRes, partialRes, totalAmountRes] = await Promise.all([
       supabaseAdmin.from('imprest_requests').select('id', { count: 'exact', head: true }),
@@ -244,7 +244,7 @@ router.get('/imprest/metrics', async (req, res, next) => {
 });
 
 // GET /api/dashboard/imprest/by-site — imprest counts and amounts by site
-router.get('/imprest/by-site', async (req, res, next) => {
+router.get('/imprest/by-site', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('imprest_requests').select('site, amount_requested, approved_amount, status');
@@ -269,7 +269,7 @@ router.get('/imprest/by-site', async (req, res, next) => {
 });
 
 // GET /api/dashboard/imprest/by-category — imprest counts and amounts by category
-router.get('/imprest/by-category', async (req, res, next) => {
+router.get('/imprest/by-category', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('imprest_requests').select('category, amount_requested, status');
@@ -290,7 +290,7 @@ router.get('/imprest/by-category', async (req, res, next) => {
 });
 
 // GET /api/dashboard/imprest/by-status — imprest counts by status
-router.get('/imprest/by-status', async (req, res, next) => {
+router.get('/imprest/by-status', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('imprest_requests').select('status, amount_requested');
@@ -308,7 +308,7 @@ router.get('/imprest/by-status', async (req, res, next) => {
 });
 
 // GET /api/dashboard/imprest/balance — old balance for all approved imprests
-router.get('/imprest/balance', async (req, res, next) => {
+router.get('/imprest/balance', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
   try {
     // Get all approved/partially_approved imprests
     const { data: imprests, error: impErr } = await supabaseAdmin
@@ -351,7 +351,7 @@ router.get('/imprest/balance', async (req, res, next) => {
 });
 
 // GET /api/dashboard/imprest/employee-balance — per-employee total outstanding balance
-router.get('/imprest/employee-balance', async (req, res, next) => {
+router.get('/imprest/employee-balance', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
   try {
     // Get all approved imprests
     const { data: imprests, error: impErr } = await supabaseAdmin

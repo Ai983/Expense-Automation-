@@ -84,21 +84,39 @@ router.post('/incoming', async (req, res) => {
           ? msgText.trim().substring(msgText.trim().indexOf(' ') + 1)
           : '';
 
-        // Update founder review directly in the database
+        // Update founder review AND advance stage
+        const updateFields = {
+          founder_review_status: decision,
+          founder_review_comment: comment || null,
+          founder_review_at: new Date().toISOString(),
+          founder_review_phone: cleanPhone,
+        };
+
+        if (decision === 'approved') {
+          // Director approved — advance to S3 (finance)
+          updateFields.current_stage = 's3_pending';
+          updateFields.director_approved_amount = null; // will be set from amount_requested
+          // Fetch amount to set ceiling
+          const { data: impData } = await supabaseAdmin
+            .from('imprest_requests').select('amount_requested').eq('id', imprestId).single();
+          if (impData) updateFields.director_approved_amount = parseFloat(impData.amount_requested);
+          updateFields.s2_approved_at = new Date().toISOString();
+        } else {
+          // Director rejected — permanent death
+          updateFields.current_stage = 'director_rejected';
+          updateFields.status = 'rejected';
+          updateFields.rejection_reason = 'Rejected by Director via WhatsApp' + (comment ? ': ' + comment : '');
+        }
+
         const { error: updateErr } = await supabaseAdmin
           .from('imprest_requests')
-          .update({
-            founder_review_status: decision,
-            founder_review_comment: comment || null,
-            founder_review_at: new Date().toISOString(),
-            founder_review_phone: cleanPhone,
-          })
+          .update(updateFields)
           .eq('id', imprestId);
 
         if (updateErr) {
           console.error('[WhatsApp] Failed to update imprest:', updateErr.message);
         } else {
-          console.log(`[WhatsApp] Founder review saved: ${decision} for imprest ${imprestId}`);
+          console.log(`[WhatsApp] Director ${decision} — stage: ${updateFields.current_stage} for imprest ${imprestId}`);
         }
       } else {
         console.log('[WhatsApp] No pending imprest found to process');

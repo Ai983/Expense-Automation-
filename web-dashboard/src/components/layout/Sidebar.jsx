@@ -1,28 +1,42 @@
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
-const NAV_ITEMS = [
-  { to: '/queue', label: 'Expense Queue', icon: '📋' },
-  { to: '/imprest-queue', label: 'Imprest Queue', icon: '💰' },
-  { to: '/dashboard', label: 'Expense Analytics', icon: '📊' },
-  { to: '/imprest-analytics', label: 'Imprest Analytics', icon: '📈' },
-  { to: '/reports', label: 'Employee Report', icon: '👥' },
-];
+function getNavItems(role) {
+  switch (role) {
+    case 'approver_s1':
+      return [
+        { to: '/s1-queue', label: 'Imprest Review', icon: '📋' },
+        { to: '/imprest-analytics', label: 'Imprest Analytics', icon: '📈' },
+      ];
+    case 'approver_s2':
+      return [
+        { to: '/s2-queue', label: 'Imprest Review', icon: '📋' },
+        { to: '/imprest-analytics', label: 'Imprest Analytics', icon: '📈' },
+      ];
+    default: // finance, manager, admin
+      return [
+        { to: '/queue', label: 'Expense Queue', icon: '📋' },
+        { to: '/imprest-queue', label: 'Imprest Queue', icon: '💰' },
+        { to: '/dashboard', label: 'Expense Analytics', icon: '📊' },
+        { to: '/imprest-analytics', label: 'Imprest Analytics', icon: '📈' },
+        { to: '/reports', label: 'Employee Report', icon: '👥' },
+      ];
+  }
+}
 
 export default function Sidebar() {
   const { user, logout } = useAuth();
+  const navItems = getNavItems(user?.role);
 
   return (
     <aside className="w-64 bg-gray-900 text-white flex flex-col h-screen fixed left-0 top-0">
-      {/* Logo */}
       <div className="px-6 py-5 border-b border-gray-700">
         <h1 className="text-lg font-bold text-brand-500">HagerStone</h1>
         <p className="text-xs text-gray-400 mt-0.5">Expense Management</p>
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
@@ -40,7 +54,6 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* User info */}
       <div className="px-4 py-4 border-t border-gray-700">
         <div className="mb-3">
           <p className="text-sm font-medium text-white truncate">{user?.name}</p>

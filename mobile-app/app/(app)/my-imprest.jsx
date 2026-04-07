@@ -68,9 +68,33 @@ export default function MyImprestScreen() {
   );
 }
 
+const STAGE_LABELS = {
+  's1_pending': 'Under Review',
+  's1_approved': 'Forwarded',
+  's2_pending': 'Awaiting Approval',
+  's2_approved': 'Approved',
+  's2_rejected': 'Rejected',
+  's3_pending': 'With Finance',
+  's3_approved': 'Approved - Payment Pending',
+  's3_rejected': 'Rejected by Finance',
+  'director_rejected': 'Rejected by Director',
+  'paid': 'Paid',
+};
+const STAGE_COLOURS = {
+  's1_pending': '#f59e0b',
+  's2_pending': '#f97316',
+  's3_pending': '#3b82f6',
+  's3_approved': '#10b981',
+  'paid': '#16a34a',
+  'director_rejected': '#ef4444',
+  's3_rejected': '#ef4444',
+  's2_rejected': '#ef4444',
+};
+
 function ImprestCard({ request }) {
-  const statusLabel = IMPREST_STATUS_LABELS[request.status] || request.status;
-  const statusColor = IMPREST_STATUS_COLOURS[request.status] || '#9ca3af';
+  const stage = request.current_stage;
+  const statusLabel = stage ? (STAGE_LABELS[stage] || stage) : (IMPREST_STATUS_LABELS[request.status] || request.status);
+  const statusColor = stage ? (STAGE_COLOURS[stage] || '#9ca3af') : (IMPREST_STATUS_COLOURS[request.status] || '#9ca3af');
   const submittedDate = new Date(request.submitted_at).toLocaleDateString('en-IN', {
     day: '2-digit', month: 'short', year: 'numeric',
   });
@@ -97,6 +121,11 @@ function ImprestCard({ request }) {
         <Text style={styles.date}>{submittedDate}</Text>
       </View>
 
+      {request.paid && request.paid_amount && (
+        <Text style={[styles.approvedAmount, { color: '#16a34a', marginTop: 4 }]}>
+          Paid: ₹{Number(request.paid_amount).toLocaleString('en-IN')}
+        </Text>
+      )}
       {request.status === 'rejected' && request.rejection_reason && (
         <Text style={styles.rejectionReason}>Reason: {request.rejection_reason}</Text>
       )}

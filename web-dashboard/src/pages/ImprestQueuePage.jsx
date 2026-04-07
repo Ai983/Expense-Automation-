@@ -146,6 +146,16 @@ export default function ImprestQueuePage() {
     finally { setActionLoading(false); }
   };
 
+  const handlePay = async (req) => {
+    if (!confirm(`Mark ${req.ref_id} as Paid? This will start the 3-day expense reminder.`)) return;
+    try {
+      await api.post(`/api/imprest/${req.id}/pay`);
+      fetchQueue();
+    } catch (e) {
+      alert(e.response?.data?.error || 'Pay failed');
+    }
+  };
+
   const totalPages = Math.ceil(total / limit);
 
   return (
@@ -331,7 +341,12 @@ export default function ImprestQueuePage() {
                           >
                             Details
                           </button>
-                          {req.status === 'pending' && (
+                          {req.current_stage === 'director_rejected' && (
+                            <div className="text-xs bg-red-50 text-red-700 px-2 py-1 rounded">
+                              Rejected by Director
+                            </div>
+                          )}
+                          {req.current_stage === 's3_pending' && (
                             <>
                               <button onClick={() => openApprove(req)}
                                 className="text-xs bg-green-600 text-white px-3 py-1 rounded-lg hover:bg-green-700 transition-colors">
@@ -342,6 +357,17 @@ export default function ImprestQueuePage() {
                                 Reject
                               </button>
                             </>
+                          )}
+                          {req.current_stage === 's3_approved' && !req.paid && (
+                            <button onClick={() => handlePay(req)}
+                              className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 transition-colors">
+                              Pay
+                            </button>
+                          )}
+                          {req.paid && (
+                            <span className="text-xs text-green-600 font-semibold">
+                              Paid {fmtDate(req.paid_at)}
+                            </span>
                           )}
                         </div>
                       </td>
@@ -462,30 +488,44 @@ export default function ImprestQueuePage() {
                 </Section>
               )}
 
-              {/* Founder / Director Review */}
-              {detailReq.requires_founder_approval && (
-                <Section title="Founder / Director Review">
-                  <Row label="Requested To" value={detailReq.requested_to_name || '—'} />
-                  <Row
-                    label="Review Status"
-                    value={
-                      detailReq.founder_review_status === 'approved' ? 'Approved'
-                      : detailReq.founder_review_status === 'rejected' ? 'Rejected'
-                      : 'Awaiting Review'
-                    }
-                    className={
-                      detailReq.founder_review_status === 'approved' ? 'text-green-600'
-                      : detailReq.founder_review_status === 'rejected' ? 'text-red-600'
-                      : 'text-yellow-600'
-                    }
-                    bold
-                  />
-                  {detailReq.founder_review_comment && (
-                    <Row label="Comment" value={detailReq.founder_review_comment} />
-                  )}
-                  {detailReq.founder_review_at && (
-                    <Row label="Reviewed On" value={fmtDate(detailReq.founder_review_at)} />
-                  )}
+              {/* Approval Journey */}
+              <Section title="Approval Journey">
+                <Row label="Stage 1 (Review)" value={
+                  detailReq.s1_approved_at ? `Approved on ${fmtDate(detailReq.s1_approved_at)}` : 'Pending'
+                } className={detailReq.s1_approved_at ? 'text-green-600' : 'text-yellow-600'} />
+                {detailReq.s1_notes && <Row label="S1 Notes" value={detailReq.s1_notes} />}
+
+                <Row label="Stage 2 (Approval)" value={
+                  detailReq.approval_route === 'avisha_director_finance'
+                    ? (detailReq.founder_review_status === 'approved' ? `Director Approved ${fmtDate(detailReq.founder_review_at) || ''}`
+                      : detailReq.founder_review_status === 'rejected' ? 'Director Rejected'
+                      : detailReq.current_stage === 's2_pending' ? 'Awaiting Director (WhatsApp)' : 'Pending')
+                    : (detailReq.s2_approved_at ? `Approved on ${fmtDate(detailReq.s2_approved_at)}` : 'Pending')
+                } className={
+                  (detailReq.founder_review_status === 'rejected' || detailReq.current_stage === 'director_rejected') ? 'text-red-600'
+                  : (detailReq.s2_approved_at || detailReq.founder_review_status === 'approved') ? 'text-green-600' : 'text-yellow-600'
+                } />
+                {detailReq.founder_review_comment && <Row label="Director Comment" value={detailReq.founder_review_comment} />}
+                {detailReq.s2_notes && <Row label="S2 Notes" value={detailReq.s2_notes} />}
+                {detailReq.director_approved_amount && (
+                  <Row label="Director Ceiling" value={fmt(detailReq.director_approved_amount)} className="text-purple-600" bold />
+                )}
+
+                <Row label="Stage 3 (Finance)" value={
+                  detailReq.current_stage === 's3_approved' || detailReq.paid ? `Approved ${fmtDate(detailReq.approved_at) || ''}` : 'Pending'
+                } className={(detailReq.current_stage === 's3_approved' || detailReq.paid) ? 'text-green-600' : 'text-yellow-600'} />
+
+                <Row label="Payment" value={
+                  detailReq.paid ? `Paid ${fmt(detailReq.paid_amount)} on ${fmtDate(detailReq.paid_at)}` : 'Not yet paid'
+                } className={detailReq.paid ? 'text-green-600' : 'text-gray-400'} bold />
+              </Section>
+
+              {/* Balance Deduction */}
+              {detailReq.old_balance_deducted > 0 && (
+                <Section title="Balance Adjustment">
+                  <Row label="Approved Amount" value={fmt(detailReq.approved_amount || detailReq.amount_requested)} />
+                  <Row label="Old Balance Deducted" value={`-${fmt(detailReq.old_balance_deducted)}`} className="text-orange-600" />
+                  <Row label="Net Amount to Pay" value={fmt(detailReq.net_approved_amount || 0)} bold className="text-green-700" />
                 </Section>
               )}
 
@@ -585,6 +625,16 @@ export default function ImprestQueuePage() {
                   />
                   {parseFloat(approveAmount) < parseFloat(selected.amount_requested) && approveAmount && (
                     <p className="text-xs text-blue-600 mt-1">This will be recorded as a partial approval.</p>
+                  )}
+                  {selected?.director_approved_amount && (
+                    <p className="text-xs text-orange-600 mt-1">
+                      Director approved {fmt(selected.director_approved_amount)} — you cannot exceed this amount.
+                    </p>
+                  )}
+                  {selected?.old_balance_deducted > 0 && (
+                    <p className="text-xs text-amber-600 mt-1">
+                      Old balance deduction: {fmt(selected.old_balance_deducted)} will be subtracted from the approved amount.
+                    </p>
                   )}
                 </div>
               )}
