@@ -42,6 +42,27 @@ export async function getSignedUrl(storagePath) {
 }
 
 /**
+ * Uploads a payment receipt to Supabase Storage.
+ */
+export async function uploadPaymentReceipt(buffer, mimeType, refId) {
+  const ext = mimeType.split('/')[1].replace('jpeg', 'jpg');
+  const storagePath = `payment-receipts/${refId}.${ext}`;
+
+  const { error } = await supabaseAdmin.storage
+    .from(STORAGE_BUCKET)
+    .upload(storagePath, buffer, {
+      contentType: mimeType,
+      upsert: true,
+    });
+
+  if (error) {
+    throw new Error(`Payment receipt upload failed: ${error.message}`);
+  }
+
+  return storagePath;
+}
+
+/**
  * Deletes a screenshot from storage (used if expense is hard-deleted).
  */
 export async function deleteScreenshot(storagePath) {

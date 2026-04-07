@@ -52,6 +52,28 @@ export async function getEmployeeImprestBalance() {
   return data.data;
 }
 
+// ── Drill-down details ──────────────────────────────────────────────────────
+
+export async function getSiteDetails(site) {
+  const { data } = await api.get(`/api/dashboard/by-site/${encodeURIComponent(site)}/details`);
+  return data.data;
+}
+
+export async function getCategoryDetails(category) {
+  const { data } = await api.get(`/api/dashboard/by-category/${encodeURIComponent(category)}/details`);
+  return data.data;
+}
+
+export async function getImprestSiteDetails(site) {
+  const { data } = await api.get(`/api/dashboard/imprest/by-site/${encodeURIComponent(site)}/details`);
+  return data.data;
+}
+
+export async function getImprestCategoryDetails(category) {
+  const { data } = await api.get(`/api/dashboard/imprest/by-category/${encodeURIComponent(category)}/details`);
+  return data.data;
+}
+
 export async function getByEmployee({ site, from, to } = {}) {
   const params = new URLSearchParams();
   if (site) params.append('site', site);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { getMetrics, getBySite, getByCategory, getByStatus } from '../services/dashboardService';
-import { SiteChart, CategoryChart, StatusChart } from '../components/dashboard/Charts';
+import { getMetrics, getBySite, getByCategory, getByStatus, getSiteDetails, getCategoryDetails } from '../services/dashboardService';
+import { SiteChart, CategoryChart, StatusChart, DrillDownTable } from '../components/dashboard/Charts';
 import { showToast } from '../components/layout/Toast';
 
 export default function DashboardPage() {
@@ -9,6 +9,8 @@ export default function DashboardPage() {
   const [catData, setCatData] = useState([]);
   const [statusData, setStatusData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [drillDown, setDrillDown] = useState(null);
+  const [drillLoading, setDrillLoading] = useState(false);
 
   useEffect(() => {
     Promise.all([getMetrics(), getBySite(), getByCategory(), getByStatus()])
@@ -21,6 +23,24 @@ export default function DashboardPage() {
       .catch(() => showToast('Failed to load dashboard data', 'error'))
       .finally(() => setLoading(false));
   }, []);
+
+  const handleSiteClick = async (site) => {
+    setDrillLoading(true);
+    try {
+      const data = await getSiteDetails(site);
+      setDrillDown({ title: `Expense Breakdown — ${site}`, data });
+    } catch { showToast('Failed to load details', 'error'); }
+    finally { setDrillLoading(false); }
+  };
+
+  const handleCategoryClick = async (category) => {
+    setDrillLoading(true);
+    try {
+      const data = await getCategoryDetails(category);
+      setDrillDown({ title: `Expense Breakdown — ${category}`, data });
+    } catch { showToast('Failed to load details', 'error'); }
+    finally { setDrillLoading(false); }
+  };
 
   if (loading) {
     return <div className="text-center py-20 text-gray-400">Loading dashboard...</div>;
@@ -37,34 +57,26 @@ export default function DashboardPage() {
 
       {/* Metric cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <MetricCard
-          label="Total Expenses"
-          value={metrics?.totalExpenses?.toLocaleString() || '0'}
-          colour="blue"
-        />
-        <MetricCard
-          label="Auto-Verify Rate"
-          value={`${metrics?.autoVerifyRate || 0}%`}
-          sub={`${metrics?.autoVerified || 0} auto-verified`}
-          colour="green"
-        />
-        <MetricCard
-          label="Pending Approval"
-          value={metrics?.pendingApproval?.toLocaleString() || '0'}
-          colour="orange"
-        />
-        <MetricCard
-          label="Total Processed"
-          value={formatINR(metrics?.totalAmountProcessed)}
-          colour="purple"
-        />
+        <MetricCard label="Total Expenses" value={metrics?.totalExpenses?.toLocaleString() || '0'} colour="blue" />
+        <MetricCard label="Auto-Verify Rate" value={`${metrics?.autoVerifyRate || 0}%`}
+          sub={`${metrics?.autoVerified || 0} auto-verified`} colour="green" />
+        <MetricCard label="Pending Approval" value={metrics?.pendingApproval?.toLocaleString() || '0'} colour="orange" />
+        <MetricCard label="Total Processed" value={formatINR(metrics?.totalAmountProcessed)} colour="purple" />
       </div>
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <SiteChart data={siteData} />
-        <CategoryChart data={catData} />
+        <SiteChart data={siteData} onBarClick={handleSiteClick} />
+        <CategoryChart data={catData} onSliceClick={handleCategoryClick} />
       </div>
+
+      {/* Drill-down */}
+      {drillLoading && <div className="card mb-6 text-center py-8 text-gray-400">Loading employee breakdown...</div>}
+      {drillDown && !drillLoading && (
+        <DrillDownTable title={drillDown.title} data={drillDown.data}
+          onClose={() => setDrillDown(null)} />
+      )}
+
       <StatusChart data={statusData} />
     </div>
   );

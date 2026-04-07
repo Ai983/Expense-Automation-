@@ -90,6 +90,8 @@ export default function ImprestQueuePage() {
   const [rejectReason, setRejectReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [payReq, setPayReq] = useState(null);                 // pay modal
+  const [payReceipt, setPayReceipt] = useState(null);
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
@@ -146,14 +148,18 @@ export default function ImprestQueuePage() {
     finally { setActionLoading(false); }
   };
 
-  const handlePay = async (req) => {
-    if (!confirm(`Mark ${req.ref_id} as Paid? This will start the 3-day expense reminder.`)) return;
+  const handlePay = async () => {
+    if (!payReq) return;
+    setActionLoading(true); setActionError('');
     try {
-      await api.post(`/api/imprest/${req.id}/pay`);
-      fetchQueue();
-    } catch (e) {
-      alert(e.response?.data?.error || 'Pay failed');
-    }
+      const formData = new FormData();
+      if (payReceipt) formData.append('receipt', payReceipt);
+      await api.post(`/api/imprest/${payReq.id}/pay`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setPayReq(null); setPayReceipt(null); fetchQueue();
+    } catch (e) { setActionError(e.response?.data?.error || 'Pay failed'); }
+    finally { setActionLoading(false); }
   };
 
   const totalPages = Math.ceil(total / limit);
@@ -303,7 +309,7 @@ export default function ImprestQueuePage() {
                         {req.requires_founder_approval ? (
                           <div>
                             <div className="flex items-center gap-1">
-                              <span className="text-xs text-gray-500">{req.requested_to_name || '—'}</span>
+                              <span className="text-xs text-gray-500">{req.requested_to_user?.name || (req.approval_route === 'avisha_director_finance' ? 'Bhaskar Sir' : 'Ritu Ma\'am')}</span>
                             </div>
                             {req.founder_review_status === 'approved' && (
                               <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-700 mt-1">
@@ -359,7 +365,7 @@ export default function ImprestQueuePage() {
                             </>
                           )}
                           {req.current_stage === 's3_approved' && !req.paid && (
-                            <button onClick={() => handlePay(req)}
+                            <button onClick={() => { setPayReq(req); setPayReceipt(null); setActionError(''); }}
                               className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 transition-colors">
                               Pay
                             </button>
@@ -518,6 +524,14 @@ export default function ImprestQueuePage() {
                 <Row label="Payment" value={
                   detailReq.paid ? `Paid ${fmt(detailReq.paid_amount)} on ${fmtDate(detailReq.paid_at)}` : 'Not yet paid'
                 } className={detailReq.paid ? 'text-green-600' : 'text-gray-400'} bold />
+
+                {detailReq.payment_receipt_url && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-500 shrink-0">Payment Receipt</span>
+                    <a href={detailReq.payment_receipt_url} target="_blank" rel="noopener noreferrer"
+                      className="text-sm font-medium text-blue-600 hover:underline">View Receipt</a>
+                  </div>
+                )}
               </Section>
 
               {/* Balance Deduction */}
@@ -673,6 +687,41 @@ export default function ImprestQueuePage() {
                   {actionLoading ? 'Rejecting…' : 'Reject'}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pay Modal */}
+      {payReq && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="p-6 border-b">
+              <h2 className="text-lg font-bold text-gray-900">Mark as Paid</h2>
+              <p className="text-sm text-gray-500 mt-1">{payReq.ref_id} — {payReq.employee?.name}</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-gray-500">Amount</span><span className="font-bold">{fmt(payReq.net_approved_amount || payReq.approved_amount)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Category</span><span>{payReq.category}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Site</span><span>{payReq.site}</span></div>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Payment Receipt (optional)</label>
+                <input type="file" accept="image/*,application/pdf"
+                  onChange={(e) => setPayReceipt(e.target.files[0] || null)}
+                  className="w-full text-sm text-gray-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+                <p className="text-xs text-gray-400 mt-1">Upload a payment slip or receipt as proof. This will only be visible to finance team.</p>
+              </div>
+              {actionError && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{actionError}</p>}
+            </div>
+            <div className="p-6 border-t flex justify-end gap-3">
+              <button onClick={() => { setPayReq(null); setPayReceipt(null); setActionError(''); }}
+                className="px-4 py-2 text-sm text-gray-600 border rounded-lg">Cancel</button>
+              <button onClick={handlePay} disabled={actionLoading}
+                className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60">
+                {actionLoading ? 'Processing…' : 'Confirm Payment'}
+              </button>
             </div>
           </div>
         </div>

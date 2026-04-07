@@ -180,7 +180,8 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       if (category === 'Conveyance' && vehicleType) extraFields.vehicle_type = vehicleType;
       if (category === 'Labour Expense' && labourSubcategory) extraFields.labour_subcategory = labourSubcategory;
       // Multi-stage approval fields (migration 015)
-      extraFields.current_stage = 's1_pending';
+      // HO/Bangalore skip S1, go directly to S2 (Ritu)
+      extraFields.current_stage = isHOorBangalore ? 's2_pending' : 's1_pending';
       extraFields.approval_route = approvalRoute;
       extraFields.old_balance_deducted = Math.round(oldBalanceDeduction * 100) / 100;
       if (approvalRoute === 'avisha_director_finance') {
@@ -231,11 +232,14 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       }
     } catch (e) { console.warn('WF1 employee lookup failed:', e.message); }
 
+    const startStage = isHOorBangalore ? 's2_pending' : 's1_pending';
     return ok(res, {
       refId, status: 'pending',
-      currentStage: 's1_pending',
+      currentStage: startStage,
       approvalRoute,
-      message: 'Imprest request submitted. Under review.',
+      message: isHOorBangalore
+        ? 'Imprest request submitted. Sent to Ritu Ma\'am for review.'
+        : 'Imprest request submitted. Under review.',
     }, 201);
   } catch (err) { next(err); }
 });
@@ -433,6 +437,14 @@ router.get('/finance/queue', authMiddleware, roleGuard(FINANCE_ROLES), async (re
       }
       return { ...r, employee_total_balance: empBalance };
     });
+
+    // Generate signed URLs for payment receipts
+    const { getSignedUrl } = await import('../services/storageService.js');
+    for (const r of enriched) {
+      if (r.payment_receipt_path) {
+        r.payment_receipt_url = await getSignedUrl(r.payment_receipt_path);
+      }
+    }
 
     return ok(res, { requests: enriched, total: count, page: parseInt(page), limit: parseInt(limit) });
   } catch (err) { next(err); }
@@ -822,7 +834,7 @@ router.post('/:id/s2-reject', authMiddleware, roleGuard(S2_ROLES), async (req, r
 // PAY: Finance marks imprest as paid — starts 3-day reminder
 // ════════════════════════════════════════════════════════════════════════════
 
-router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), async (req, res, next) => {
+router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single('receipt'), async (req, res, next) => {
   try {
     const { data: imp, error: fetchErr } = await supabaseAdmin
       .from('imprest_requests')
@@ -833,13 +845,22 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), async (req, re
 
     const paidAmount = parseFloat(imp.net_approved_amount || imp.approved_amount);
 
-    await supabaseAdmin.from('imprest_requests').update({
+    const updateFields = {
       paid: true,
       paid_at: new Date().toISOString(),
       paid_by: req.user.id,
       paid_amount: Math.round(paidAmount * 100) / 100,
       current_stage: 'paid',
-    }).eq('id', req.params.id);
+    };
+
+    // Upload payment receipt if provided
+    if (req.file) {
+      const { uploadPaymentReceipt } = await import('../services/storageService.js');
+      const receiptPath = await uploadPaymentReceipt(req.file.buffer, req.file.mimetype, imp.ref_id);
+      updateFields.payment_receipt_path = receiptPath;
+    }
+
+    await supabaseAdmin.from('imprest_requests').update(updateFields).eq('id', req.params.id);
 
     // NOW start the 3-day expense reminder
     const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();

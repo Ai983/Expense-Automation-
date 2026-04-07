@@ -404,4 +404,97 @@ router.get('/imprest/employee-balance', roleGuard(ALL_DASHBOARD_ROLES), async (r
   } catch (err) { next(err); }
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+// DRILL-DOWN ENDPOINTS — clickable chart details
+// ════════════════════════════════════════════════════════════════════════════
+
+// GET /api/dashboard/by-site/:site/details — employee breakdown for expense site
+router.get('/by-site/:site/details', roleGuard(FINANCE_ROLES), async (req, res, next) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('expenses')
+      .select('amount, status, employee:employee_id (name, email, site)')
+      .eq('site', req.params.site);
+    if (error) throw error;
+
+    const empMap = {};
+    for (const e of (data || [])) {
+      const name = e.employee?.name || 'Unknown';
+      if (!empMap[name]) empMap[name] = { name, email: e.employee?.email, site: e.employee?.site, total: 0, count: 0, approved: 0 };
+      empMap[name].total += parseFloat(e.amount);
+      empMap[name].count++;
+      if (e.status === 'approved') empMap[name].approved += parseFloat(e.amount);
+    }
+    return ok(res, Object.values(empMap).sort((a, b) => b.total - a.total));
+  } catch (err) { next(err); }
+});
+
+// GET /api/dashboard/by-category/:category/details
+router.get('/by-category/:category/details', roleGuard(FINANCE_ROLES), async (req, res, next) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('expenses')
+      .select('amount, status, employee:employee_id (name, email, site)')
+      .eq('category', req.params.category);
+    if (error) throw error;
+
+    const empMap = {};
+    for (const e of (data || [])) {
+      const name = e.employee?.name || 'Unknown';
+      if (!empMap[name]) empMap[name] = { name, email: e.employee?.email, site: e.employee?.site, total: 0, count: 0 };
+      empMap[name].total += parseFloat(e.amount);
+      empMap[name].count++;
+    }
+    return ok(res, Object.values(empMap).sort((a, b) => b.total - a.total));
+  } catch (err) { next(err); }
+});
+
+// GET /api/dashboard/imprest/by-site/:site/details
+router.get('/imprest/by-site/:site/details', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('imprest_requests')
+      .select('amount_requested, approved_amount, status, category, employee:employee_id (name, email)')
+      .eq('site', req.params.site);
+    if (error) throw error;
+
+    const empMap = {};
+    for (const r of (data || [])) {
+      const name = r.employee?.name || 'Unknown';
+      if (!empMap[name]) empMap[name] = { name, email: r.employee?.email, totalRequested: 0, totalApproved: 0, count: 0, categories: {} };
+      empMap[name].totalRequested += parseFloat(r.amount_requested);
+      empMap[name].totalApproved += parseFloat(r.approved_amount || 0);
+      empMap[name].count++;
+      empMap[name].categories[r.category] = (empMap[name].categories[r.category] || 0) + 1;
+    }
+    const result = Object.values(empMap).map((e) => ({
+      ...e,
+      totalRequested: Math.round(e.totalRequested),
+      totalApproved: Math.round(e.totalApproved),
+      topCategory: Object.entries(e.categories).sort((a, b) => b[1] - a[1])[0]?.[0] || '',
+    }));
+    return ok(res, result.sort((a, b) => b.totalRequested - a.totalRequested));
+  } catch (err) { next(err); }
+});
+
+// GET /api/dashboard/imprest/by-category/:category/details
+router.get('/imprest/by-category/:category/details', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('imprest_requests')
+      .select('amount_requested, approved_amount, status, site, employee:employee_id (name, email)')
+      .eq('category', req.params.category);
+    if (error) throw error;
+
+    const empMap = {};
+    for (const r of (data || [])) {
+      const name = r.employee?.name || 'Unknown';
+      if (!empMap[name]) empMap[name] = { name, email: r.employee?.email, site: r.site, totalRequested: 0, count: 0 };
+      empMap[name].totalRequested += parseFloat(r.amount_requested);
+      empMap[name].count++;
+    }
+    return ok(res, Object.values(empMap).sort((a, b) => b.totalRequested - a.totalRequested));
+  } catch (err) { next(err); }
+});
+
 export default router;
