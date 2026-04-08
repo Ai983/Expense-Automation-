@@ -35,10 +35,27 @@ router.get('/places-autocomplete', authMiddleware, async (req, res, next) => {
   try {
     const { input } = req.query;
     if (!input || input.length < 2) return ok(res, []);
-    const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(input)}&components=country:in&key=${GOOGLE_MAPS_KEY}`;
-    const resp = await fetch(url);
-    const data = await resp.json();
-    const suggestions = (data.predictions || []).map((p) => ({
+    // Try new Places API first, fall back to legacy
+    const newResp = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_MAPS_KEY },
+      body: JSON.stringify({ input, includedRegionCodes: ['in'] }),
+    });
+    const newData = await newResp.json();
+
+    if (newData.suggestions) {
+      const suggestions = newData.suggestions.map((s) => ({
+        description: s.placePrediction?.text?.text || s.placePrediction?.structuredFormat?.mainText?.text || '',
+        place_id: s.placePrediction?.placeId || '',
+      })).filter((s) => s.description);
+      return ok(res, suggestions);
+    }
+
+    // Fallback to legacy API
+    const legacyUrl = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(input)}&components=country:in&key=${GOOGLE_MAPS_KEY}`;
+    const legacyResp = await fetch(legacyUrl);
+    const legacyData = await legacyResp.json();
+    const suggestions = (legacyData.predictions || []).map((p) => ({
       description: p.description,
       place_id: p.place_id,
     }));
