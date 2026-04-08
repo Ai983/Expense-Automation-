@@ -1036,38 +1036,38 @@ export default function ImprestScreen() {
           <View style={styles.stepContent}>
             <Text style={styles.stepTitle}>Review / {'\u0938\u092E\u0940\u0915\u094D\u0937\u093E'}</Text>
             <View style={styles.summaryCard}>
-              <SummaryRow label="Site / \u0938\u093E\u0907\u091F" value={site === 'Others' ? customSite.trim() : site} />
-              <SummaryRow label="Category / \u0936\u094D\u0930\u0947\u0923\u0940" value={category} />
-              {category !== 'Conveyance' && <SummaryRow label="People / \u0932\u094B\u0917" value={peopleCount} />}
+              <SummaryRow label={'Site / साइट'} value={site === 'Others' ? customSite.trim() : site} />
+              <SummaryRow label={'Category / श्रेणी'} value={category} />
+              {category !== 'Conveyance' && <SummaryRow label={'People / लोग'} value={peopleCount} />}
               {['Food Expense', 'Site Room Rent', 'Hotel Expense'].includes(category) && (dateFrom || dateTo) && (
-                <SummaryRow label="Duration / \u0905\u0935\u0927\u093F" value={`${dateFrom} \u2192 ${dateTo} (${daysBetween(dateFrom, dateTo)} days)`} />
+                <SummaryRow label={'Duration / अवधि'} value={`${dateFrom} → ${dateTo} (${daysBetween(dateFrom, dateTo)} days)`} />
               )}
               {category === 'Travelling' && travelFrom && (
-                <SummaryRow label="Route / \u092E\u093E\u0930\u094D\u0917" value={`${travelFrom} \u2192 ${travelTo}`} />
+                <SummaryRow label={'Route / मार्ग'} value={`${travelFrom} → ${travelTo}`} />
               )}
               {category === 'Travelling' && travelDate && (
-                <SummaryRow label="Travel Date / \u092F\u093E\u0924\u094D\u0930\u093E \u0924\u093F\u0925\u093F" value={travelDate} />
+                <SummaryRow label={'Travel Date / यात्रा तिथि'} value={travelDate} />
               )}
               {category === 'Travelling' && (
-                <SummaryRow label="Mode / \u092A\u094D\u0930\u0915\u093E\u0930" value={travelSubtype} />
+                <SummaryRow label={'Mode / प्रकार'} value={travelSubtype} />
               )}
               {category === 'Conveyance' && (
-                <SummaryRow label="Mode / \u092A\u094D\u0930\u0915\u093E\u0930" value={conveyanceMode} />
+                <SummaryRow label={'Mode / प्रकार'} value={conveyanceMode} />
               )}
               {conveyanceMode === 'Own Vehicle' && vehicleType && (
-                <SummaryRow label="Vehicle / \u0935\u093E\u0939\u0928" value={vehicleType} />
+                <SummaryRow label={'Vehicle / वाहन'} value={vehicleType} />
               )}
               {category === 'Labour Expense' && (
-                <SummaryRow label="Sub-type / \u0909\u092A-\u092A\u094D\u0930\u0915\u093E\u0930" value={labourSub} />
+                <SummaryRow label={'Sub-type / उप-प्रकार'} value={labourSub} />
               )}
               {['Site Expense', 'Material Expense'].includes(category) && requirement && (
-                <SummaryRow label="Requirement / \u0906\u0935\u0936\u094D\u092F\u0915\u0924\u093E" value={requirement} />
+                <SummaryRow label={'Requirement / आवश्यकता'} value={requirement} />
               )}
               {category === 'Food Expense' && effectiveRate > 0 && (
-                <SummaryRow label="Rate/person/day" value={`\u20B9${effectiveRate}`} />
+                <SummaryRow label="Rate/person/day" value={`₹${effectiveRate}`} />
               )}
-              <SummaryRow label="Amount / \u0930\u093E\u0936\u093F" value={`\u20B9${amountRequested}`} highlight />
-              {purpose ? <SummaryRow label="Purpose / \u0909\u0926\u094D\u0926\u0947\u0936\u094D\u092F" value={purpose} /> : null}
+              <SummaryRow label={'Amount / राशि'} value={`₹${amountRequested}`} highlight />
+              {purpose ? <SummaryRow label={'Purpose / उद्देश्य'} value={purpose} /> : null}
             </View>
             <TouchableOpacity
               style={[styles.primaryBtn, submitting && styles.btnDisabled]}
