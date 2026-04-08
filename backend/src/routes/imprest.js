@@ -29,6 +29,23 @@ router.get('/food-rates', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── GET /api/imprest/places-autocomplete ─────────────────────────────────────
+const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
+router.get('/places-autocomplete', authMiddleware, async (req, res, next) => {
+  try {
+    const { input } = req.query;
+    if (!input || input.length < 2) return ok(res, []);
+    const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(input)}&components=country:in&key=${GOOGLE_MAPS_KEY}`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    const suggestions = (data.predictions || []).map((p) => ({
+      description: p.description,
+      place_id: p.place_id,
+    }));
+    return ok(res, suggestions);
+  } catch (err) { next(err); }
+});
+
 // ── POST /api/imprest/estimate-travel ─────────────────────────────────────────
 router.post('/estimate-travel', authMiddleware, roleGuard(['employee']), async (req, res, next) => {
   try {
@@ -58,7 +75,12 @@ router.post('/estimate-travel', authMiddleware, roleGuard(['employee']), async (
 router.post('/scan-conveyance', authMiddleware, roleGuard(['employee']), upload.single('screenshot'), async (req, res, next) => {
   try {
     if (!req.file) return fail(res, 'No image provided');
-    const result = await extractRideFare(req.file.buffer, req.file.mimetype);
+    const { from, to, rideType } = req.body;
+    const result = await extractRideFare(req.file.buffer, req.file.mimetype, {
+      expectedFrom: from || undefined,
+      expectedTo: to || undefined,
+      expectedRideType: rideType || undefined,
+    });
     if (!result.amount) return fail(res, 'Could not extract amount from screenshot. Please enter manually.');
     return ok(res, result);
   } catch (err) { next(err); }

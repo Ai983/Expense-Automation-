@@ -91,6 +91,7 @@ export const IMPREST_CATEGORIES = [
   'Hotel Expense',
   'Site Expense',
   'Material Expense',
+  'Office Expense',
   'Other',
 ];
 

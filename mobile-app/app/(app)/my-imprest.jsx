@@ -44,6 +44,9 @@ export default function MyImprestScreen() {
 
   return (
     <View style={styles.container}>
+      <View style={styles.headerBar}>
+        <Text style={styles.headerTitle}>My Imprest / मेरे अग्रिम</Text>
+      </View>
       <Text style={styles.total}>{total} total request{total !== 1 ? 's' : ''}</Text>
       <FlatList
         data={requests}
@@ -59,8 +62,8 @@ export default function MyImprestScreen() {
         }
         ListEmptyComponent={
           <View style={styles.center}>
-            <Text style={styles.emptyText}>No imprest requests yet.</Text>
-            <Text style={styles.emptyHint}>Submit your first advance from the Imprest tab.</Text>
+            <Text style={styles.emptyText}>No imprest requests yet. / अभी कोई अग्रिम नहीं है</Text>
+            <Text style={styles.emptyHint}>Submit your first advance from the Imprest tab. / इम्प्रेस्ट टैब से अपना पहला अग्रिम जमा करें</Text>
           </View>
         }
       />
@@ -100,7 +103,7 @@ function ImprestCard({ request }) {
   });
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: statusColor }]}>
       <View style={styles.cardHeader}>
         <Text style={styles.refId}>{request.ref_id}</Text>
         <View style={[styles.badge, { backgroundColor: statusColor + '22', borderColor: statusColor }]}>
@@ -135,6 +138,8 @@ function ImprestCard({ request }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9fafb' },
+  headerBar: { backgroundColor: '#e8a24a', paddingVertical: 14, paddingHorizontal: 20 },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: '#fff' },
   total: { fontSize: 13, color: '#6b7280', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 },
   list: { padding: 20, paddingTop: 8, paddingBottom: 40 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60 },
