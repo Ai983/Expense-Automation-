@@ -52,6 +52,14 @@ Add these fields to the JSON:
   "screenshotDrop": <actual drop shown in screenshot or null>`
     : '';
 
+  const rideTypeHint = expectedRideType
+    ? `\nIMPORTANT: The user selected ride type "${expectedRideType}". If the screenshot shows multiple ride options (e.g. Bike, Auto, Cab/Sedan/Go), extract the fare for the "${expectedRideType}" category:
+- If "${expectedRideType}" is "Bike": look for Bike Saver, Moto, Bike, Rapido Bike, etc.
+- If "${expectedRideType}" is "Cab": look for Uber Go, Go Sedan, Premier, Ola Mini, Ola Prime, sedan, hatchback, cab options — NOT Bike/Moto/Auto.
+- If "${expectedRideType}" is "Auto": look for Auto, Auto Rickshaw options.
+Pick the cheapest option within the matching category. If no option matches the expected ride type, still return the closest match but set rideTypeMatch to false.`
+    : '';
+
   const prompt = `You are extracting the total fare from a ride-hailing app screenshot (Ola, Uber, Rapido, etc).
 Look for the total fare, bill amount, or amount charged for the ride.
 Return ONLY a valid JSON object with no extra text:
@@ -63,7 +71,7 @@ Rules:
 - Look for labels like "Total", "Fare", "Bill Amount", "Amount Charged", "Total Fare", "Your fare", "Trip fare"
 - Return the final total amount after all discounts and surcharges
 - Return null if you cannot find a clear fare amount
-- Return ONLY the JSON, no other text${verifySection}`;
+- Return ONLY the JSON, no other text${rideTypeHint}${verifySection}`;
 
   const response = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',

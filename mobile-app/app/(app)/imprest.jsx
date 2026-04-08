@@ -823,7 +823,26 @@ export default function ImprestScreen() {
                   <TouchableOpacity
                     key={rt}
                     style={[styles.rideTypeBtn, rideType === rt && styles.rideTypeBtnSelected]}
-                    onPress={() => setRideType(rt)}
+                    onPress={() => {
+                      if (rt === rideType) return;
+                      setRideType(rt);
+                      setScanResult(null);
+                      setAmountRequested('');
+                      // Re-scan with new ride type if image already exists
+                      if (conveyanceImage) {
+                        setScanningRide(true);
+                        scanConveyanceReceipt(conveyanceImage.uri, conveyanceImage.mimeType, {
+                          from: convFrom.trim(),
+                          to: convTo.trim(),
+                          rideType: rt,
+                        }).then(res => {
+                          setAmountRequested(String(res.amount));
+                          setScanResult(res);
+                        }).catch(() => {
+                          showAlert('Re-scan failed', 'Please scan again or enter amount manually.');
+                        }).finally(() => setScanningRide(false));
+                      }
+                    }}
                   >
                     <Text style={[styles.rideTypeBtnText, rideType === rt && styles.rideTypeBtnTextSelected]}>
                       {rt === 'Bike' ? '\uD83C\uDFCD\uFE0F' : '\uD83D\uDE95'} {rt}
