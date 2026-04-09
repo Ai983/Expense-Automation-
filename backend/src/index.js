@@ -11,6 +11,7 @@ import employeeRoutes from './routes/employees.js';
 import imprestRoutes from './routes/imprest.js';
 import reportRoutes from './routes/reports.js';
 import whatsappWebhookRoutes from './routes/whatsappWebhook.js';
+import feedbackRoutes from './routes/feedback.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 const app = express();
@@ -99,6 +100,7 @@ app.use('/api/employees', employeeRoutes);
 app.use('/api/imprest', imprestRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/whatsapp', whatsappWebhookRoutes);
+app.use('/api/feedback', feedbackRoutes);
 
 // ── 404 handler ───────────────────────────────────────────────────────────────
 app.use((_req, res) => {

@@ -12,6 +12,7 @@ function getNavItems(role) {
       return [
         { to: '/s2-queue', label: 'Imprest Review', icon: '📋' },
         { to: '/imprest-analytics', label: 'Imprest Analytics', icon: '📈' },
+        { to: '/feedback', label: 'Feedback', icon: '💬' },
       ];
     default: // finance, manager, admin
       return [
