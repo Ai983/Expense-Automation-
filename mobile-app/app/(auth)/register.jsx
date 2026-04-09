@@ -3,6 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ScrollView, Alert, Platform, KeyboardAvoidingView,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
@@ -45,6 +46,7 @@ export default function RegisterScreen() {
   const [form, setForm] = useState({ email: '', phone: '', password: '', site: SITES[0] });
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const { register } = useAuth();
   const router = useRouter();
 
@@ -160,14 +162,19 @@ export default function RegisterScreen() {
 
           {/* Password */}
           <Text style={styles.label}>Password (min 6 chars) *</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="••••••••"
-            placeholderTextColor="#9ca3af"
-            value={form.password}
-            onChangeText={(v) => set('password', v)}
-            secureTextEntry
-          />
+          <View style={styles.passwordRow}>
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              placeholder="••••••••"
+              placeholderTextColor="#9ca3af"
+              value={form.password}
+              onChangeText={(v) => set('password', v)}
+              secureTextEntry={!showPassword}
+            />
+            <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn}>
+              <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={22} color="#6b7280" />
+            </TouchableOpacity>
+          </View>
 
           {/* Site */}
           <Text style={styles.label}>Site *</Text>
@@ -210,6 +217,8 @@ const styles = StyleSheet.create({
   customNameInput: { marginTop: 8, borderColor: '#e8a24a', borderWidth: 2, backgroundColor: '#fffbf5' },
   pickerWrapper: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, backgroundColor: '#fafafa', marginBottom: 4 },
   picker: { height: 48 },
+  passwordRow: { flexDirection: 'row', alignItems: 'center' },
+  eyeBtn: { position: 'absolute', right: 12, padding: 4 },
   errorText: { color: '#dc2626', fontSize: 13, marginTop: 12, textAlign: 'center' },
   btn: { backgroundColor: '#e8a24a', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 24 },
   btnDisabled: { opacity: 0.6 },
