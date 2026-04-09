@@ -728,12 +728,17 @@ router.post('/:id/s1-approve', authMiddleware, roleGuard(S1_ROLES), async (req, 
     if (imp.current_stage !== 's1_pending') return fail(res, 'Request is not at Stage 1');
 
     const now = new Date().toISOString();
-    await supabaseAdmin.from('imprest_requests').update({
+    const updateFields = {
       current_stage: 's2_pending',
       s1_approved_by: req.user.id,
       s1_approved_at: now,
       s1_notes: notes || null,
-    }).eq('id', req.params.id);
+    };
+    // Director route: mark as waiting for WhatsApp reply
+    if (imp.approval_route === 'avisha_director_finance') {
+      updateFields.founder_review_status = 'pending';
+    }
+    await supabaseAdmin.from('imprest_requests').update(updateFields).eq('id', req.params.id);
 
     // If director route, trigger WhatsApp to Bhaskar Sir
     if (imp.approval_route === 'avisha_director_finance') {
