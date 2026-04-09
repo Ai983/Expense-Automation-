@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HagerStone Expense Automation — System Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #f8f9fa; color: #1e1e1e; padding: 30px; }
+
+  .header { background: #1e1e1e; color: #fff; text-align: center; padding: 20px 30px; border-radius: 12px; margin-bottom: 24px; }
+  .header h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
+  .header p { font-size: 14px; color: #adb5bd; margin-top: 6px; }
+
+  .tech-stack { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 30px; justify-content: center; }
+  .tech-badge { padding: 10px 20px; border-radius: 10px; font-weight: 600; font-size: 14px; border: 2px solid; }
+  .tech-mobile { background: #a5d8ff; border-color: #1971c2; color: #1971c2; }
+  .tech-backend { background: #ffec99; border-color: #e67700; color: #e67700; }
+  .tech-dashboard { background: #b2f2bb; border-color: #2f9e44; color: #2f9e44; }
+  .tech-db { background: #ffd8a8; border-color: #e8590c; color: #e8590c; }
+  .tech-n8n { background: #d0bfff; border-color: #7048e8; color: #7048e8; }
+  .tech-wa { background: #96f2d7; border-color: #0ca678; color: #0ca678; }
+
+  .columns { display: grid; grid-template-columns: 1fr 1.4fr; gap: 30px; margin-bottom: 30px; }
+  @media (max-width: 1100px) { .columns { grid-template-columns: 1fr; } }
+
+  .section { background: #fff; border-radius: 14px; padding: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+  .section-title { font-size: 20px; font-weight: 700; padding: 10px 18px; border-radius: 10px; margin-bottom: 20px; text-align: center; }
+  .title-expense { background: #e7f5ff; color: #1971c2; border: 2px solid #1971c2; }
+  .title-imprest { background: #fff3bf; color: #e67700; border: 2px solid #e67700; }
+  .title-reports { background: #f3d9fa; color: #7048e8; border: 2px solid #7048e8; }
+
+  .flow { display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .step { width: 100%; max-width: 520px; padding: 14px 18px; border-radius: 10px; text-align: center; font-size: 14px; line-height: 1.5; border: 2px solid; }
+  .step-blue { background: #a5d8ff; border-color: #1971c2; }
+  .step-yellow { background: #ffec99; border-color: #e67700; }
+  .step-green { background: #b2f2bb; border-color: #2f9e44; }
+  .step-purple { background: #d0bfff; border-color: #7048e8; }
+  .step-teal { background: #96f2d7; border-color: #0ca678; }
+  .step-red { background: #ffe3e3; border-color: #c92a2a; }
+  .step-light { background: #f8f9fa; border-color: #dee2e6; }
+
+  .step strong { display: block; font-size: 15px; margin-bottom: 2px; }
+  .step .sub { font-size: 12.5px; color: #495057; margin-top: 3px; }
+
+  .arrow { font-size: 22px; color: #868e96; line-height: 1; padding: 4px 0; }
+  .arrow-label { font-size: 11px; color: #868e96; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  .diamond { width: 100%; max-width: 360px; padding: 16px; border: 3px solid #c92a2a; background: #fff5f5; border-radius: 10px; text-align: center; transform: rotate(0deg); position: relative; }
+  .diamond::before { content: ''; position: absolute; top: -8px; left: 50%; transform: translateX(-50%); width: 16px; height: 16px; background: #c92a2a; border-radius: 50%; }
+  .diamond strong { color: #c92a2a; font-size: 16px; }
+
+  .branch-row { display: flex; gap: 12px; width: 100%; max-width: 560px; justify-content: center; }
+  .branch { flex: 1; padding: 12px 8px; border-radius: 10px; text-align: center; font-size: 13px; font-weight: 600; border: 2px solid; }
+  .branch-green { background: #d3f9d8; border-color: #2f9e44; color: #2f9e44; }
+  .branch-yellow { background: #fff3bf; border-color: #e67700; color: #e67700; }
+  .branch-red { background: #ffc9c9; border-color: #c92a2a; color: #c92a2a; }
+
+  .side-trigger { display: flex; align-items: center; gap: 12px; width: 100%; max-width: 580px; }
+  .side-trigger .step { flex: 1; }
+  .side-trigger .trigger-arrow { font-size: 20px; color: #7048e8; flex-shrink: 0; }
+  .side-trigger .trigger-box { flex: 0 0 220px; padding: 10px 12px; border-radius: 10px; background: #d0bfff; border: 2px solid #7048e8; text-align: center; font-size: 12.5px; line-height: 1.4; }
+
+  .director-block { width: 100%; max-width: 560px; display: flex; gap: 12px; align-items: stretch; }
+  .director-block .left-flow { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .director-block .right-flow { flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; gap: 0; }
+
+  .reports-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
+  @media (max-width: 900px) { .reports-grid { grid-template-columns: 1fr; } }
+  .report-card { background: #fff; border-radius: 14px; padding: 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); display: flex; align-items: center; gap: 16px; }
+  .report-icon { width: 50px; height: 50px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0; }
+  .report-icon-purple { background: #d0bfff; }
+  .report-icon-teal { background: #96f2d7; }
+
+  .legend { background: #fff; border-radius: 14px; padding: 20px 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+  .legend h3 { font-size: 16px; margin-bottom: 12px; color: #495057; }
+  .legend-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .legend-dot { width: 14px; height: 14px; border-radius: 4px; border: 2px solid; flex-shrink: 0; }
+
+  .key-numbers { margin-top: 12px; padding-top: 12px; border-top: 1px solid #e9ecef; }
+  .key-numbers span { display: inline-block; background: #f1f3f5; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; margin: 3px 4px; color: #495057; }
+
+  .note { font-size: 12px; color: #868e96; font-style: italic; margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>HagerStone Expense Automation</h1>
+  <p>Complete System Architecture &amp; Workflow | Prepared for Founder Review</p>
+</div>
+
+<div class="tech-stack">
+  <div class="tech-badge tech-mobile">&#x1F4F1; Mobile App (React Native / Expo)</div>
+  <div class="tech-badge tech-backend">&#x2699;&#xFE0F; Backend API (Express.js, Port 4000)</div>
+  <div class="tech-badge tech-dashboard">&#x1F4CA; Finance Dashboard (React + Vite)</div>
+  <div class="tech-badge tech-db">&#x1F5C4;&#xFE0F; Supabase (PostgreSQL + Storage)</div>
+  <div class="tech-badge tech-n8n">&#x1F504; n8n (Workflow Automation)</div>
+  <div class="tech-badge tech-wa">&#x1F4AC; WhatsApp (Maytapi API)</div>
+</div>
+
+<div class="columns">
+  <!-- ======================== EXPENSE FLOW ======================== -->
+  <div class="section">
+    <div class="section-title title-expense">EXPENSE SUBMISSION FLOW</div>
+    <div class="flow">
+
+      <div class="step step-blue">
+        <strong>1. Employee Uploads Receipt</strong>
+        Selects site, category, amount &amp; uploads screenshot(s) via Mobile App
+      </div>
+      <div class="arrow">&#x25BC;</div>
+
+      <div class="step step-yellow">
+        <strong>2. File Storage</strong>
+        Multer handles upload &#x2192; stored in Supabase Storage
+        <div class="sub">Supports up to 5 images or PDFs per expense</div>
+      </div>
+      <div class="arrow">&#x25BC;</div>
+
+      <div class="step step-yellow">
+        <strong>3. AI-Powered OCR</strong>
+        Claude Vision API (Haiku) extracts:<br>
+        Amount, Date, Transaction ID, Payment Status
+        <div class="sub">Confidence level: high / medium / low</div>
+      </div>
+      <div class="arrow">&#x25BC;</div>
+
+      <div class="step step-yellow">
+        <strong>4. Verification Scoring (4 Checks)</strong>
+        <div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap; margin-top:6px;">
+          <span style="background:#fff;padding:4px 8px;border-radius:6px;font-size:12px;border:1px solid #dee2e6;">Amount <b>40%</b></span>
+          <span style="background:#fff;padding:4px 8px;border-radius:6px;font-size:12px;border:1px solid #dee2e6;">Date <b>20%</b></span>
+          <span style="background:#fff;padding:4px 8px;border-radius:6px;font-size:12px;border:1px solid #dee2e6;">Payment Status <b>30%</b></span>
+          <span style="background:#fff;padding:4px 8px;border-radius:6px;font-size:12px;border:1px solid #dee2e6;">Txn ID <b>10%</b></span>
+        </div>
+        <div class="sub">Final Score = 70% &times; Weighted Checks + 30% &times; OCR Confidence</div>
+      </div>
+      <div class="arrow">&#x25BC;</div>
+
+      <div class="diamond">
+        <strong>Confidence Score?</strong>
+      </div>
+      <div class="arrow" style="padding:6px 0;">&#x25BC;</div>
+
+      <div class="branch-row">
+        <div class="branch branch-green">&ge; 94%<br>Auto Verified &#x2705;</div>
+        <div class="branch branch-yellow">70 &ndash; 93%<br>Manual Review &#x26A0;&#xFE0F;</div>
+        <div class="branch branch-red">&lt; 70%<br>Blocked &#x274C;</div>
+      </div>
+      <div class="arrow">&#x25BC;</div>
+
+      <div class="step step-yellow">
+        <strong>5. Duplicate Detection</strong>
+        5 rules checked within 7-day window
+        <div class="sub">Same Txn ID &#x2192; BLOCK | Same amount + site + same day &#x2192; WARN</div>
+      </div>
+      <div class="arrow">&#x25BC;</div>
+
+      <div class="step step-green">
+        <strong>6. Real-Time Broadcast</strong>
+        WebSocket pushes new expense to Finance Dashboard instantly
+      </div>
+      <div class="arrow">&#x25BC;</div>
+
+      <div class="step step-green">
+        <strong>7. Finance Team Action</strong>
+        Approve / Reject / Bulk Approve from Dashboard
+        <div class="sub">Rejected expenses linked to imprest reverse the fulfilled amount</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ======================== IMPREST FLOW ======================== -->
+  <div class="section">
+    <div class="section-title title-imprest">IMPREST REQUEST FLOW (Multi-Stage Approval)</div>
+    <div class="flow">
+
+      <div class="side-trigger">
+        <div class="step step-blue" style="flex:1;">
+          <strong>1. Employee Submits Imprest</strong>
+          7-step wizard: Site &#x2192; Category &#x2192; Details &#x2192; Amount &#x2192; Purpose &#x2192; Review &#x2192; Submit
+        </div>
+        <div class="trigger-arrow">&#x27A1;&#xFE0F;</div>
+        <div class="trigger-box">
+          <strong>&#x1F504; n8n WF1</strong><br>
+          WhatsApp confirmation sent to employee
+        </div>
+      </div>
+      <div class="arrow">&#x25BC;</div>
+
+      <div class="diamond">
+        <strong>Routing Logic (Site + Amount)</strong>
+      </div>
+      <div class="arrow" style="padding:6px 0;">&#x25BC;</div>
+
+      <div class="branch-row" style="max-width:640px;">
+        <div class="branch branch-green" style="font-size:12px;">
+          <b>PATH A</b><br>HO / Bangalore<br>(any amount)<br>Skip S1 &#x2192; S2
+        </div>
+        <div class="branch branch-yellow" style="font-size:12px;">
+          <b>PATH B</b><br>Other Site<br>&le; &#x20B9;10,000<br>S1 &#x2192; S2 &#x2192; S3
+        </div>
+        <div class="branch branch-red" style="font-size:12px;">
+          <b>PATH C</b><br>Other Site<br>&gt; &#x20B9;10,000<br>S1 &#x2192; Director &#x2192; S3
+        </div>
+      </div>
+      <div class="arrow">&#x25BC;</div>
+
+      <div class="step step-yellow" style="border-style:dashed;">
+        <strong>STAGE 1: Avisha Reviews</strong>
+        First-level approval for non-HO/Bangalore sites
+        <div class="note">Skipped entirely for Head Office &amp; Bangalore sites (Path A)</div>
+      </div>
+      <div class="arrow">&#x25BC;</div>
+
+      <div class="diamond">
+        <strong>Director Approval Needed?</strong>
+        <div style="font-size:12px;color:#868e96;margin-top:4px;">Amount &gt; &#x20B9;10,000 &amp; not HO/Bangalore</div>
+      </div>
+      <div class="arrow" style="padding:6px 0;">&#x25BC;</div>
+
+      <div style="display:flex;gap:16px;width:100%;max-width:580px;">
+        <!-- NO path -->
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;">
+          <div class="arrow-label">&#x2264; &#x20B9;10,000 (NO)</div>
+          <div class="arrow">&#x25BC;</div>
+          <div class="step step-yellow" style="width:100%;">
+            <strong>STAGE 2: Ritu Reviews</strong>
+            Can adjust amount downward
+          </div>
+        </div>
+
+        <!-- YES path -->
+        <div style="flex:1.2;display:flex;flex-direction:column;align-items:center;">
+          <div class="arrow-label">&gt; &#x20B9;10,000 (YES)</div>
+          <div class="arrow">&#x25BC;</div>
+          <div class="step step-purple" style="width:100%;">
+            <strong>&#x1F504; n8n WF2 Triggered</strong>
+            WhatsApp sent to<br><b>Director (Bhaskar Sir)</b>
+            <div class="sub">Director replies YES / NO on WhatsApp</div>
+          </div>
+          <div class="arrow">&#x25BC;</div>
+          <div style="display:flex;gap:8px;width:100%;">
+            <div class="branch branch-green" style="flex:1;font-size:12px;">YES &#x2192; S3<br><span style="font-size:11px;color:#495057;">Sets ceiling amount</span></div>
+            <div class="branch branch-red" style="flex:1;font-size:12px;">NO &#x2192; Rejected<br><span style="font-size:11px;color:#495057;">Terminal state</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">&#x25BC;</div>
+
+      <div class="step step-green">
+        <strong>STAGE 3: Finance Final Approval</strong>
+        Full or partial amount approval
+        <div class="sub">Path C: Cannot exceed Director's approved ceiling</div>
+      </div>
+      <div class="arrow">&#x25BC;</div>
+
+      <div class="step step-green" style="border-width:3px;">
+        <strong>&#x2705; Mark as PAID</strong>
+        Finance uploads payment receipt &amp; disburses funds
+      </div>
+      <div class="arrow">&#x25BC;</div>
+
+      <div class="step step-teal">
+        <strong>&#x1F4AC; 3-Day Expense Reminder</strong>
+        WhatsApp sent to employee: "Submit expenses within 3 days"
+        <div class="sub">Reminder entry created with 72-hour deadline</div>
+      </div>
+      <div class="arrow">&#x25BC;</div>
+
+      <div class="step step-red">
+        <strong>&#x23F0; Deadline Enforcement</strong>
+        If 3 days pass without expense submission:<br>
+        Employee is <b>BLOCKED</b> from new imprest requests
+        <div class="sub">Finance can manually unblock from Dashboard</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ======================== REPORTS ======================== -->
+<div class="section" style="margin-bottom:30px;">
+  <div class="section-title title-reports">AUTOMATED REPORTS (n8n WF3 — Cron Scheduled)</div>
+  <div class="reports-grid">
+    <div class="report-card">
+      <div class="report-icon report-icon-purple">&#x1F4C5;</div>
+      <div>
+        <strong style="font-size:16px;">Weekly Report</strong>
+        <div style="font-size:13px;color:#495057;margin-top:4px;">
+          Every <b>Saturday at 9:00 AM IST</b><br>
+          Imprest &amp; expense stats for the past 7 days<br>
+          Top sites by amount, approval/rejection counts
+        </div>
+      </div>
+    </div>
+    <div class="report-card">
+      <div class="report-icon report-icon-purple">&#x1F4C6;</div>
+      <div>
+        <strong style="font-size:16px;">Monthly Report</strong>
+        <div style="font-size:13px;color:#495057;margin-top:4px;">
+          Every <b>1st of the month at 9:00 AM IST</b><br>
+          Full month imprest &amp; expense summary<br>
+          Top 5 sites, total amounts requested vs approved
+        </div>
+      </div>
+    </div>
+    <div class="report-card" style="grid-column: 1 / -1;">
+      <div class="report-icon report-icon-teal">&#x1F4AC;</div>
+      <div>
+        <strong style="font-size:16px;">Delivery: WhatsApp to Founder (Dhruv Sir)</strong>
+        <div style="font-size:13px;color:#495057;margin-top:4px;">
+          n8n fetches report from backend API &#x2192; formats as WhatsApp message &#x2192; sends via Maytapi to Founder's WhatsApp number<br>
+          <span style="background:#f1f3f5;padding:2px 8px;border-radius:4px;font-size:12px;">Backend endpoint: <code>/api/reports/weekly</code> &amp; <code>/api/reports/monthly</code> secured by n8n secret header</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================== LEGEND ======================== -->
+<div class="legend">
+  <h3>Color Legend &amp; Key Thresholds</h3>
+  <div class="legend-row">
+    <div class="legend-item"><div class="legend-dot" style="background:#a5d8ff;border-color:#1971c2;"></div> Mobile App</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ffec99;border-color:#e67700;"></div> Backend Processing</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#b2f2bb;border-color:#2f9e44;"></div> Finance / Approved</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#d0bfff;border-color:#7048e8;"></div> n8n Automation</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#96f2d7;border-color:#0ca678;"></div> WhatsApp</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ffc9c9;border-color:#c92a2a;"></div> Rejected / Blocked</div>
+  </div>
+  <div class="key-numbers">
+    <strong style="font-size:13px;color:#495057;">Key Thresholds:</strong>
+    <span>Auto-verify &ge; 94%</span>
+    <span>Manual review 70 &ndash; 93%</span>
+    <span>Block &lt; 70%</span>
+    <span>Director approval &gt; &#x20B9;10,000</span>
+    <span>Amount tolerance &plusmn; &#x20B9;10</span>
+    <span>3-day expense deadline</span>
+    <span>7-day duplicate window</span>
+    <span>Ref ID: HSE-YYYYMMDD-XXXX / IMP-YYYYMMDD-XXXX</span>
+  </div>
+</div>
+
+<div style="text-align:center;padding:20px;color:#adb5bd;font-size:12px;">
+  HagerStone Expense Automation System &mdash; Built by Shubh | Powered by Claude AI, n8n, Supabase, Maytapi
+</div>
+
+</body>
+</html>

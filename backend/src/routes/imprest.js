@@ -783,7 +783,7 @@ router.post('/:id/s1-reject', authMiddleware, roleGuard(S1_ROLES), async (req, r
 
     await supabaseAdmin.from('imprest_requests').update({
       status: 'rejected', rejection_reason: reason.trim(),
-      current_stage: 's1_pending', // stays at s1 but rejected
+      current_stage: 's1_rejected',
       s1_approved_by: req.user.id, s1_approved_at: new Date().toISOString(),
     }).eq('id', req.params.id);
 
