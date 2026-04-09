@@ -10,6 +10,7 @@ import EmployeeReportPage from './pages/EmployeeReportPage';
 import ImprestAnalyticsPage from './pages/ImprestAnalyticsPage';
 import S1QueuePage from './pages/S1QueuePage';
 import S2QueuePage from './pages/S2QueuePage';
+import ResetPassword from './pages/ResetPassword';
 
 function getDefaultRoute(role) {
   if (role === 'approver_s1') return '/s1-queue';
@@ -38,6 +39,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to={defaultRoute} replace /> : <Login />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/queue" element={<ProtectedLayout><ExpenseQueuePage /></ProtectedLayout>} />
       <Route path="/imprest-queue" element={<ProtectedLayout><ImprestQueuePage /></ProtectedLayout>} />
       <Route path="/dashboard" element={<ProtectedLayout><DashboardPage /></ProtectedLayout>} />

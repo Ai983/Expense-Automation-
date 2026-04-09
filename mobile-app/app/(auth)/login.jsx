@@ -29,7 +29,10 @@ export default function LoginScreen() {
       return showAlert('Enter Email', 'Please enter your email address first, then tap Forgot Password.');
     }
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase());
+      const redirectUrl = process.env.EXPO_PUBLIC_RESET_PASSWORD_URL || 'https://expense-automation-three.vercel.app/reset-password';
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+        redirectTo: redirectUrl,
+      });
       if (error) throw error;
       setResetSent(true);
       showAlert('Email Sent', `Password reset link sent to ${email}. Check your inbox.`);
