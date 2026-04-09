@@ -197,6 +197,30 @@ function VerificationBadge({ expense }) {
   return <span className="text-xs text-gray-400">—</span>;
 }
 
+function downloadCSV(expenses) {
+  const headers = ['Ref ID', 'Employee', 'Site', 'Amount', 'Category', 'Status', 'OCR Confidence', 'Duplicate', 'Description', 'Submitted'];
+  const rows = expenses.map((e) => [
+    e.ref_id,
+    e.employee?.name || '',
+    e.site,
+    e.amount,
+    e.category,
+    e.status,
+    e.screenshot_metadata?.confidence ?? '',
+    e.duplicate_flag ? 'Yes' : 'No',
+    (e.description || '').replace(/"/g, '""'),
+    new Date(e.submitted_at).toLocaleDateString('en-IN'),
+  ]);
+  const csv = [headers, ...rows].map((r) => r.map((v) => `"${v}"`).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `expenses_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function ExpenseQueue() {
   const [expenses, setExpenses] = useState([]);
   const [total, setTotal] = useState(0);
@@ -295,6 +319,19 @@ export default function ExpenseQueue() {
 
       <FilterBar filters={filters} onChange={(f) => { setFilters(f); setPage(1); }} />
 
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs text-gray-400">
+          {searchQuery ? `${displayedExpenses.length} of ${total}` : total} expense{total !== 1 ? 's' : ''} found
+        </p>
+        <button
+          onClick={() => downloadCSV(displayedExpenses)}
+          className="btn-secondary text-sm"
+          title="Download filtered data as CSV"
+        >
+          Download CSV
+        </button>
+      </div>
+
       {/* Bulk action bar */}
       {selected.size > 0 && (
         <div className="flex items-center gap-4 bg-brand-50 border border-brand-500 rounded-lg px-4 py-3 mb-4">
@@ -307,11 +344,6 @@ export default function ExpenseQueue() {
           </button>
         </div>
       )}
-
-      {/* Summary */}
-      <p className="text-xs text-gray-400 mb-3">
-        {searchQuery ? `${displayedExpenses.length} of ${total}` : total} expense{total !== 1 ? 's' : ''} found
-      </p>
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">

@@ -67,6 +67,32 @@ function categoryDetail(req) {
   return parts.join(' · ');
 }
 
+function downloadImprestCSV(requests) {
+  const headers = ['Ref ID', 'Employee', 'Site', 'Category', 'Purpose', 'People', 'Amount Requested', 'Approved Amount', 'Old Balance', 'Status', 'Founder Review', 'Submitted'];
+  const rows = requests.map((r) => [
+    r.ref_id,
+    r.employee?.name || '',
+    r.site,
+    r.category,
+    (r.purpose || '').replace(/"/g, '""'),
+    r.people_count,
+    r.amount_requested,
+    r.approved_amount ?? '',
+    r.old_balance ?? '',
+    r.status,
+    r.founder_review_status || '',
+    new Date(r.submitted_at).toLocaleDateString('en-IN'),
+  ]);
+  const csv = [headers, ...rows].map((r) => r.map((v) => `"${v}"`).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `imprest_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function ImprestQueuePage() {
   const [requests, setRequests] = useState([]);
   const [total, setTotal] = useState(0);
@@ -207,6 +233,13 @@ export default function ImprestQueuePage() {
           className="text-sm text-gray-500 hover:text-gray-700 px-2"
         >Clear</button>
         <span className="ml-auto text-sm text-gray-500 self-center">{total} request{total !== 1 ? 's' : ''}</span>
+        <button
+          onClick={() => downloadImprestCSV(requests)}
+          className="btn-secondary text-sm whitespace-nowrap"
+          title="Download filtered data as CSV"
+        >
+          Download CSV
+        </button>
       </div>
 
       {/* Table */}
