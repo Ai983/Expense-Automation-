@@ -1199,8 +1199,8 @@ const styles = StyleSheet.create({
 
   greeting: { fontSize: 22, fontWeight: '700', color: '#111827', marginBottom: 8 },
   stepTitle: { fontSize: 20, fontWeight: '700', color: '#111827', marginBottom: 8 },
-  stepSubtitle: { fontSize: 14, color: '#6b7280', marginBottom: 16, lineHeight: 20 },
-  label: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6, marginTop: 12 },
+  stepSubtitle: { fontSize: 15, color: '#6b7280', marginBottom: 16, lineHeight: 22 },
+  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 6, marginTop: 12 },
 
   pickerWrapper: {
     borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10,
@@ -1225,15 +1225,15 @@ const styles = StyleSheet.create({
   receiptPreview: { width: '100%', height: 180, borderRadius: 8, marginTop: 12, borderWidth: 1, borderColor: '#e5e7eb' },
 
   primaryBtn: {
-    backgroundColor: '#e8a24a', borderRadius: 10, paddingVertical: 14,
+    backgroundColor: '#e8a24a', borderRadius: 12, paddingVertical: 16,
     alignItems: 'center', marginTop: 20,
   },
-  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 17 },
   secondaryBtn: {
-    backgroundColor: '#111827', borderRadius: 10, paddingVertical: 12,
+    backgroundColor: '#111827', borderRadius: 12, paddingVertical: 14,
     alignItems: 'center', marginTop: 12,
   },
-  secondaryBtnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  secondaryBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
   btnDisabled: { opacity: 0.6 },
 
   navRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 20, paddingTop: 8 },
@@ -1246,14 +1246,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row', flexWrap: 'wrap', marginTop: 12, gap: 10,
   },
   categoryCard: {
-    width: '30%', minWidth: 95, borderWidth: 1.5, borderColor: '#d1d5db', borderRadius: 12,
-    padding: 12, alignItems: 'center', backgroundColor: '#fff',
+    width: '45%', minWidth: 100, borderWidth: 1.5, borderColor: '#d1d5db', borderRadius: 12,
+    padding: 16, alignItems: 'center', backgroundColor: '#fff',
   },
   categoryCardSelected: {
     borderColor: '#e8a24a', backgroundColor: '#fffbeb',
   },
-  categoryIcon: { fontSize: 28, marginBottom: 6 },
-  categoryLabel: { fontSize: 11, fontWeight: '600', color: '#374151', textAlign: 'center' },
+  categoryIcon: { fontSize: 32, marginBottom: 8 },
+  categoryLabel: { fontSize: 13, fontWeight: '600', color: '#374151', textAlign: 'center' },
   categoryLabelSelected: { color: '#92400e' },
 
   // Ride type toggle

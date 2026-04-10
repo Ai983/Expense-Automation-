@@ -22,7 +22,10 @@ export default function Login() {
         setError('This portal is for finance team only. Use the mobile app to submit expenses.');
         return;
       }
-      navigate('/dashboard');
+      const route = role === 'approver_s1' ? '/s1-queue'
+                  : role === 'approver_s2' ? '/s2-queue'
+                  : '/queue';
+      navigate(route);
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed. Check your credentials.');
     } finally {

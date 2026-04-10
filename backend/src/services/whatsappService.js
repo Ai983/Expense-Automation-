@@ -29,16 +29,84 @@ export async function sendWhatsApp(phone, message) {
 
   const url = `https://api.maytapi.com/api/${MAYTAPI_PRODUCT_ID}/${MAYTAPI_PHONE_ID}/sendMessage`;
 
-  await axios.post(
+  console.log(`[WhatsApp] Sending to ${to}...`);
+  const resp = await axios.post(
     url,
     { to_number: to, type: 'text', message },
     { headers: { 'x-maytapi-key': MAYTAPI_API_TOKEN, 'Content-Type': 'application/json' } }
   );
+  console.log(`[WhatsApp] Sent to ${to} — status: ${resp.status}, success: ${resp.data?.success}`);
 }
 
 /**
  * Sends the imprest approval WhatsApp reminder.
  */
+const S1_PHONE = process.env.S1_PHONE || '';
+const S2_PHONE = process.env.S2_PHONE || '';
+const FINANCE_PHONE = process.env.FINANCE_PHONE || '';
+
+/**
+ * Notify S1 approver (Avisha) when a new imprest arrives at s1_pending.
+ */
+export async function notifyS1({ refId, employeeName, site, category, amount, purpose }) {
+  if (!S1_PHONE) return;
+  const msg =
+    `🔔 *New Imprest Request*\n\n` +
+    `Ref: ${refId}\n` +
+    `Employee: ${employeeName}\n` +
+    `Site: ${site}\n` +
+    `Category: ${category}\n` +
+    `Amount: Rs.${Number(amount).toLocaleString('en-IN')}\n` +
+    `Purpose: ${purpose || 'Not specified'}\n\n` +
+    `Reply: *YES ${refId}* to approve\n` +
+    `Reply: *NO ${refId} <reason>* to reject`;
+  try {
+    await sendWhatsApp(S1_PHONE, msg);
+  } catch (e) { console.warn('[WhatsApp] S1 notify failed:', e.message); }
+}
+
+/**
+ * Notify S2 approver (Ritu) when a request arrives at s2_pending.
+ */
+export async function notifyS2({ refId, employeeName, site, category, amount, purpose, s1Notes }) {
+  if (!S2_PHONE) return;
+  const msg =
+    `🔔 *Imprest Forwarded to You*\n\n` +
+    `Ref: ${refId}\n` +
+    `Employee: ${employeeName}\n` +
+    `Site: ${site}\n` +
+    `Category: ${category}\n` +
+    `Amount: Rs.${Number(amount).toLocaleString('en-IN')}\n` +
+    `Purpose: ${purpose || 'Not specified'}\n` +
+    (s1Notes ? `S1 Notes: ${s1Notes}\n` : '') +
+    `\nReply: *YES ${refId}* to approve\n` +
+    `Reply: *NO ${refId} <reason>* to reject`;
+  try {
+    await sendWhatsApp(S2_PHONE, msg);
+  } catch (e) { console.warn('[WhatsApp] S2 notify failed:', e.message); }
+}
+
+/**
+ * Notify Finance team when a request arrives at s3_pending.
+ */
+export async function notifyFinance({ refId, employeeName, site, category, amount, purpose, s2Notes }) {
+  if (!FINANCE_PHONE) return;
+  const msg =
+    `🔔 *Imprest Ready for Finance Approval*\n\n` +
+    `Ref: ${refId}\n` +
+    `Employee: ${employeeName}\n` +
+    `Site: ${site}\n` +
+    `Category: ${category}\n` +
+    `Amount: Rs.${Number(amount).toLocaleString('en-IN')}\n` +
+    `Purpose: ${purpose || 'Not specified'}\n` +
+    (s2Notes ? `S2 Notes: ${s2Notes}\n` : '') +
+    `\nReply: *YES ${refId}* to approve\n` +
+    `Reply: *NO ${refId} <reason>* to reject`;
+  try {
+    await sendWhatsApp(FINANCE_PHONE, msg);
+  } catch (e) { console.warn('[WhatsApp] Finance notify failed:', e.message); }
+}
+
 export async function sendImprestApprovalReminder({ name, phone, refId, approvedAmount, site, category, deadline }) {
   const deadlineStr = new Date(deadline).toLocaleDateString('en-IN', {
     day: '2-digit', month: 'short', year: 'numeric',
