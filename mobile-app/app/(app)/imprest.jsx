@@ -757,7 +757,7 @@ export default function ImprestScreen() {
             )}
             {travelSubtype === 'Contractual Cab' && (
               <View style={styles.infoBox}>
-                <Text style={styles.infoHint}>Rate: {'\u20B9'}12/km (distance fetched from Google Maps)</Text>
+                <Text style={styles.infoHint}>Rate: {'\u20B9'}10/km (distance fetched from Google Maps)</Text>
               </View>
             )}
           </View>

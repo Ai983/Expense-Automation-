@@ -99,10 +99,10 @@ Return ONLY a JSON object with no other text:
   }
 }
 
-// ── Contractual Cab — distance × ₹12/km ──────────────────────────────────────
+// ── Contractual Cab — distance × ₹10/km ──────────────────────────────────────
 
 export async function estimateContractualCabCost({ from, to, peopleCount = 1 }) {
-  const RATE_PER_KM = 12;
+  const RATE_PER_KM = 10;
   const distanceKm = await getDistanceKmWithFallback(from, to);
 
   const estimatedAmount = distanceKm
