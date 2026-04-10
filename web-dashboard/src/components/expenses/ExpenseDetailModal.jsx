@@ -9,6 +9,7 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
   const [rejecting, setRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [acting, setActing] = useState(false);
+  const [adjustedAmount, setAdjustedAmount] = useState('');
 
   useEffect(() => {
     getExpenseDetails(expenseId)
@@ -20,7 +21,8 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
   async function handleApprove() {
     setActing(true);
     try {
-      await approveExpense(expenseId);
+      const adj = adjustedAmount.trim() ? parseFloat(adjustedAmount) : null;
+      await approveExpense(expenseId, adj);
       showToast('Expense approved', 'success');
       onAction?.('approved');
       onClose();
@@ -203,10 +205,49 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
             {/* Actions */}
             {canAct && (
               <div className="border-t pt-5 space-y-3">
+                {/* Amount Adjustment */}
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <label className="block text-sm font-semibold text-amber-800 mb-2">
+                    Adjust Amount (if different from claimed)
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-gray-500">Claimed: ₹{Number(expense.amount).toLocaleString('en-IN')}</span>
+                    {meta.extractedAmount && Number(meta.extractedAmount) !== Number(expense.amount) && (
+                      <span className="text-sm text-red-600 font-medium">OCR: ₹{Number(meta.extractedAmount).toLocaleString('en-IN')}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-gray-500 font-medium">₹</span>
+                    <input
+                      type="number"
+                      className="input flex-1"
+                      placeholder={`${expense.amount} (leave blank to keep original)`}
+                      value={adjustedAmount}
+                      onChange={(e) => setAdjustedAmount(e.target.value)}
+                      min="0"
+                      step="0.01"
+                    />
+                    {meta.extractedAmount && (
+                      <button
+                        type="button"
+                        className="text-xs px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded transition"
+                        onClick={() => setAdjustedAmount(String(meta.extractedAmount))}
+                      >
+                        Use OCR amount
+                      </button>
+                    )}
+                  </div>
+                  {adjustedAmount.trim() && (
+                    <p className="text-xs text-amber-700 mt-1">
+                      Will approve with ₹{Number(adjustedAmount).toLocaleString('en-IN')} instead of ₹{Number(expense.amount).toLocaleString('en-IN')}
+                    </p>
+                  )}
+                </div>
+
                 {!rejecting ? (
                   <div className="flex gap-3">
                     <button className="btn-primary flex-1" disabled={acting} onClick={handleApprove}>
-                      {acting ? 'Processing...' : '✓ Approve'}
+                      {acting ? 'Processing...' : adjustedAmount.trim() ? `✓ Approve ₹${Number(adjustedAmount).toLocaleString('en-IN')}` : '✓ Approve'}
                     </button>
                     <button className="btn-danger flex-1" disabled={acting} onClick={() => setRejecting(true)}>
                       ✗ Reject

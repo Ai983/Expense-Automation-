@@ -389,6 +389,7 @@ router.post(
   roleGuard(FINANCE_ROLES),
   async (req, res, next) => {
     try {
+      const { adjustedAmount } = req.body || {};
       const { data: expense, error: fetchErr } = await supabaseAdmin
         .from('expenses')
         .select('id, ref_id, status, amount, employee_id')
@@ -401,13 +402,22 @@ router.post(
         return fail(res, `Cannot approve expense with status: ${expense.status}`);
       }
 
+      const updateFields = {
+        status: 'approved',
+        approved_by: req.user.id,
+        approved_at: new Date().toISOString(),
+      };
+
+      // Finance can adjust the amount (e.g. OCR shows ₹290 but employee claimed ₹300)
+      const finalAmount = adjustedAmount != null ? parseFloat(adjustedAmount) : null;
+      if (finalAmount != null) {
+        if (isNaN(finalAmount) || finalAmount <= 0) return fail(res, 'Invalid adjusted amount');
+        updateFields.amount = finalAmount;
+      }
+
       const { error: updateErr } = await supabaseAdmin
         .from('expenses')
-        .update({
-          status: 'approved',
-          approved_by: req.user.id,
-          approved_at: new Date().toISOString(),
-        })
+        .update(updateFields)
         .eq('id', req.params.expenseId);
 
       if (updateErr) throw updateErr;
@@ -417,12 +427,12 @@ router.post(
         action: 'approve',
         entityType: 'expense',
         entityId: expense.id,
-        oldValue: { status: expense.status },
-        newValue: { status: 'approved' },
+        oldValue: { status: expense.status, amount: expense.amount },
+        newValue: { status: 'approved', amount: finalAmount || expense.amount },
         ipAddress: req.ip,
       });
 
-      return ok(res, { refId: expense.ref_id, status: 'approved', message: 'Expense approved' });
+      return ok(res, { refId: expense.ref_id, status: 'approved', message: 'Expense approved', adjustedAmount: finalAmount });
     } catch (err) {
       next(err);
     }
