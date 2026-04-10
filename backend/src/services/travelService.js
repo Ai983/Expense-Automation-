@@ -19,37 +19,65 @@ async function getDistanceKm(from, to) {
   }
 }
 
-// ── Flight / Train / Bus — Claude Haiku estimate ──────────────────────────────
+// ── Flight / Train / Bus — Claude with web search for real-time prices ────────
+
+async function searchWebForFare(query) {
+  try {
+    const res = await fetch(`https://www.googleapis.com/customsearch/v1?key=${MAPS_KEY}&cx=a352a1074c0264ef1&q=${encodeURIComponent(query)}&num=5`);
+    const data = await res.json();
+    return (data.items || []).map(item => `${item.title}: ${item.snippet}`).join('\n');
+  } catch (e) {
+    console.warn('Web search failed:', e.message);
+    return '';
+  }
+}
 
 export async function estimatePublicTransportCost({ from, to, mode, travelDate, peopleCount = 1 }) {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  const dateStr = travelDate ? ` on ${travelDate}` : '';
+  const dateStr = travelDate || new Date().toISOString().split('T')[0];
   const peopleStr = peopleCount > 1 ? `\nNumber of people: ${peopleCount} (provide total for all)` : '';
 
-  const prompt = `You are a travel cost estimator for an Indian corporate expense system. Give the most accurate current fare estimate.
+  // Search web for real-time prices
+  let searchQuery = '';
+  if (mode === 'Flight') {
+    searchQuery = `cheapest flight ${from} to ${to} ${dateStr} economy fare price INR`;
+  } else if (mode === 'Train') {
+    searchQuery = `train fare ${from} to ${to} 3AC tatkal price IRCTC ${dateStr}`;
+  } else {
+    searchQuery = `${mode} fare ${from} to ${to} price INR ${dateStr}`;
+  }
+
+  const webResults = await searchWebForFare(searchQuery);
+  const webContext = webResults
+    ? `\nHere are real-time search results for current fares:\n${webResults}\n\nUse these results to give the most accurate fare.`
+    : '\nNo web results found. Use your best knowledge of current Indian fares.';
+
+  const prompt = `You are a travel cost estimator for an Indian corporate expense system.
 
 Mode: ${mode}
 From: ${from}
-To: ${to}${dateStr}${peopleStr}
+To: ${to}
+Travel Date: ${dateStr} (THIS IS THE ACTUAL TRAVEL DATE — estimate fare for THIS date, NOT advance booking)${peopleStr}
+${webContext}
 
-Rules:
-- For FLIGHTS: Use the lowest available economy class fare. Consider airlines like IndiGo, SpiceJet, Air India Express. Include taxes. For ${travelDate || 'near-term'} booking, use realistic advance booking prices.
-- For TRAINS: Use AC 3-tier (3AC) fare from IRCTC. If route has Rajdhani/Shatabdi, prefer that fare. Include base fare + GST.
-- For BUSES: Use AC sleeper/seater fare from operators like RedBus, KSRTC, UPSRTC. Use government bus fares where available.
-- Give the MOST LIKELY actual fare an employee would pay, not a range. Be specific.
-- If the route doesn't have direct ${mode.toLowerCase()} service, say so and suggest the nearest hub.
+IMPORTANT:
+- The travel date is ${dateStr}. Give the fare for booking on/near this date.
+- For FLIGHTS: Last-minute/same-week economy fares are HIGHER than advance fares. A Delhi-Bangalore flight booked 1-2 days before typically costs ₹6,000-₹10,000, not ₹3,000-₹4,000.
+- For TRAINS: Use tatkal fare if travel is within 1-2 days. Use regular 3AC fare for advance booking.
+- Be realistic about last-minute pricing. Do NOT give advance booking prices for near-term travel.
+- Give ONE specific amount, not a range.
 
-Return ONLY this JSON with no other text:
+Return ONLY this JSON:
 {
   "estimated_amount": <total fare in rupees as integer>,
   "per_person_amount": <per person fare as integer>,
-  "reasoning": "<specific explanation with airline/train name and class>"
+  "reasoning": "<specific explanation mentioning airline/train, class, and why this price>"
 }`;
 
   try {
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 256,
+      max_tokens: 300,
       messages: [{ role: 'user', content: prompt }],
     });
 
