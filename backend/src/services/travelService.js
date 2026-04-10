@@ -26,16 +26,24 @@ export async function estimatePublicTransportCost({ from, to, mode, travelDate, 
   const dateStr = travelDate ? ` on ${travelDate}` : '';
   const peopleStr = peopleCount > 1 ? `\nNumber of people: ${peopleCount} (provide total for all)` : '';
 
-  const prompt = `Estimate a realistic ${mode} fare for travel in India.
+  const prompt = `You are a travel cost estimator for an Indian corporate expense system. Give the most accurate current fare estimate.
+
+Mode: ${mode}
 From: ${from}
 To: ${to}${dateStr}${peopleStr}
 
-Consider typical Indian ${mode.toLowerCase()} fares. For flights, use economy class. For trains, use sleeper/3AC. For buses, use AC/non-AC as appropriate.
+Rules:
+- For FLIGHTS: Use the lowest available economy class fare. Consider airlines like IndiGo, SpiceJet, Air India Express. Include taxes. For ${travelDate || 'near-term'} booking, use realistic advance booking prices.
+- For TRAINS: Use AC 3-tier (3AC) fare from IRCTC. If route has Rajdhani/Shatabdi, prefer that fare. Include base fare + GST.
+- For BUSES: Use AC sleeper/seater fare from operators like RedBus, KSRTC, UPSRTC. Use government bus fares where available.
+- Give the MOST LIKELY actual fare an employee would pay, not a range. Be specific.
+- If the route doesn't have direct ${mode.toLowerCase()} service, say so and suggest the nearest hub.
+
 Return ONLY this JSON with no other text:
 {
   "estimated_amount": <total fare in rupees as integer>,
   "per_person_amount": <per person fare as integer>,
-  "reasoning": "<one sentence explanation>"
+  "reasoning": "<specific explanation with airline/train name and class>"
 }`;
 
   try {
