@@ -378,7 +378,7 @@ export default function ImprestScreen() {
 
   // ── Submit ───────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
-    const systemLockedFood = category === 'Food Expense' && foodRate && site !== 'Others';
+    const systemLockedFood = category === 'Food Expense' && foodRate && site !== 'Others' && user?.email !== 'ea@hagerstone.com';
     if (!systemLockedFood && (!amountRequested || parseFloat(amountRequested) <= 0)) {
       return showAlert('Invalid amount / \u0905\u092E\u093E\u0928\u094D\u092F \u0930\u093E\u0936\u093F', 'Please enter a valid amount. / \u0915\u0943\u092A\u092F\u093E \u090F\u0915 \u0935\u0948\u0927 \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964');
     }
@@ -389,7 +389,9 @@ export default function ImprestScreen() {
         : foodRate;
 
       // For system-locked food rates, compute final amount from rate * people * days
-      const finalAmount = (category === 'Food Expense' && effectiveFoodRate && site !== 'Others')
+      // EA (Ritu) can override the amount even for configured sites
+      const foodLocked = category === 'Food Expense' && effectiveFoodRate && site !== 'Others' && user?.email !== 'ea@hagerstone.com';
+      const finalAmount = foodLocked
         ? effectiveFoodRate * (parseInt(peopleCount) || 1) * daysBetween(dateFrom, dateTo)
         : parseFloat(amountRequested);
 
@@ -638,7 +640,25 @@ export default function ImprestScreen() {
               </View>
             )}
 
-            {!isOtherSite && rateToUse > 0 && (
+            {!isOtherSite && rateToUse > 0 && user?.email === 'ea@hagerstone.com' && (
+              <View>
+                <View style={styles.infoBox}>
+                  <Text style={styles.infoText}>
+                    Suggested: {'\u20B9'}{rateToUse}/person {'\u00D7'} {people} people {'\u00D7'} {days} day(s) = {'\u20B9'}{computed}
+                  </Text>
+                </View>
+                <Text style={[styles.label, { marginTop: 12 }]}>Amount / {'\u0930\u093E\u0936\u093F'} ({'\u20B9'}) *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={amountRequested}
+                  onChangeText={setAmountRequested}
+                  keyboardType="numeric"
+                  placeholder={`${computed}`}
+                  placeholderTextColor="#9ca3af"
+                />
+              </View>
+            )}
+            {!isOtherSite && rateToUse > 0 && user?.email !== 'ea@hagerstone.com' && (
               <View style={styles.infoBox}>
                 <Text style={styles.infoText}>
                   {'\u20B9'}{rateToUse}/person {'\u00D7'} {people} people {'\u00D7'} {days} day(s) = {'\u20B9'}{computed}
