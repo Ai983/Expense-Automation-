@@ -12,10 +12,12 @@ import S1QueuePage from './pages/S1QueuePage';
 import S2QueuePage from './pages/S2QueuePage';
 import ResetPassword from './pages/ResetPassword';
 import FeedbackPage from './pages/FeedbackPage';
+import ProcurementQueuePage from './pages/ProcurementQueuePage';
 
 function getDefaultRoute(role) {
   if (role === 'approver_s1') return '/s1-queue';
   if (role === 'approver_s2') return '/s2-queue';
+  if (role === 'procurement_finance') return '/procurement-queue';
   return '/queue';
 }
 
@@ -49,6 +51,7 @@ function AppRoutes() {
       <Route path="/s1-queue" element={<ProtectedLayout><S1QueuePage /></ProtectedLayout>} />
       <Route path="/s2-queue" element={<ProtectedLayout><S2QueuePage /></ProtectedLayout>} />
       <Route path="/feedback" element={<ProtectedLayout><FeedbackPage /></ProtectedLayout>} />
+      <Route path="/procurement-queue" element={<ProtectedLayout><ProcurementQueuePage /></ProtectedLayout>} />
       <Route path="/" element={<Navigate to={user ? defaultRoute : '/login'} replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
