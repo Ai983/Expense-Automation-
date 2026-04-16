@@ -12,6 +12,7 @@ import imprestRoutes from './routes/imprest.js';
 import reportRoutes from './routes/reports.js';
 import whatsappWebhookRoutes from './routes/whatsappWebhook.js';
 import feedbackRoutes from './routes/feedback.js';
+import poPaymentsRoutes from './routes/poPayments.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 const app = express();
@@ -101,6 +102,7 @@ app.use('/api/imprest', imprestRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/whatsapp', whatsappWebhookRoutes);
 app.use('/api/feedback', feedbackRoutes);
+app.use('/api/po-payments', poPaymentsRoutes);
 
 // ── 404 handler ───────────────────────────────────────────────────────────────
 app.use((_req, res) => {

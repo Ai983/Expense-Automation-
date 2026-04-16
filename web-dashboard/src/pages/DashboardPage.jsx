@@ -2,8 +2,19 @@ import { useEffect, useState } from 'react';
 import { getMetrics, getBySite, getByCategory, getByStatus, getSiteDetails, getCategoryDetails } from '../services/dashboardService';
 import { SiteChart, CategoryChart, StatusChart, DrillDownTable } from '../components/dashboard/Charts';
 import { showToast } from '../components/layout/Toast';
+import { useAuth } from '../context/AuthContext';
+import POPaymentsTab from '../components/POPaymentsTab';
+import ProjectSpendTab from '../components/ProjectSpendTab';
+
+const TABS = [
+  { id: 'expenses', label: 'Expense Analytics', roles: ['finance', 'manager', 'admin'] },
+  { id: 'po-payments', label: 'PO Payments', roles: ['finance', 'manager', 'admin'] },
+  { id: 'project-spend', label: 'Project Spend', roles: ['finance', 'manager', 'admin'] },
+];
 
 export default function DashboardPage() {
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState('expenses');
   const [metrics, setMetrics] = useState(null);
   const [siteData, setSiteData] = useState([]);
   const [catData, setCatData] = useState([]);
@@ -11,6 +22,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [drillDown, setDrillDown] = useState(null);
   const [drillLoading, setDrillLoading] = useState(false);
+
+  const visibleTabs = TABS.filter(t => !user?.role || t.roles.includes(user.role));
 
   useEffect(() => {
     Promise.all([getMetrics(), getBySite(), getByCategory(), getByStatus()])
@@ -52,32 +65,59 @@ export default function DashboardPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-sm text-gray-500 mt-1">HagerStone expense analytics overview</p>
+        <p className="text-sm text-gray-500 mt-1">HagerStone analytics overview</p>
       </div>
 
-      {/* Metric cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <MetricCard label="Total Expenses" value={metrics?.totalExpenses?.toLocaleString() || '0'} colour="blue" />
-        <MetricCard label="Auto-Verify Rate" value={`${metrics?.autoVerifyRate || 0}%`}
-          sub={`${metrics?.autoVerified || 0} auto-verified`} colour="green" />
-        <MetricCard label="Pending Approval" value={metrics?.pendingApproval?.toLocaleString() || '0'} colour="orange" />
-        <MetricCard label="Total Processed" value={formatINR(metrics?.totalAmountProcessed)} colour="purple" />
+      {/* Tab bar */}
+      <div className="flex gap-1 border-b border-gray-200 mb-6">
+        {visibleTabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
+              activeTab === tab.id
+                ? 'text-blue-600 border-b-2 border-blue-600 -mb-px bg-white'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <SiteChart data={siteData} onBarClick={handleSiteClick} />
-        <CategoryChart data={catData} onSliceClick={handleCategoryClick} />
-      </div>
+      {/* Expense Analytics tab */}
+      {activeTab === 'expenses' && (
+        <>
+          {/* Metric cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <MetricCard label="Total Expenses" value={metrics?.totalExpenses?.toLocaleString() || '0'} colour="blue" />
+            <MetricCard label="Auto-Verify Rate" value={`${metrics?.autoVerifyRate || 0}%`}
+              sub={`${metrics?.autoVerified || 0} auto-verified`} colour="green" />
+            <MetricCard label="Pending Approval" value={metrics?.pendingApproval?.toLocaleString() || '0'} colour="orange" />
+            <MetricCard label="Total Processed" value={formatINR(metrics?.totalAmountProcessed)} colour="purple" />
+          </div>
 
-      {/* Drill-down */}
-      {drillLoading && <div className="card mb-6 text-center py-8 text-gray-400">Loading employee breakdown...</div>}
-      {drillDown && !drillLoading && (
-        <DrillDownTable title={drillDown.title} data={drillDown.data}
-          onClose={() => setDrillDown(null)} />
+          {/* Charts */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <SiteChart data={siteData} onBarClick={handleSiteClick} />
+            <CategoryChart data={catData} onSliceClick={handleCategoryClick} />
+          </div>
+
+          {drillLoading && <div className="card mb-6 text-center py-8 text-gray-400">Loading employee breakdown...</div>}
+          {drillDown && !drillLoading && (
+            <DrillDownTable title={drillDown.title} data={drillDown.data}
+              onClose={() => setDrillDown(null)} />
+          )}
+
+          <StatusChart data={statusData} />
+        </>
       )}
 
-      <StatusChart data={statusData} />
+      {/* PO Payments tab */}
+      {activeTab === 'po-payments' && <POPaymentsTab />}
+
+      {/* Project Spend tab */}
+      {activeTab === 'project-spend' && <ProjectSpendTab />}
     </div>
   );
 }

@@ -14,6 +14,10 @@ function getNavItems(role) {
         { to: '/imprest-analytics', label: 'Imprest Analytics', icon: '📈' },
         { to: '/feedback', label: 'Feedback', icon: '💬' },
       ];
+    case 'procurement_finance':
+      return [
+        { to: '/procurement-queue', label: 'Procurement Payments', icon: '📦' },
+      ];
     default: // finance, manager, admin
       return [
         { to: '/queue', label: 'Expense Queue', icon: '📋' },
