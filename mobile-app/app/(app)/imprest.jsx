@@ -83,6 +83,8 @@ function getStepLabels(category) {
       return [...base, 'labour_sub', 'people', 'amount', 'purpose', 'review'];
     case 'Porter':
       return [...base, 'people', 'amount', 'purpose', 'review'];
+    case 'Site Expense':
+      return [...base, 'amount', 'purpose', 'review'];
     default:
       return [...base, 'people', 'amount', 'purpose', 'review'];
   }

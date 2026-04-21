@@ -32,7 +32,6 @@ export const CATEGORIES = [
   'Travelling',
   'Software',
   'Labour Expense',
-  'Material Expense',
   'Site Expense',
   'Office Expense',
   'Employee Welfare',
@@ -71,6 +70,7 @@ export const IMPREST_CATEGORIES = [
   'Labour Expense',
   'Porter',
   'Hotel Expense',
+  'Site Expense',
   'Other',
 ];
 

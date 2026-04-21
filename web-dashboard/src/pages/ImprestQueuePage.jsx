@@ -3,7 +3,7 @@ import api from '../services/api';
 
 const IMPREST_CATEGORIES = [
   'Food Expense', 'Site Room Rent', 'Travelling', 'Conveyance',
-  'Labour Expense', 'Porter', 'Hotel Expense', 'Other',
+  'Labour Expense', 'Porter', 'Hotel Expense', 'Site Expense', 'Other',
 ];
 
 const IMPREST_SITES = [
