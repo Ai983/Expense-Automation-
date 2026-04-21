@@ -950,7 +950,7 @@ export default function ImprestScreen() {
               </View>
               <View style={styles.infoBox}>
                 <Text style={styles.infoHint}>
-                  Rate: {'\u20B9'}{vehicleType === 'Car' ? '10' : '8'}/km
+                  Rate: {'\u20B9'}{vehicleType === 'Car' ? '10' : '5'}/km
                 </Text>
               </View>
               <Text style={styles.label}>From / {'\u0915\u0939\u093E\u0901 \u0938\u0947'} *</Text>

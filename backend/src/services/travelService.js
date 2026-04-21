@@ -160,7 +160,7 @@ export async function estimateContractualCabCost({ from, to, peopleCount = 1 }) 
 // ── Own Vehicle (Bike/Car) — distance × fixed rate ────────────────────────────
 
 export async function estimateOwnVehicleCost({ from, to, vehicleType = 'Bike' }) {
-  const RATE = vehicleType === 'Car' ? 10 : 8;
+  const RATE = vehicleType === 'Car' ? 10 : 5;
   const distanceKm = await getDistanceKmWithFallback(from, to);
 
   const estimatedAmount = distanceKm
