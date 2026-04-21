@@ -9,17 +9,19 @@ import { Picker } from '@react-native-picker/picker';
 import { useAuth } from '../../src/context/AuthContext';
 import { submitExpense } from '../../src/services/expenseService';
 import { getMyReminders, fulfillReminder } from '../../src/services/imprestService';
-import { SITES, CATEGORIES } from '../../src/constants';
+import { SITES, CATEGORIES, IMPREST_TO_EXPENSE_CATEGORY } from '../../src/constants';
 
 const INITIAL_FORM = { site: SITES[0], amount: '', category: CATEGORIES[0], description: '' };
 
 export default function SubmitExpenseScreen() {
   const [form, setForm] = useState(INITIAL_FORM);
-  const [image, setImage] = useState(null);
+  const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [reminders, setReminders] = useState([]);
   const [activeReminderId, setActiveReminderId] = useState(null); // reminder being fulfilled
+  const [activeImprestId, setActiveImprestId] = useState(null); // linked imprest id
+  const [imprestApprovedAmount, setImprestApprovedAmount] = useState(null); // for showing balance info
   const { user } = useAuth();
 
   const fetchReminders = useCallback(async () => {
@@ -38,18 +40,23 @@ export default function SubmitExpenseScreen() {
 
   function applyReminder(reminder) {
     const imp = reminder.imprest;
-    const approvedAmt = imp?.approved_amount || imp?.amount_requested || '';
+    const approvedAmt = parseFloat(imp?.approved_amount || imp?.amount_requested || 0);
+    const previouslyFulfilled = parseFloat(reminder.fulfilled_amount || 0);
+    const remainingBalance = Math.max(0, approvedAmt - previouslyFulfilled);
     const site = imp?.site && SITES.includes(imp.site) ? imp.site : SITES[0];
-    const category = imp?.category && CATEGORIES.includes(imp.category) ? imp.category : CATEGORIES[0];
+    const mappedCategory = IMPREST_TO_EXPENSE_CATEGORY[imp?.category] || null;
+    const category = mappedCategory && CATEGORIES.includes(mappedCategory) ? mappedCategory : (imp?.category && CATEGORIES.includes(imp.category) ? imp.category : CATEGORIES[0]);
 
     setForm({
       site,
-      amount: approvedAmt ? String(approvedAmt) : '',
+      amount: remainingBalance > 0 ? String(remainingBalance) : (approvedAmt ? String(approvedAmt) : ''),
       category,
       description: `Expense for imprest ${imp?.ref_id || ''}`,
     });
     setActiveReminderId(reminder.id);
-    setImage(null);
+    setActiveImprestId(imp?.id || null);
+    setImprestApprovedAmount(approvedAmt);
+    setImages([]);
     setResult(null);
   }
 
@@ -61,7 +68,7 @@ export default function SubmitExpenseScreen() {
       });
       if (!result.canceled && result.assets?.[0]) {
         const asset = result.assets[0];
-        setImage({ uri: asset.uri, mimeType: 'application/pdf', name: asset.name });
+        setImages((prev) => [...prev, { uri: asset.uri, mimeType: 'application/pdf', name: asset.name }]);
         setResult(null);
       }
     } catch {
@@ -89,39 +96,46 @@ export default function SubmitExpenseScreen() {
 
     if (!pickerResult.canceled && pickerResult.assets?.[0]) {
       const asset = pickerResult.assets[0];
-      setImage({ uri: asset.uri, mimeType: asset.mimeType || 'image/jpeg' });
+      setImages((prev) => [...prev, { uri: asset.uri, mimeType: asset.mimeType || 'image/jpeg' }]);
       setResult(null);
     }
+  }
+
+  function removeImage(index) {
+    setImages((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function handleSubmit() {
     if (!form.amount || isNaN(parseFloat(form.amount)) || parseFloat(form.amount) <= 0) {
       return Alert.alert('Error', 'Enter a valid amount');
     }
-    if (!image) {
-      return Alert.alert('Error', 'Upload a payment screenshot or PDF');
+    if (images.length === 0) {
+      return Alert.alert('Error', 'Upload at least one payment screenshot or PDF');
     }
 
     setLoading(true);
     setResult(null);
 
     try {
+      const expenseAmount = parseFloat(form.amount);
       const res = await submitExpense({
         site: form.site,
-        amount: parseFloat(form.amount),
+        amount: expenseAmount,
         category: form.category,
         description: form.description,
-        imageUri: image.uri,
-        imageMimeType: image.mimeType,
+        images,
+        imprestId: activeImprestId || undefined,
       });
       setResult(res);
       setForm(INITIAL_FORM);
-      setImage(null);
+      setImages([]);
 
-      // Mark the linked reminder as fulfilled
+      // Mark the linked reminder as fulfilled (or partially fulfilled)
       if (activeReminderId) {
-        try { await fulfillReminder(activeReminderId); } catch { /* ignore */ }
+        try { await fulfillReminder(activeReminderId, expenseAmount); } catch { /* ignore */ }
         setActiveReminderId(null);
+        setActiveImprestId(null);
+        setImprestApprovedAmount(null);
         fetchReminders(); // refresh reminder list
       }
     } catch (err) {
@@ -154,19 +168,24 @@ export default function SubmitExpenseScreen() {
               const hoursLeft = Math.floor(msLeft / (1000 * 60 * 60));
               const daysLeft = Math.floor(hoursLeft / 24);
               const isActive = activeReminderId === r.id;
+              const isExpired = r.status === 'expired' || msLeft < 0;
+              const approvedAmt = parseFloat(imp?.approved_amount || imp?.amount_requested || 0);
+              const fulfilledAmt = parseFloat(r.fulfilled_amount || 0);
+              const remainingBal = Math.max(0, approvedAmt - fulfilledAmt);
+              const hasPartialExpense = fulfilledAmt > 0;
 
               return (
                 <TouchableOpacity
                   key={r.id}
-                  style={[styles.reminderCard, isActive && styles.reminderCardActive]}
+                  style={[styles.reminderCard, isActive && styles.reminderCardActive, isExpired && styles.reminderCardExpired]}
                   onPress={() => applyReminder(r)}
                   activeOpacity={0.8}
                 >
                   <View style={styles.reminderRow}>
                     <Text style={styles.reminderRef}>{imp?.ref_id}</Text>
-                    <View style={[styles.reminderBadge, hoursLeft < 24 && styles.reminderBadgeUrgent]}>
-                      <Text style={[styles.reminderBadgeText, hoursLeft < 24 && styles.reminderBadgeTextUrgent]}>
-                        {daysLeft > 0 ? `${daysLeft}d left` : hoursLeft > 0 ? `${hoursLeft}h left` : 'Due today'}
+                    <View style={[styles.reminderBadge, isExpired ? styles.reminderBadgeExpired : hoursLeft < 24 && styles.reminderBadgeUrgent]}>
+                      <Text style={[styles.reminderBadgeText, isExpired ? styles.reminderBadgeTextExpired : hoursLeft < 24 && styles.reminderBadgeTextUrgent]}>
+                        {isExpired ? 'Overdue — submit now' : daysLeft > 0 ? `${daysLeft}d left` : hoursLeft > 0 ? `${hoursLeft}h left` : 'Due today'}
                       </Text>
                     </View>
                   </View>
@@ -174,10 +193,21 @@ export default function SubmitExpenseScreen() {
                     {imp?.category} · {imp?.site}
                   </Text>
                   <Text style={styles.reminderAmount}>
-                    Approved: ₹{Number(imp?.approved_amount || imp?.amount_requested || 0).toLocaleString('en-IN')}
+                    Approved: ₹{approvedAmt.toLocaleString('en-IN')}
                   </Text>
+                  {hasPartialExpense && (
+                    <View style={styles.balanceRow}>
+                      <Text style={styles.balanceFulfilled}>
+                        Submitted: ₹{fulfilledAmt.toLocaleString('en-IN')}
+                      </Text>
+                      <Text style={styles.balanceRemaining}>
+                        Balance: ₹{remainingBal.toLocaleString('en-IN')}
+                      </Text>
+                    </View>
+                  )}
                   <Text style={styles.reminderDeadline}>
                     Submit by {deadline.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    {hasPartialExpense ? ' · You can submit remaining amount' : ''}
                   </Text>
                   {isActive && (
                     <Text style={styles.reminderActive}>✓ Form pre-filled — add screenshot & submit</Text>
@@ -209,9 +239,9 @@ export default function SubmitExpenseScreen() {
         {activeReminderId && (
           <View style={styles.prefilledBanner}>
             <Text style={styles.prefilledText}>
-              Form pre-filled from imprest · You can edit any field
+              Form pre-filled from imprest · You can submit partial or full amount
             </Text>
-            <TouchableOpacity onPress={() => { setActiveReminderId(null); setForm(INITIAL_FORM); }}>
+            <TouchableOpacity onPress={() => { setActiveReminderId(null); setActiveImprestId(null); setImprestApprovedAmount(null); setForm(INITIAL_FORM); setImages([]); }}>
               <Text style={styles.prefilledClear}>Clear</Text>
             </TouchableOpacity>
           </View>
@@ -252,23 +282,31 @@ export default function SubmitExpenseScreen() {
           numberOfLines={3}
         />
 
-        <Text style={styles.label}>Payment Proof *</Text>
-        {image ? (
-          <View style={styles.imagePreview}>
-            {image.mimeType === 'application/pdf' ? (
-              <View style={styles.pdfPreview}>
-                <Text style={styles.pdfIcon}>📄</Text>
-                <Text style={styles.pdfName} numberOfLines={2}>{image.name || 'document.pdf'}</Text>
-                <Text style={styles.pdfNote}>PDF will be parsed by AI to extract amount</Text>
+        <Text style={styles.label}>Payment Proof * {images.length > 0 && `(${images.length} attached)`}</Text>
+
+        {/* Show attached images */}
+        {images.length > 0 && (
+          <View style={{ marginBottom: 12 }}>
+            {images.map((img, idx) => (
+              <View key={idx} style={styles.imagePreview}>
+                {img.mimeType === 'application/pdf' ? (
+                  <View style={styles.pdfPreview}>
+                    <Text style={styles.pdfIcon}>📄</Text>
+                    <Text style={styles.pdfName} numberOfLines={2}>{img.name || 'document.pdf'}</Text>
+                  </View>
+                ) : (
+                  <Image source={{ uri: img.uri }} style={styles.previewImg} resizeMode="contain" />
+                )}
+                <TouchableOpacity onPress={() => removeImage(idx)} style={styles.removeImg}>
+                  <Text style={styles.removeImgText}>Remove</Text>
+                </TouchableOpacity>
               </View>
-            ) : (
-              <Image source={{ uri: image.uri }} style={styles.previewImg} resizeMode="contain" />
-            )}
-            <TouchableOpacity onPress={() => setImage(null)} style={styles.removeImg}>
-              <Text style={styles.removeImgText}>Remove</Text>
-            </TouchableOpacity>
+            ))}
           </View>
-        ) : (
+        )}
+
+        {/* Add more buttons (always visible if < 5 images) */}
+        {images.length < 5 && (
           <View style={styles.imageButtons}>
             <TouchableOpacity style={styles.imgBtn} onPress={() => pickImage('camera')}>
               <Text style={styles.imgBtnText}>📷 Camera</Text>
@@ -280,6 +318,11 @@ export default function SubmitExpenseScreen() {
               <Text style={styles.imgBtnText}>📄 PDF</Text>
             </TouchableOpacity>
           </View>
+        )}
+        {images.length > 0 && images.length < 5 && (
+          <Text style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 4 }}>
+            You can add up to {5 - images.length} more screenshot{5 - images.length !== 1 ? 's' : ''}
+          </Text>
         )}
 
         <TouchableOpacity
@@ -346,6 +389,11 @@ const styles = StyleSheet.create({
   reminderCardActive: {
     borderColor: '#e8a24a', backgroundColor: '#fff7ed', borderWidth: 2,
   },
+  reminderCardExpired: {
+    backgroundColor: '#fff1f2', borderColor: '#f87171', borderWidth: 2,
+  },
+  reminderBadgeExpired: { backgroundColor: '#fee2e2' },
+  reminderBadgeTextExpired: { color: '#dc2626', fontWeight: '700' },
   reminderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
   reminderRef: { fontSize: 13, fontWeight: '700', color: '#e8a24a', fontFamily: 'monospace' },
   reminderBadge: { backgroundColor: '#fef3c7', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
@@ -356,6 +404,9 @@ const styles = StyleSheet.create({
   reminderAmount: { fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 2 },
   reminderDeadline: { fontSize: 11, color: '#6b7280' },
   reminderActive: { fontSize: 12, color: '#16a34a', fontWeight: '600', marginTop: 6 },
+  balanceRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 2, marginBottom: 2 },
+  balanceFulfilled: { fontSize: 12, color: '#16a34a', fontWeight: '600' },
+  balanceRemaining: { fontSize: 12, color: '#dc2626', fontWeight: '700' },
 
   // Pre-filled banner
   prefilledBanner: {

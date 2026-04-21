@@ -16,7 +16,7 @@ export async function estimateTravelCost({ from, to, peopleCount, mode, travelDa
 /**
  * Uploads a ride-hailing screenshot for Claude OCR and returns { amount, confidence }.
  */
-export async function scanConveyanceReceipt(imageUri, mimeType = 'image/jpeg') {
+export async function scanConveyanceReceipt(imageUri, mimeType = 'image/jpeg', extras = {}) {
   const formData = new FormData();
   const ext = mimeType.split('/').pop() || 'jpg';
   const filename = `receipt.${ext}`;
@@ -28,6 +28,11 @@ export async function scanConveyanceReceipt(imageUri, mimeType = 'image/jpeg') {
   } else {
     formData.append('screenshot', { uri: imageUri, name: filename, type: mimeType });
   }
+
+  // Append verification extras (from, to, rideType) if provided
+  if (extras.from) formData.append('from', extras.from);
+  if (extras.to) formData.append('to', extras.to);
+  if (extras.rideType) formData.append('rideType', extras.rideType);
 
   const { data } = await api.post('/api/imprest/scan-conveyance', formData, { timeout: 30000 });
   return data.data;
@@ -50,6 +55,9 @@ export async function getMyReminders(employeeId) {
   return data.data;
 }
 
-export async function fulfillReminder(reminderId) {
-  await api.post(`/api/imprest/reminders/${reminderId}/fulfill`);
+export async function fulfillReminder(reminderId, expenseAmount) {
+  const { data } = await api.post(`/api/imprest/reminders/${reminderId}/fulfill`, {
+    expenseAmount: expenseAmount || 0,
+  });
+  return data.data;
 }

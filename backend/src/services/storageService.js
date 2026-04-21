@@ -13,7 +13,7 @@ export async function uploadScreenshot(buffer, mimeType, employeeId, refId) {
     .from(STORAGE_BUCKET)
     .upload(storagePath, buffer, {
       contentType: mimeType,
-      upsert: false,
+      upsert: true,
     });
 
   if (error) {
@@ -39,6 +39,27 @@ export async function getSignedUrl(storagePath) {
   }
 
   return data.signedUrl;
+}
+
+/**
+ * Uploads a payment receipt to Supabase Storage.
+ */
+export async function uploadPaymentReceipt(buffer, mimeType, refId) {
+  const ext = mimeType.split('/')[1].replace('jpeg', 'jpg');
+  const storagePath = `payment-receipts/${refId}.${ext}`;
+
+  const { error } = await supabaseAdmin.storage
+    .from(STORAGE_BUCKET)
+    .upload(storagePath, buffer, {
+      contentType: mimeType,
+      upsert: true,
+    });
+
+  if (error) {
+    throw new Error(`Payment receipt upload failed: ${error.message}`);
+  }
+
+  return storagePath;
 }
 
 /**

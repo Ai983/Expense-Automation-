@@ -19,29 +19,65 @@ async function getDistanceKm(from, to) {
   }
 }
 
-// ── Flight / Train / Bus — Claude Haiku estimate ──────────────────────────────
+// ── Flight / Train / Bus — Claude with web search for real-time prices ────────
+
+async function searchWebForFare(query) {
+  try {
+    const res = await fetch(`https://www.googleapis.com/customsearch/v1?key=${MAPS_KEY}&cx=a352a1074c0264ef1&q=${encodeURIComponent(query)}&num=5`);
+    const data = await res.json();
+    return (data.items || []).map(item => `${item.title}: ${item.snippet}`).join('\n');
+  } catch (e) {
+    console.warn('Web search failed:', e.message);
+    return '';
+  }
+}
 
 export async function estimatePublicTransportCost({ from, to, mode, travelDate, peopleCount = 1 }) {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  const dateStr = travelDate ? ` on ${travelDate}` : '';
+  const dateStr = travelDate || new Date().toISOString().split('T')[0];
   const peopleStr = peopleCount > 1 ? `\nNumber of people: ${peopleCount} (provide total for all)` : '';
 
-  const prompt = `Estimate a realistic ${mode} fare for travel in India.
-From: ${from}
-To: ${to}${dateStr}${peopleStr}
+  // Search web for real-time prices
+  let searchQuery = '';
+  if (mode === 'Flight') {
+    searchQuery = `cheapest flight ${from} to ${to} ${dateStr} economy fare price INR`;
+  } else if (mode === 'Train') {
+    searchQuery = `train fare ${from} to ${to} 3AC tatkal price IRCTC ${dateStr}`;
+  } else {
+    searchQuery = `${mode} fare ${from} to ${to} price INR ${dateStr}`;
+  }
 
-Consider typical Indian ${mode.toLowerCase()} fares. For flights, use economy class. For trains, use sleeper/3AC. For buses, use AC/non-AC as appropriate.
-Return ONLY this JSON with no other text:
+  const webResults = await searchWebForFare(searchQuery);
+  const webContext = webResults
+    ? `\nHere are real-time search results for current fares:\n${webResults}\n\nUse these results to give the most accurate fare.`
+    : '\nNo web results found. Use your best knowledge of current Indian fares.';
+
+  const prompt = `You are a travel cost estimator for an Indian corporate expense system.
+
+Mode: ${mode}
+From: ${from}
+To: ${to}
+Travel Date: ${dateStr} (THIS IS THE ACTUAL TRAVEL DATE — estimate fare for THIS date, NOT advance booking)${peopleStr}
+${webContext}
+
+IMPORTANT:
+- The travel date is ${dateStr}. Give the fare for booking on/near this date.
+- For FLIGHTS: Last-minute/same-week economy fares are HIGHER than advance fares. A Delhi-Bangalore flight booked 1-2 days before typically costs ₹6,000-₹10,000, not ₹3,000-₹4,000.
+- For TRAINS: Use tatkal fare if travel is within 1-2 days. Use regular 3AC fare for advance booking.
+- Be realistic about last-minute pricing. Do NOT give advance booking prices for near-term travel.
+- Give ONE specific amount, not a range.
+
+Return ONLY this JSON:
 {
   "estimated_amount": <total fare in rupees as integer>,
   "per_person_amount": <per person fare as integer>,
-  "reasoning": "<one sentence explanation>"
+  "reasoning": "<specific explanation mentioning airline/train, class, and why this price>"
 }`;
 
   try {
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 256,
+      max_tokens: 300,
       messages: [{ role: 'user', content: prompt }],
     });
 
@@ -99,10 +135,10 @@ Return ONLY a JSON object with no other text:
   }
 }
 
-// ── Contractual Cab — distance × ₹12/km ──────────────────────────────────────
+// ── Contractual Cab — distance × ₹10/km ──────────────────────────────────────
 
 export async function estimateContractualCabCost({ from, to, peopleCount = 1 }) {
-  const RATE_PER_KM = 12;
+  const RATE_PER_KM = 10;
   const distanceKm = await getDistanceKmWithFallback(from, to);
 
   const estimatedAmount = distanceKm
@@ -124,7 +160,7 @@ export async function estimateContractualCabCost({ from, to, peopleCount = 1 }) 
 // ── Own Vehicle (Bike/Car) — distance × fixed rate ────────────────────────────
 
 export async function estimateOwnVehicleCost({ from, to, vehicleType = 'Bike' }) {
-  const RATE = vehicleType === 'Car' ? 10 : 8;
+  const RATE = vehicleType === 'Car' ? 10 : 5;
   const distanceKm = await getDistanceKmWithFallback(from, to);
 
   const estimatedAmount = distanceKm

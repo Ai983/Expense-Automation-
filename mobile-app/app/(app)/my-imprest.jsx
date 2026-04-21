@@ -44,6 +44,9 @@ export default function MyImprestScreen() {
 
   return (
     <View style={styles.container}>
+      <View style={styles.headerBar}>
+        <Text style={styles.headerTitle}>My Imprest / मेरे अग्रिम</Text>
+      </View>
       <Text style={styles.total}>{total} total request{total !== 1 ? 's' : ''}</Text>
       <FlatList
         data={requests}
@@ -59,8 +62,8 @@ export default function MyImprestScreen() {
         }
         ListEmptyComponent={
           <View style={styles.center}>
-            <Text style={styles.emptyText}>No imprest requests yet.</Text>
-            <Text style={styles.emptyHint}>Submit your first advance from the Imprest tab.</Text>
+            <Text style={styles.emptyText}>No imprest requests yet. / अभी कोई अग्रिम नहीं है</Text>
+            <Text style={styles.emptyHint}>Submit your first advance from the Imprest tab. / इम्प्रेस्ट टैब से अपना पहला अग्रिम जमा करें</Text>
           </View>
         }
       />
@@ -68,15 +71,39 @@ export default function MyImprestScreen() {
   );
 }
 
+const STAGE_LABELS = {
+  's1_pending': 'Under Review',
+  's1_approved': 'Forwarded',
+  's2_pending': 'Awaiting Approval',
+  's2_approved': 'Approved',
+  's2_rejected': 'Rejected',
+  's3_pending': 'With Finance',
+  's3_approved': 'Approved - Payment Pending',
+  's3_rejected': 'Rejected by Finance',
+  'director_rejected': 'Rejected by Director',
+  'paid': 'Paid',
+};
+const STAGE_COLOURS = {
+  's1_pending': '#f59e0b',
+  's2_pending': '#f97316',
+  's3_pending': '#3b82f6',
+  's3_approved': '#10b981',
+  'paid': '#16a34a',
+  'director_rejected': '#ef4444',
+  's3_rejected': '#ef4444',
+  's2_rejected': '#ef4444',
+};
+
 function ImprestCard({ request }) {
-  const statusLabel = IMPREST_STATUS_LABELS[request.status] || request.status;
-  const statusColor = IMPREST_STATUS_COLOURS[request.status] || '#9ca3af';
+  const stage = request.current_stage;
+  const statusLabel = stage ? (STAGE_LABELS[stage] || stage) : (IMPREST_STATUS_LABELS[request.status] || request.status);
+  const statusColor = stage ? (STAGE_COLOURS[stage] || '#9ca3af') : (IMPREST_STATUS_COLOURS[request.status] || '#9ca3af');
   const submittedDate = new Date(request.submitted_at).toLocaleDateString('en-IN', {
     day: '2-digit', month: 'short', year: 'numeric',
   });
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: statusColor }]}>
       <View style={styles.cardHeader}>
         <Text style={styles.refId}>{request.ref_id}</Text>
         <View style={[styles.badge, { backgroundColor: statusColor + '22', borderColor: statusColor }]}>
@@ -97,6 +124,11 @@ function ImprestCard({ request }) {
         <Text style={styles.date}>{submittedDate}</Text>
       </View>
 
+      {request.paid && request.paid_amount && (
+        <Text style={[styles.approvedAmount, { color: '#16a34a', marginTop: 4 }]}>
+          Paid: ₹{Number(request.paid_amount).toLocaleString('en-IN')}
+        </Text>
+      )}
       {request.status === 'rejected' && request.rejection_reason && (
         <Text style={styles.rejectionReason}>Reason: {request.rejection_reason}</Text>
       )}
@@ -106,6 +138,8 @@ function ImprestCard({ request }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9fafb' },
+  headerBar: { backgroundColor: '#e8a24a', paddingVertical: 14, paddingHorizontal: 20 },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: '#fff' },
   total: { fontSize: 13, color: '#6b7280', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 },
   list: { padding: 20, paddingTop: 8, paddingBottom: 40 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60 },

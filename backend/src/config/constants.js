@@ -40,9 +40,21 @@ export const CATEGORIES = [
   'Porter Expenses',
 ];
 
-export const ROLES = ['employee', 'finance', 'manager', 'admin'];
+export const ROLES = ['employee', 'finance', 'manager', 'admin', 'approver_s1', 'approver_s2'];
 
 export const FINANCE_ROLES = ['finance', 'manager', 'admin'];
+
+// Multi-stage approval roles
+export const S1_ROLES = ['approver_s1', 'admin'];
+export const S2_ROLES = ['approver_s2', 'admin'];
+export const S3_ROLES = ['finance', 'manager', 'admin'];
+export const ALL_DASHBOARD_ROLES = ['approver_s1', 'approver_s2', 'finance', 'manager', 'admin'];
+
+// Sites that always go through Ritu (not Bhaskar) regardless of amount
+export const RITU_ALWAYS_SITES = ['Head Office', 'Bangalore Office'];
+
+// Amount threshold for director approval
+export const DIRECTOR_APPROVAL_THRESHOLD = 10000;
 
 export const EXPENSE_STATUSES = [
   'pending',

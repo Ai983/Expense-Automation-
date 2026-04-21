@@ -9,6 +9,7 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
   const [rejecting, setRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [acting, setActing] = useState(false);
+  const [adjustedAmount, setAdjustedAmount] = useState('');
 
   useEffect(() => {
     getExpenseDetails(expenseId)
@@ -20,7 +21,8 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
   async function handleApprove() {
     setActing(true);
     try {
-      await approveExpense(expenseId);
+      const adj = adjustedAmount.trim() ? parseFloat(adjustedAmount) : null;
+      await approveExpense(expenseId, adj);
       showToast('Expense approved', 'success');
       onAction?.('approved');
       onClose();
@@ -47,7 +49,7 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
   }
 
   const meta = expense?.screenshot_metadata || {};
-  const canAct = expense && ['pending', 'verified', 'manual_review'].includes(expense.status);
+  const canAct = expense && ['pending', 'verified', 'manual_review', 'blocked'].includes(expense.status);
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
@@ -134,33 +136,60 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
               </div>
             )}
 
-            {/* Attachment — screenshot or PDF */}
-            {expense.screenshotSignedUrl && (
+            {/* Attachments — one or more screenshots/PDFs */}
+            {(expense.allScreenshotUrls?.length > 0 || expense.screenshotSignedUrl) && (
               <div>
                 <h3 className="text-sm font-semibold text-gray-700 mb-3">
-                  {meta.attachmentType === 'pdf' ? 'PDF Attachment' : 'Payment Screenshot'}
+                  {meta.screenshotCount > 1
+                    ? `Payment Proofs (${meta.screenshotCount} attachments)`
+                    : meta.attachmentType === 'pdf' ? 'PDF Attachment' : 'Payment Screenshot'}
                 </h3>
-                {meta.attachmentType === 'pdf' ? (
-                  <a
-                    href={expense.screenshotSignedUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 hover:bg-blue-100 transition text-blue-700 font-medium text-sm"
-                  >
-                    <span className="text-2xl">📄</span>
-                    <span>Open PDF Document</span>
-                  </a>
-                ) : (
-                  <>
-                    <a href={expense.screenshotSignedUrl} target="_blank" rel="noopener noreferrer">
-                      <img
-                        src={expense.screenshotSignedUrl}
-                        alt="Payment screenshot"
-                        className="rounded-lg border max-h-80 object-contain cursor-pointer hover:opacity-90 transition"
-                      />
-                    </a>
-                    <p className="text-xs text-gray-400 mt-1">Click to open full size</p>
-                  </>
+                {meta.totalExtractedAmount > 0 && meta.screenshotCount > 1 && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 mb-3 text-xs text-blue-800">
+                    Total extracted from {meta.screenshotCount} screenshots: <strong>₹{Number(meta.totalExtractedAmount).toLocaleString('en-IN')}</strong>
+                    {meta.allOcrResults?.map((ocr, i) => (
+                      <span key={i} className="ml-2 text-blue-600">
+                        #{i + 1}: ₹{Number(ocr.extractedAmount || 0).toLocaleString('en-IN')}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className={`${(expense.allScreenshotUrls?.length || 0) > 1 ? 'grid grid-cols-2 gap-3' : ''}`}>
+                  {(expense.allScreenshotUrls || [expense.screenshotSignedUrl]).map((url, i) => (
+                    url && (
+                      <div key={i} className="relative">
+                        {meta.attachmentType === 'pdf' ? (
+                          <a href={url} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 hover:bg-blue-100 transition text-blue-700 font-medium text-sm">
+                            <span className="text-2xl">📄</span>
+                            <span>Open PDF {(expense.allScreenshotUrls?.length || 0) > 1 ? `#${i + 1}` : ''}</span>
+                          </a>
+                        ) : (
+                          <a href={url} target="_blank" rel="noopener noreferrer">
+                            <img src={url} alt={`Screenshot ${i + 1}`}
+                              className="rounded-lg border max-h-60 w-full object-contain cursor-pointer hover:opacity-90 transition" />
+                          </a>
+                        )}
+                      </div>
+                    )
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400 mt-1">Click to open full size</p>
+              </div>
+            )}
+
+            {/* Blocked info — accounts can still approve/reject */}
+            {expense.status === 'blocked' && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-sm font-semibold text-red-800">Blocked by AI Verification</p>
+                <p className="text-sm text-red-700 mt-1">
+                  This expense was auto-blocked due to low verification confidence or duplicate detection.
+                  Review the verification checks above and approve or reject as appropriate.
+                </p>
+                {meta.duplicateWarnings?.length > 0 && (
+                  <p className="text-xs text-red-600 mt-2">
+                    Duplicate warnings: {meta.duplicateWarnings.join('; ')}
+                  </p>
                 )}
               </div>
             )}
@@ -176,10 +205,49 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
             {/* Actions */}
             {canAct && (
               <div className="border-t pt-5 space-y-3">
+                {/* Amount Adjustment */}
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <label className="block text-sm font-semibold text-amber-800 mb-2">
+                    Adjust Amount (if different from claimed)
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-gray-500">Claimed: ₹{Number(expense.amount).toLocaleString('en-IN')}</span>
+                    {meta.extractedAmount && Number(meta.extractedAmount) !== Number(expense.amount) && (
+                      <span className="text-sm text-red-600 font-medium">OCR: ₹{Number(meta.extractedAmount).toLocaleString('en-IN')}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-gray-500 font-medium">₹</span>
+                    <input
+                      type="number"
+                      className="input flex-1"
+                      placeholder={`${expense.amount} (leave blank to keep original)`}
+                      value={adjustedAmount}
+                      onChange={(e) => setAdjustedAmount(e.target.value)}
+                      min="0"
+                      step="0.01"
+                    />
+                    {meta.extractedAmount && (
+                      <button
+                        type="button"
+                        className="text-xs px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded transition"
+                        onClick={() => setAdjustedAmount(String(meta.extractedAmount))}
+                      >
+                        Use OCR amount
+                      </button>
+                    )}
+                  </div>
+                  {adjustedAmount.trim() && (
+                    <p className="text-xs text-amber-700 mt-1">
+                      Will approve with ₹{Number(adjustedAmount).toLocaleString('en-IN')} instead of ₹{Number(expense.amount).toLocaleString('en-IN')}
+                    </p>
+                  )}
+                </div>
+
                 {!rejecting ? (
                   <div className="flex gap-3">
                     <button className="btn-primary flex-1" disabled={acting} onClick={handleApprove}>
-                      {acting ? 'Processing...' : '✓ Approve'}
+                      {acting ? 'Processing...' : adjustedAmount.trim() ? `✓ Approve ₹${Number(adjustedAmount).toLocaleString('en-IN')}` : '✓ Approve'}
                     </button>
                     <button className="btn-danger flex-1" disabled={acting} onClick={() => setRejecting(true)}>
                       ✗ Reject

@@ -35,10 +35,30 @@ Rules:
  * Extracts the fare/amount from a ride-hailing app screenshot (Ola, Uber, Rapido).
  * Returns: { amount, confidence }
  */
-export async function extractRideFare(imageBuffer, mimeType = 'image/jpeg') {
+export async function extractRideFare(imageBuffer, mimeType = 'image/jpeg', { expectedFrom, expectedTo, expectedRideType } = {}) {
   const client = getClient();
   const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
   const mediaType = supportedTypes.includes(mimeType) ? mimeType : 'image/jpeg';
+
+  const verifySection = (expectedFrom || expectedTo || expectedRideType)
+    ? `\nAlso verify these details against the screenshot:
+- Expected pickup: "${expectedFrom || 'not provided'}"
+- Expected drop: "${expectedTo || 'not provided'}"
+- Expected ride type: "${expectedRideType || 'not provided'}" (Bike/Auto/Cab)
+Add these fields to the JSON:
+  "locationMatch": <true if pickup/drop areas roughly match the screenshot locations, false otherwise>,
+  "rideTypeMatch": <true if the ride type in screenshot matches expected, false otherwise>,
+  "screenshotPickup": <actual pickup shown in screenshot or null>,
+  "screenshotDrop": <actual drop shown in screenshot or null>`
+    : '';
+
+  const rideTypeHint = expectedRideType
+    ? `\nIMPORTANT: The user selected ride type "${expectedRideType}". If the screenshot shows multiple ride options (e.g. Bike, Auto, Cab/Sedan/Go), extract the fare for the "${expectedRideType}" category:
+- If "${expectedRideType}" is "Bike": look for Bike Saver, Moto, Bike, Rapido Bike, etc.
+- If "${expectedRideType}" is "Cab": look for Uber Go, Go Sedan, Premier, Ola Mini, Ola Prime, sedan, hatchback, cab options — NOT Bike/Moto/Auto.
+- If "${expectedRideType}" is "Auto": look for Auto, Auto Rickshaw options.
+Pick the cheapest option within the matching category. If no option matches the expected ride type, still return the closest match but set rideTypeMatch to false.`
+    : '';
 
   const prompt = `You are extracting the total fare from a ride-hailing app screenshot (Ola, Uber, Rapido, etc).
 Look for the total fare, bill amount, or amount charged for the ride.
@@ -51,7 +71,7 @@ Rules:
 - Look for labels like "Total", "Fare", "Bill Amount", "Amount Charged", "Total Fare", "Your fare", "Trip fare"
 - Return the final total amount after all discounts and surcharges
 - Return null if you cannot find a clear fare amount
-- Return ONLY the JSON, no other text`;
+- Return ONLY the JSON, no other text${rideTypeHint}${verifySection}`;
 
   const response = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
@@ -73,9 +93,16 @@ Rules:
     const amount = typeof parsed.amount === 'number' ? parsed.amount
       : parsed.amount != null ? parseFloat(String(parsed.amount).replace(/,/g, '')) || null
       : null;
-    return { amount, confidence: parsed.confidence || 'low' };
+    return {
+      amount,
+      confidence: parsed.confidence || 'low',
+      locationMatch: parsed.locationMatch ?? null,
+      rideTypeMatch: parsed.rideTypeMatch ?? null,
+      screenshotPickup: parsed.screenshotPickup || null,
+      screenshotDrop: parsed.screenshotDrop || null,
+    };
   } catch {
-    return { amount: null, confidence: 'low' };
+    return { amount: null, confidence: 'low', locationMatch: null, rideTypeMatch: null };
   }
 }
 

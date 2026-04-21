@@ -13,6 +13,22 @@ import {
 import {
   getFoodRates, estimateTravelCost, scanConveyanceReceipt, submitImprest,
 } from '../../src/services/imprestService';
+import PlacesInput from '../../src/components/PlacesInput';
+
+// ── Category icon mapping ────────────────────────────────────────────────────
+const CATEGORY_ICONS = {
+  'Food Expense': '\uD83C\uDF7D\uFE0F',
+  'Site Room Rent': '\uD83C\uDFE0',
+  'Travelling': '\u2708\uFE0F',
+  'Conveyance': '\uD83D\uDE97',
+  'Labour Expense': '\uD83D\uDC77',
+  'Porter': '\uD83D\uDCE6',
+  'Hotel Expense': '\uD83C\uDFE8',
+  'Site Expense': '\uD83D\uDD27',
+  'Material Expense': '\uD83D\uDCE6',
+  'Office Expense': '\uD83C\uDFE2',
+  'Other': '\uD83D\uDCCB',
+};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -94,8 +110,11 @@ function getStepLabels(category) {
 
 export default function ImprestScreen() {
   const { user } = useAuth();
+  // Employees who can enter any food amount regardless of site rate
+  const canOverrideFoodRate = user?.email === 'ea@hagerstone.com' || user?.email === 'facade@hagerstone.com';
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
+  const [showSuccess, setShowSuccess] = useState(false);
 
   // Step tracking
   const [stepIndex, setStepIndex] = useState(0);
@@ -133,9 +152,14 @@ export default function ImprestScreen() {
   const [convFrom, setConvFrom] = useState('');
   const [convTo, setConvTo] = useState('');
   const [ownVehicleEstimate, setOwnVehicleEstimate] = useState(null);
+  const [rideType, setRideType] = useState('Cab');
+  const [scanResult, setScanResult] = useState(null);
 
   // Labour
   const [labourSub, setLabourSub] = useState(LABOUR_SUBCATEGORIES[0]);
+
+  // Site Expense / Material Expense — requirement description
+  const [requirement, setRequirement] = useState('');
 
   // ── Derived step list ────────────────────────────────────────────────────────
   const steps = getStepLabels(category);
@@ -183,10 +207,10 @@ export default function ImprestScreen() {
   // ── Travel estimate ──────────────────────────────────────────────────────────
   const handleEstimateTravel = useCallback(async () => {
     if (!travelFrom.trim() || !travelTo.trim()) {
-      return showAlert('Missing info', 'Please enter both From and To locations.');
+      return showAlert('Missing info / \u091C\u093E\u0928\u0915\u093E\u0930\u0940 \u0905\u0927\u0942\u0930\u0940', 'Please enter both From and To locations. / \u0915\u0943\u092A\u092F\u093E \u0926\u094B\u0928\u094B\u0902 \u0938\u094D\u0925\u093E\u0928 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964');
     }
     if (['Flight', 'Train', 'Bus'].includes(travelSubtype) && !travelDate) {
-      return showAlert('Missing info', 'Please enter the travel date.');
+      return showAlert('Missing info / \u091C\u093E\u0928\u0915\u093E\u0930\u0940 \u0905\u0927\u0942\u0930\u0940', 'Please enter the travel date. / \u0915\u0943\u092A\u092F\u093E \u092F\u093E\u0924\u094D\u0930\u093E \u0924\u093F\u0925\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964');
     }
     setEstimating(true);
     setAiEstimate(null);
@@ -202,7 +226,7 @@ export default function ImprestScreen() {
       setAmountRequested(String(estimate.estimatedAmount));
       setUserEditedAmount(false);
     } catch {
-      showAlert('Estimation failed', 'Could not estimate cost. Please enter manually.');
+      showAlert('Estimation failed / \u0905\u0928\u0941\u092E\u093E\u0928 \u0935\u093F\u092B\u0932', 'Could not estimate cost. Please enter manually. / \u0915\u0943\u092A\u092F\u093E \u092E\u0948\u0928\u094D\u092F\u0941\u0905\u0932 \u0930\u0942\u092A \u0938\u0947 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964');
     } finally {
       setEstimating(false);
     }
@@ -211,7 +235,7 @@ export default function ImprestScreen() {
   // ── Own Vehicle estimate ─────────────────────────────────────────────────────
   const handleEstimateOwnVehicle = useCallback(async () => {
     if (!convFrom.trim() || !convTo.trim()) {
-      return showAlert('Missing info', 'Please enter both From and To locations.');
+      return showAlert('Missing info / \u091C\u093E\u0928\u0915\u093E\u0930\u0940 \u0905\u0927\u0942\u0930\u0940', 'Please enter both From and To locations. / \u0915\u0943\u092A\u092F\u093E \u0926\u094B\u0928\u094B\u0902 \u0938\u094D\u0925\u093E\u0928 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964');
     }
     setEstimating(true);
     setOwnVehicleEstimate(null);
@@ -226,7 +250,7 @@ export default function ImprestScreen() {
       setAmountRequested(String(estimate.estimatedAmount));
       setUserEditedAmount(false);
     } catch {
-      showAlert('Estimation failed', 'Could not estimate. Please enter manually.');
+      showAlert('Estimation failed / \u0905\u0928\u0941\u092E\u093E\u0928 \u0935\u093F\u092B\u0932', 'Could not estimate. Please enter manually. / \u0915\u0943\u092A\u092F\u093E \u092E\u0948\u0928\u094D\u092F\u0941\u0905\u0932 \u0930\u0942\u092A \u0938\u0947 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964');
     } finally {
       setEstimating(false);
     }
@@ -250,80 +274,89 @@ export default function ImprestScreen() {
     const mimeType = asset.mimeType || 'image/jpeg';
     setConveyanceImage({ uri: asset.uri, mimeType });
     setScanningRide(true);
+    setScanResult(null);
     try {
-      const result = await scanConveyanceReceipt(asset.uri, mimeType);
-      setAmountRequested(String(result.amount));
+      const res = await scanConveyanceReceipt(asset.uri, mimeType, {
+        from: convFrom.trim(),
+        to: convTo.trim(),
+        rideType,
+      });
+      setAmountRequested(String(res.amount));
+      setScanResult(res);
     } catch (e) {
-      showAlert('Scan failed', e?.response?.data?.error || 'Could not read amount. Please enter manually.');
+      showAlert('Scan failed / \u0938\u094D\u0915\u0948\u0928 \u0935\u093F\u092B\u0932', e?.response?.data?.error || 'Could not read amount. Please enter manually. / \u0915\u0943\u092A\u092F\u093E \u092E\u0948\u0928\u094D\u092F\u0941\u0905\u0932 \u0930\u0942\u092A \u0938\u0947 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964');
     } finally {
       setScanningRide(false);
     }
-  }, []);
+  }, [convFrom, convTo, rideType]);
 
   // ── Navigation ───────────────────────────────────────────────────────────────
   const validateCurrentStep = () => {
     switch (currentStep) {
       case 'site':
-        if (!site) { showAlert('Required', 'Please select a site.'); return false; }
-        if (site === 'Others' && !customSite.trim()) { showAlert('Required', 'Please enter the site name.'); return false; }
+        if (!site) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please select a site. / \u0915\u0943\u092A\u092F\u093E \u090F\u0915 \u0938\u093E\u0907\u091F \u091A\u0941\u0928\u0947\u0902\u0964'); return false; }
+        if (site === 'Others' && !customSite.trim()) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter the site name. / \u0915\u0943\u092A\u092F\u093E \u0938\u093E\u0907\u091F \u0915\u093E \u0928\u093E\u092E \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
         return true;
       case 'category':
-        if (!category) { showAlert('Required', 'Please select a category.'); return false; }
+        if (!category) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please select a category. / \u0915\u0943\u092A\u092F\u093E \u090F\u0915 \u0936\u094D\u0930\u0947\u0923\u0940 \u091A\u0941\u0928\u0947\u0902\u0964'); return false; }
         return true;
       case 'people':
-        if (!peopleCount || parseInt(peopleCount) < 1) { showAlert('Required', 'Please enter number of people.'); return false; }
+        if (!peopleCount || parseInt(peopleCount) < 1) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter number of people. / \u0915\u0943\u092A\u092F\u093E \u0932\u094B\u0917\u094B\u0902 \u0915\u0940 \u0938\u0902\u0916\u094D\u092F\u093E \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
         return true;
       case 'food_dates':
       case 'dates':
-        if (!dateFrom) { showAlert('Required', 'Please select start date.'); return false; }
-        if (!dateTo) { showAlert('Required', 'Please select end date.'); return false; }
-        if (new Date(dateTo) < new Date(dateFrom)) { showAlert('Invalid', 'End date must be after start date.'); return false; }
+        if (!dateFrom) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please select start date. / \u0915\u0943\u092A\u092F\u093E \u0936\u0941\u0930\u0942 \u0924\u093F\u0925\u093F \u091A\u0941\u0928\u0947\u0902\u0964'); return false; }
+        if (!dateTo) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please select end date. / \u0915\u0943\u092A\u092F\u093E \u0905\u0902\u0924\u093F\u092E \u0924\u093F\u0925\u093F \u091A\u0941\u0928\u0947\u0902\u0964'); return false; }
+        if (new Date(dateTo) < new Date(dateFrom)) { showAlert('Invalid / \u0905\u092E\u093E\u0928\u094D\u092F', 'End date must be after start date. / \u0905\u0902\u0924\u093F\u092E \u0924\u093F\u0925\u093F \u0936\u0941\u0930\u0942 \u0924\u093F\u0925\u093F \u0915\u0947 \u092C\u093E\u0926 \u0939\u094B\u0928\u0940 \u091A\u093E\u0939\u093F\u090F\u0964'); return false; }
         return true;
       case 'food_amount':
-        if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required', 'Amount is required.'); return false; }
+        if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Amount is required. / \u0930\u093E\u0936\u093F \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948\u0964'); return false; }
         if (site === 'Others') {
           const r = parseFloat(customFoodRate);
-          if (!r || r <= 0) { showAlert('Required', 'Please enter per-person daily rate.'); return false; }
-          if (r > 600) { showAlert('Limit exceeded', 'Rate cannot exceed ₹600 per person per day.'); return false; }
+          if (!r || r <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter per-person daily rate. / \u0915\u0943\u092A\u092F\u093E \u092A\u094D\u0930\u0924\u093F \u0935\u094D\u092F\u0915\u094D\u0924\u093F \u0926\u0948\u0928\u093F\u0915 \u0926\u0930 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
+          if (r > 600) { showAlert('Limit exceeded / \u0938\u0940\u092E\u093E \u092A\u093E\u0930', 'Rate cannot exceed \u20B9600 per person per day. / \u0926\u0930 \u20B9600 \u092A\u094D\u0930\u0924\u093F \u0935\u094D\u092F\u0915\u094D\u0924\u093F \u092A\u094D\u0930\u0924\u093F \u0926\u093F\u0928 \u0938\u0947 \u0905\u0927\u093F\u0915 \u0928\u0939\u0940\u0902 \u0939\u094B \u0938\u0915\u0924\u0940\u0964'); return false; }
         }
         return true;
       case 'amount':
-        if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required', 'Amount is required.'); return false; }
+        if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Amount is required. / \u0930\u093E\u0936\u093F \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948\u0964'); return false; }
         return true;
       case 'travel_subtype':
-        if (!travelSubtype) { showAlert('Required', 'Please select travel type.'); return false; }
+        if (!travelSubtype) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please select travel type. / \u0915\u0943\u092A\u092F\u093E \u092F\u093E\u0924\u094D\u0930\u093E \u092A\u094D\u0930\u0915\u093E\u0930 \u091A\u0941\u0928\u0947\u0902\u0964'); return false; }
         return true;
       case 'travel_route':
-        if (!travelFrom.trim()) { showAlert('Required', 'Please enter From location.'); return false; }
-        if (!travelTo.trim()) { showAlert('Required', 'Please enter To location.'); return false; }
+        if (!travelFrom.trim()) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter From location. / \u0915\u0943\u092A\u092F\u093E \u0915\u0939\u093E\u0901 \u0938\u0947 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
+        if (!travelTo.trim()) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter To location. / \u0915\u0943\u092A\u092F\u093E \u0915\u0939\u093E\u0901 \u0924\u0915 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
         if (['Flight', 'Train', 'Bus'].includes(travelSubtype) && !travelDate) {
-          showAlert('Required', 'Please enter travel date.'); return false;
+          showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter travel date. / \u0915\u0943\u092A\u092F\u093E \u092F\u093E\u0924\u094D\u0930\u093E \u0924\u093F\u0925\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false;
         }
         return true;
       case 'travel_amount':
-        if (!aiEstimate) { showAlert('Required', 'Please click the estimate button first to get a cost estimate.'); return false; }
-        if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required', 'Amount is required.'); return false; }
+        if (!aiEstimate) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please click the estimate button first to get a cost estimate. / \u0915\u0943\u092A\u092F\u093E \u092A\u0939\u0932\u0947 \u0905\u0928\u0941\u092E\u093E\u0928 \u092C\u091F\u0928 \u092A\u0930 \u0915\u094D\u0932\u093F\u0915 \u0915\u0930\u0947\u0902\u0964'); return false; }
+        if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Amount is required. / \u0930\u093E\u0936\u093F \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948\u0964'); return false; }
         return true;
       case 'conveyance_mode':
-        if (!conveyanceMode) { showAlert('Required', 'Please select mode.'); return false; }
+        if (!conveyanceMode) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please select mode. / \u0915\u0943\u092A\u092F\u093E \u0935\u093E\u0939\u0928 \u0915\u093E \u092A\u094D\u0930\u0915\u093E\u0930 \u091A\u0941\u0928\u0947\u0902\u0964'); return false; }
         return true;
       case 'conveyance_detail':
         if (conveyanceMode === 'Ola/Rapido/Uber') {
-          if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required', 'Please scan receipt or enter amount.'); return false; }
+          if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please scan receipt or enter amount. / \u0915\u0943\u092A\u092F\u093E \u0930\u0938\u0940\u0926 \u0938\u094D\u0915\u0948\u0928 \u0915\u0930\u0947\u0902 \u092F\u093E \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
         }
         if (conveyanceMode === 'Own Vehicle') {
-          if (!convFrom.trim() || !convTo.trim()) { showAlert('Required', 'Please enter From and To locations.'); return false; }
-          if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required', 'Please get estimate or enter amount.'); return false; }
+          if (!convFrom.trim() || !convTo.trim()) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter From and To locations. / \u0915\u0943\u092A\u092F\u093E \u0926\u094B\u0928\u094B\u0902 \u0938\u094D\u0925\u093E\u0928 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
+          if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please get estimate or enter amount. / \u0915\u0943\u092A\u092F\u093E \u0905\u0928\u0941\u092E\u093E\u0928 \u0932\u0947\u0902 \u092F\u093E \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
         }
         if (conveyanceMode === 'Public Transport') {
-          if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required', 'Please enter amount.'); return false; }
+          if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter amount. / \u0915\u0943\u092A\u092F\u093E \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
         }
         return true;
+      case 'requirement':
+        if (!requirement.trim()) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please describe the requirement. / \u0915\u0943\u092A\u092F\u093E \u0906\u0935\u0936\u094D\u092F\u0915\u0924\u093E \u0915\u093E \u0935\u0930\u094D\u0923\u0928 \u0915\u0930\u0947\u0902\u0964'); return false; }
+        return true;
       case 'labour_sub':
-        if (!labourSub) { showAlert('Required', 'Please select sub-category.'); return false; }
+        if (!labourSub) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please select sub-category. / \u0915\u0943\u092A\u092F\u093E \u0909\u092A-\u0936\u094D\u0930\u0947\u0923\u0940 \u091A\u0941\u0928\u0947\u0902\u0964'); return false; }
         return true;
       case 'purpose':
-        if (!purpose.trim()) { showAlert('Required', 'Purpose / notes are required.'); return false; }
+        if (!purpose.trim()) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Purpose / notes are required. / \u0909\u0926\u094D\u0926\u0947\u0936\u094D\u092F / \u0928\u094B\u091F\u094D\u0938 \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948\u0902\u0964'); return false; }
         return true;
       default:
         return true;
@@ -343,9 +376,9 @@ export default function ImprestScreen() {
 
   // ── Submit ───────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
-    const systemLockedFood = category === 'Food Expense' && foodRate && site !== 'Others';
+    const systemLockedFood = category === 'Food Expense' && foodRate && site !== 'Others' && !canOverrideFoodRate;
     if (!systemLockedFood && (!amountRequested || parseFloat(amountRequested) <= 0)) {
-      return showAlert('Invalid amount', 'Please enter a valid amount.');
+      return showAlert('Invalid amount / \u0905\u092E\u093E\u0928\u094D\u092F \u0930\u093E\u0936\u093F', 'Please enter a valid amount. / \u0915\u0943\u092A\u092F\u093E \u090F\u0915 \u0935\u0948\u0927 \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964');
     }
     setSubmitting(true);
     try {
@@ -353,8 +386,10 @@ export default function ImprestScreen() {
         ? parseFloat(customFoodRate) || null
         : foodRate;
 
-      // For system-locked food rates, compute final amount from rate × people × days
-      const finalAmount = (category === 'Food Expense' && effectiveFoodRate && site !== 'Others')
+      // For system-locked food rates, compute final amount from rate * people * days
+      // EA (Ritu) can override the amount even for configured sites
+      const foodLocked = category === 'Food Expense' && effectiveFoodRate && site !== 'Others' && !canOverrideFoodRate;
+      const finalAmount = foodLocked
         ? effectiveFoodRate * (parseInt(peopleCount) || 1) * daysBetween(dateFrom, dateTo)
         : parseFloat(amountRequested);
 
@@ -382,11 +417,17 @@ export default function ImprestScreen() {
         vehicleType: conveyanceMode === 'Own Vehicle' ? vehicleType : undefined,
         // Labour
         labourSubcategory: category === 'Labour Expense' ? labourSub : undefined,
+        // Site Expense / Material Expense
+        requirement: ['Site Expense', 'Material Expense'].includes(category) ? requirement.trim() : undefined,
       };
       const res = await submitImprest(payload);
-      setResult(res);
+      setShowSuccess(true);
+      setTimeout(() => {
+        setShowSuccess(false);
+        setResult(res);
+      }, 1500);
     } catch (e) {
-      showAlert('Submission failed', e?.response?.data?.error || 'Please try again.');
+      showAlert('Submission failed / \u091C\u092E\u093E \u0935\u093F\u092B\u0932', e?.response?.data?.error || 'Please try again. / \u0915\u0943\u092A\u092F\u093E \u092A\u0941\u0928\u0903 \u092A\u094D\u0930\u092F\u093E\u0938 \u0915\u0930\u0947\u0902\u0964');
     } finally {
       setSubmitting(false);
     }
@@ -412,20 +453,35 @@ export default function ImprestScreen() {
     setConveyanceImage(null);
     setConvFrom(''); setConvTo('');
     setOwnVehicleEstimate(null);
+    setRideType('Cab');
+    setScanResult(null);
     setLabourSub(LABOUR_SUBCATEGORIES[0]);
+    setRequirement('');
   };
+
+  // ── Success animation screen ────────────────────────────────────────────────
+  if (showSuccess) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.resultCard}>
+          <Text style={styles.successCheckmark}>{'\u2705'}</Text>
+          <Text style={styles.resultTitle}>Submitted Successfully! / \u0938\u092B\u0932\u0924\u093E\u092A\u0942\u0930\u094D\u0935\u0915 \u091C\u092E\u093E!</Text>
+        </View>
+      </View>
+    );
+  }
 
   // ── Result screen ────────────────────────────────────────────────────────────
   if (result) {
     return (
       <View style={styles.container}>
         <View style={styles.resultCard}>
-          <Text style={styles.resultIcon}>✓</Text>
-          <Text style={styles.resultTitle}>Request Submitted</Text>
+          <Text style={styles.resultIcon}>{'\u2713'}</Text>
+          <Text style={styles.resultTitle}>Request Submitted / \u0905\u0928\u0941\u0930\u094B\u0927 \u091C\u092E\u093E</Text>
           <Text style={styles.resultRef}>{result.refId}</Text>
           <Text style={styles.resultMessage}>{result.message}</Text>
           <TouchableOpacity style={styles.primaryBtn} onPress={resetForm}>
-            <Text style={styles.primaryBtnText}>New Request</Text>
+            <Text style={styles.primaryBtnText}>New Request / \u0928\u092F\u093E \u0905\u0928\u0941\u0930\u094B\u0927</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -439,13 +495,13 @@ export default function ImprestScreen() {
       case 'intro':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.greeting}>Hi, {user?.name?.split(' ')[0] || 'there'} 👋</Text>
-            <Text style={styles.stepTitle}>Request an Imprest / Advance</Text>
+            <Text style={styles.greeting}>Hi, {user?.name?.split(' ')[0] || 'there'} {'\uD83D\uDC4B'}</Text>
+            <Text style={styles.stepTitle}>Request an Imprest / Advance{'\n'}{'\u0905\u0917\u094D\u0930\u093F\u092E \u0905\u0928\u0941\u0930\u094B\u0927'}</Text>
             <Text style={styles.stepSubtitle}>
-              This form will take you through a few quick steps to submit your advance request.
+              This form will take you through a few quick steps to submit your advance request.{'\n'}{'\u092F\u0939 \u092B\u0949\u0930\u094D\u092E \u0906\u092A\u0915\u094B \u0905\u0917\u094D\u0930\u093F\u092E \u0905\u0928\u0941\u0930\u094B\u0927 \u091C\u092E\u093E \u0915\u0930\u0928\u0947 \u092E\u0947\u0902 \u092E\u0926\u0926 \u0915\u0930\u0947\u0917\u093E\u0964'}
             </Text>
             <TouchableOpacity style={styles.primaryBtn} onPress={() => setStepIndex(1)}>
-              <Text style={styles.primaryBtnText}>Let's Start →</Text>
+              <Text style={styles.primaryBtnText}>Let's Start / {'\u0936\u0941\u0930\u0942 \u0915\u0930\u0947\u0902'} {'\u2192'}</Text>
             </TouchableOpacity>
           </View>
         );
@@ -453,7 +509,7 @@ export default function ImprestScreen() {
       case 'site':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Which site are you at? *</Text>
+            <Text style={styles.stepTitle}>Select your site / {'\u0905\u092A\u0928\u0940 \u0938\u093E\u0907\u091F \u091A\u0941\u0928\u0947\u0902'} *</Text>
             <View style={styles.pickerWrapper}>
               <Picker
                 selectedValue={site}
@@ -466,7 +522,7 @@ export default function ImprestScreen() {
             </View>
             {site === 'Others' && (
               <View>
-                <Text style={styles.label}>Enter Site Name *</Text>
+                <Text style={styles.label}>Enter Site Name / {'\u0938\u093E\u0907\u091F \u0915\u093E \u0928\u093E\u092E \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902'} *</Text>
                 <TextInput
                   style={styles.input}
                   value={customSite}
@@ -484,21 +540,27 @@ export default function ImprestScreen() {
       case 'category':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>What is this advance for? *</Text>
-            <View style={styles.pickerWrapper}>
-              <Picker
-                selectedValue={category}
-                onValueChange={(val) => {
-                  setCategory(val);
-                  setAmountRequested('');
-                  setAiEstimate(null);
-                  setOwnVehicleEstimate(null);
-                }}
-                style={styles.picker}
-                dropdownIconColor="#e8a24a"
-              >
-                {IMPREST_CATEGORIES.map((c) => <Picker.Item key={c} label={c} value={c} />)}
-              </Picker>
+            <Text style={styles.stepTitle}>What is this advance for? / {'\u092F\u0939 \u0905\u0917\u094D\u0930\u093F\u092E \u0915\u093F\u0938\u0932\u093F\u090F \u0939\u0948?'} *</Text>
+            <View style={styles.categoryGrid}>
+              {IMPREST_CATEGORIES.map((c) => {
+                const isSelected = category === c;
+                const icon = CATEGORY_ICONS[c] || '\uD83D\uDCCB';
+                return (
+                  <TouchableOpacity
+                    key={c}
+                    style={[styles.categoryCard, isSelected && styles.categoryCardSelected]}
+                    onPress={() => {
+                      setCategory(c);
+                      setAmountRequested('');
+                      setAiEstimate(null);
+                      setOwnVehicleEstimate(null);
+                    }}
+                  >
+                    <Text style={styles.categoryIcon}>{icon}</Text>
+                    <Text style={[styles.categoryLabel, isSelected && styles.categoryLabelSelected]} numberOfLines={2}>{c}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
         );
@@ -506,7 +568,7 @@ export default function ImprestScreen() {
       case 'people':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>How many people? *</Text>
+            <Text style={styles.stepTitle}>Number of People / {'\u0932\u094B\u0917\u094B\u0902 \u0915\u0940 \u0938\u0902\u0916\u094D\u092F\u093E'} *</Text>
             <TextInput
               style={styles.input}
               value={peopleCount}
@@ -522,19 +584,19 @@ export default function ImprestScreen() {
       case 'food_dates':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Food Expense Duration *</Text>
-            <Text style={styles.stepSubtitle}>Select the date range for food expense</Text>
-            <DateInput label="From Date" value={dateFrom} onChange={(v) => {
+            <Text style={styles.stepTitle}>Food Expense Duration / {'\u0916\u093E\u0928\u093E \u0916\u0930\u094D\u091A \u0905\u0935\u0927\u093F'} *</Text>
+            <Text style={styles.stepSubtitle}>Select the date range for food expense / {'\u0916\u093E\u0928\u093E \u0916\u0930\u094D\u091A \u0915\u0947 \u0932\u093F\u090F \u0924\u093F\u0925\u093F \u0938\u0940\u092E\u093E \u091A\u0941\u0928\u0947\u0902'}</Text>
+            <DateInput label={'From / \u0915\u092C \u0938\u0947'} value={dateFrom} onChange={(v) => {
               setDateFrom(v);
               setAmountRequested('');
             }} />
-            <DateInput label="To Date" value={dateTo} minDate={dateFrom} onChange={(v) => {
+            <DateInput label={'To / \u0915\u092C \u0924\u0915'} value={dateTo} minDate={dateFrom} onChange={(v) => {
               setDateTo(v);
               setAmountRequested('');
             }} />
             {dateFrom && dateTo && new Date(dateTo) >= new Date(dateFrom) && (
               <View style={styles.infoBox}>
-                <Text style={styles.infoText}>Duration: {daysBetween(dateFrom, dateTo)} day(s)</Text>
+                <Text style={styles.infoText}>Duration / {'\u0905\u0935\u0927\u093F'}: {daysBetween(dateFrom, dateTo)} day(s) / {'\u0926\u093F\u0928'}</Text>
               </View>
             )}
           </View>
@@ -549,14 +611,14 @@ export default function ImprestScreen() {
 
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Food Amount</Text>
+            <Text style={styles.stepTitle}>Food Amount / {'\u0916\u093E\u0928\u093E \u0930\u093E\u0936\u093F'}</Text>
 
             {foodRateLoading && <ActivityIndicator color="#e8a24a" style={{ marginVertical: 16 }} />}
             {foodRateError ? <Text style={styles.errorText}>{foodRateError}</Text> : null}
 
             {isOtherSite && (
               <View>
-                <Text style={styles.label}>Per Person Daily Rate (₹) — max ₹600 *</Text>
+                <Text style={styles.label}>Per Person Daily Rate ({'\u20B9'}) / {'\u092A\u094D\u0930\u0924\u093F \u0935\u094D\u092F\u0915\u094D\u0924\u093F \u0926\u0948\u0928\u093F\u0915 \u0926\u0930'} — max {'\u20B9'}600 *</Text>
                 <TextInput
                   style={styles.input}
                   value={customFoodRate}
@@ -571,21 +633,39 @@ export default function ImprestScreen() {
                   placeholderTextColor="#9ca3af"
                 />
                 {parseFloat(customFoodRate) > 600 && (
-                  <Text style={styles.errorText}>Rate cannot exceed ₹600 per person per day</Text>
+                  <Text style={styles.errorText}>Rate cannot exceed {'\u20B9'}600 per person per day / {'\u0926\u0930 \u20B9600 \u092A\u094D\u0930\u0924\u093F \u0935\u094D\u092F\u0915\u094D\u0924\u093F \u092A\u094D\u0930\u0924\u093F \u0926\u093F\u0928 \u0938\u0947 \u0905\u0927\u093F\u0915 \u0928\u0939\u0940\u0902 \u0939\u094B \u0938\u0915\u0924\u0940'}</Text>
                 )}
               </View>
             )}
 
-            {!isOtherSite && rateToUse > 0 && (
+            {!isOtherSite && rateToUse > 0 && canOverrideFoodRate && (
+              <View>
+                <View style={styles.infoBox}>
+                  <Text style={styles.infoText}>
+                    Suggested: {'\u20B9'}{rateToUse}/person {'\u00D7'} {people} people {'\u00D7'} {days} day(s) = {'\u20B9'}{computed}
+                  </Text>
+                </View>
+                <Text style={[styles.label, { marginTop: 12 }]}>Amount / {'\u0930\u093E\u0936\u093F'} ({'\u20B9'}) *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={amountRequested}
+                  onChangeText={setAmountRequested}
+                  keyboardType="numeric"
+                  placeholder={`${computed}`}
+                  placeholderTextColor="#9ca3af"
+                />
+              </View>
+            )}
+            {!isOtherSite && rateToUse > 0 && !canOverrideFoodRate && (
               <View style={styles.infoBox}>
                 <Text style={styles.infoText}>
-                  ₹{rateToUse}/person × {people} people × {days} day(s) = ₹{computed}
+                  {'\u20B9'}{rateToUse}/person {'\u00D7'} {people} people {'\u00D7'} {days} day(s) = {'\u20B9'}{computed}
                 </Text>
-                <Text style={styles.infoHint}>Rate locked by system for {site}</Text>
+                <Text style={styles.infoHint}>Rate locked by system for {site} / {'\u0926\u0930 \u0938\u093F\u0938\u094D\u091F\u092E \u0926\u094D\u0935\u093E\u0930\u093E \u0928\u093F\u0930\u094D\u0927\u093E\u0930\u093F\u0924'}</Text>
               </View>
             )}
 
-            <Text style={styles.label}>Total Amount (₹) *</Text>
+            <Text style={styles.label}>Total Amount ({'\u20B9'}) / {'\u0915\u0941\u0932 \u0930\u093E\u0936\u093F'} *</Text>
             <TextInput
               style={[styles.input, !isOtherSite && rateToUse > 0 ? styles.inputLocked : null]}
               value={!isOtherSite && computed > 0 ? String(computed) : amountRequested}
@@ -604,18 +684,18 @@ export default function ImprestScreen() {
         return (
           <View style={styles.stepContent}>
             <Text style={styles.stepTitle}>
-              {category === 'Hotel Expense' ? 'Duration of Stay *' : 'Rent Duration *'}
+              {category === 'Hotel Expense' ? 'Duration of Stay / \u0920\u0939\u0930\u0928\u0947 \u0915\u0940 \u0905\u0935\u0927\u093F *' : 'Rent Duration / \u0915\u093F\u0930\u093E\u092F\u093E \u0905\u0935\u0927\u093F *'}
             </Text>
             <Text style={styles.stepSubtitle}>
               {category === 'Hotel Expense'
-                ? 'Select check-in and check-out dates'
-                : 'Select the from and to date for the rent period'}
+                ? 'Select check-in and check-out dates / \u091A\u0947\u0915-\u0907\u0928 \u0914\u0930 \u091A\u0947\u0915-\u0906\u0909\u091F \u0924\u093F\u0925\u093F \u091A\u0941\u0928\u0947\u0902'
+                : 'Select the from and to date for the rent period / \u0915\u093F\u0930\u093E\u092F\u0947 \u0915\u0940 \u0905\u0935\u0927\u093F \u0915\u0947 \u0932\u093F\u090F \u0924\u093F\u0925\u093F \u091A\u0941\u0928\u0947\u0902'}
             </Text>
-            <DateInput label="From Date" value={dateFrom} onChange={setDateFrom} />
-            <DateInput label="To Date" value={dateTo} minDate={dateFrom} onChange={setDateTo} />
+            <DateInput label={'From / \u0915\u0939\u093E\u0901 \u0938\u0947'} value={dateFrom} onChange={setDateFrom} />
+            <DateInput label={'To / \u0915\u0939\u093E\u0901 \u0924\u0915'} value={dateTo} minDate={dateFrom} onChange={setDateTo} />
             {dateFrom && dateTo && new Date(dateTo) >= new Date(dateFrom) && (
               <View style={styles.infoBox}>
-                <Text style={styles.infoText}>Duration: {daysBetween(dateFrom, dateTo)} day(s)</Text>
+                <Text style={styles.infoText}>Duration / {'\u0905\u0935\u0927\u093F'}: {daysBetween(dateFrom, dateTo)} day(s) / {'\u0926\u093F\u0928'}</Text>
               </View>
             )}
           </View>
@@ -624,13 +704,13 @@ export default function ImprestScreen() {
       case 'amount':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Amount (₹) *</Text>
+            <Text style={styles.stepTitle}>Amount / {'\u0930\u093E\u0936\u093F'} ({'\u20B9'}) *</Text>
             <TextInput
               style={styles.input}
               value={amountRequested}
               onChangeText={setAmountRequested}
               keyboardType="numeric"
-              placeholder="Enter amount in ₹"
+              placeholder={'Enter amount in \u20B9 / \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902'}
               placeholderTextColor="#9ca3af"
             />
           </View>
@@ -640,7 +720,7 @@ export default function ImprestScreen() {
       case 'travel_subtype':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Mode of Travel *</Text>
+            <Text style={styles.stepTitle}>Mode of Travel / {'\u092F\u093E\u0924\u094D\u0930\u093E \u0915\u093E \u092A\u094D\u0930\u0915\u093E\u0930'} *</Text>
             <View style={styles.pickerWrapper}>
               <Picker
                 selectedValue={travelSubtype}
@@ -657,29 +737,25 @@ export default function ImprestScreen() {
       case 'travel_route':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Travel Details *</Text>
-            <Text style={styles.label}>From *</Text>
-            <TextInput
-              style={styles.input}
+            <Text style={styles.stepTitle}>Travel Details / {'\u092F\u093E\u0924\u094D\u0930\u093E \u0935\u093F\u0935\u0930\u0923'} *</Text>
+            <Text style={styles.label}>From / {'\u0915\u0939\u093E\u0901 \u0938\u0947'} *</Text>
+            <PlacesInput
               value={travelFrom}
               onChangeText={setTravelFrom}
               placeholder="e.g. Connaught Place, Delhi"
-              placeholderTextColor="#9ca3af"
             />
-            <Text style={styles.label}>To *</Text>
-            <TextInput
-              style={styles.input}
+            <Text style={styles.label}>To / {'\u0915\u0939\u093E\u0901 \u0924\u0915'} *</Text>
+            <PlacesInput
               value={travelTo}
               onChangeText={setTravelTo}
               placeholder="e.g. Bhuj, Gujarat"
-              placeholderTextColor="#9ca3af"
             />
             {['Flight', 'Train', 'Bus'].includes(travelSubtype) && (
-              <DateInput label="Travel Date" value={travelDate} onChange={setTravelDate} />
+              <DateInput label={'Travel Date / \u092F\u093E\u0924\u094D\u0930\u093E \u0924\u093F\u0925\u093F'} value={travelDate} onChange={setTravelDate} />
             )}
             {travelSubtype === 'Contractual Cab' && (
               <View style={styles.infoBox}>
-                <Text style={styles.infoHint}>Rate: ₹12/km (distance fetched from Google Maps)</Text>
+                <Text style={styles.infoHint}>Rate: {'\u20B9'}10/km (distance fetched from Google Maps)</Text>
               </View>
             )}
           </View>
@@ -688,7 +764,7 @@ export default function ImprestScreen() {
       case 'travel_amount':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Travel Amount *</Text>
+            <Text style={styles.stepTitle}>Travel Amount / {'\u092F\u093E\u0924\u094D\u0930\u093E \u0930\u093E\u0936\u093F'} *</Text>
 
             <TouchableOpacity
               style={[styles.secondaryBtn, estimating && styles.btnDisabled]}
@@ -698,21 +774,21 @@ export default function ImprestScreen() {
               {estimating
                 ? <ActivityIndicator color="#fff" size="small" />
                 : <Text style={styles.secondaryBtnText}>
-                    {travelSubtype === 'Contractual Cab' ? 'Calculate Distance Cost' : 'Get AI Estimate'}
+                    {travelSubtype === 'Contractual Cab' ? 'Calculate Distance Cost / \u0926\u0942\u0930\u0940 \u0932\u093E\u0917\u0924 \u0917\u0923\u0928\u093E \u0915\u0930\u0947\u0902' : 'Get AI Estimate / AI \u0905\u0928\u0941\u092E\u093E\u0928 \u092A\u094D\u0930\u093E\u092A\u094D\u0924 \u0915\u0930\u0947\u0902'}
                   </Text>}
             </TouchableOpacity>
 
             {aiEstimate && (
               <View style={styles.infoBox}>
                 <Text style={styles.infoText}>
-                  Estimate: ₹{aiEstimate.estimatedAmount}
+                  Estimate / {'\u0905\u0928\u0941\u092E\u093E\u0928'}: {'\u20B9'}{aiEstimate.estimatedAmount}
                   {aiEstimate.distanceKm ? ` (${aiEstimate.distanceKm} km)` : ''}
                 </Text>
                 <Text style={styles.infoHint}>{aiEstimate.reasoning}</Text>
               </View>
             )}
 
-            <Text style={styles.label}>{aiEstimate ? 'Amount (edit if needed) *' : 'Amount (₹) *'}</Text>
+            <Text style={styles.label}>{aiEstimate ? 'Amount (edit if needed) / \u0930\u093E\u0936\u093F (\u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u094B \u0924\u094B \u092C\u0926\u0932\u0947\u0902) *' : 'Amount / \u0930\u093E\u0936\u093F (\u20B9) *'}</Text>
             <TextInput
               style={styles.input}
               value={amountRequested}
@@ -726,7 +802,7 @@ export default function ImprestScreen() {
             />
             {userEditedAmount && aiEstimate && (
               <Text style={styles.deviationNote}>
-                Estimate: ₹{aiEstimate.estimatedAmount} | Entered: ₹{amountRequested}
+                Estimate / {'\u0905\u0928\u0941\u092E\u093E\u0928'}: {'\u20B9'}{aiEstimate.estimatedAmount} | Entered / {'\u0926\u0930\u094D\u091C'}: {'\u20B9'}{amountRequested}
               </Text>
             )}
           </View>
@@ -736,11 +812,11 @@ export default function ImprestScreen() {
       case 'conveyance_mode':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Mode of Conveyance *</Text>
+            <Text style={styles.stepTitle}>Mode of Conveyance / {'\u0935\u093E\u0939\u0928 \u0915\u093E \u092A\u094D\u0930\u0915\u093E\u0930'} *</Text>
             <View style={styles.pickerWrapper}>
               <Picker
                 selectedValue={conveyanceMode}
-                onValueChange={(v) => { setConveyanceMode(v); setAmountRequested(''); setConveyanceImage(null); }}
+                onValueChange={(v) => { setConveyanceMode(v); setAmountRequested(''); setConveyanceImage(null); setScanResult(null); }}
                 style={styles.picker}
                 dropdownIconColor="#e8a24a"
               >
@@ -754,10 +830,58 @@ export default function ImprestScreen() {
         if (conveyanceMode === 'Ola/Rapido/Uber') {
           return (
             <View style={styles.stepContent}>
-              <Text style={styles.stepTitle}>Attach Ride Receipt *</Text>
+              <Text style={styles.stepTitle}>Ride Details / {'\u0930\u093E\u0907\u0921 \u0935\u093F\u0935\u0930\u0923'} *</Text>
               <Text style={styles.stepSubtitle}>
-                Take a screenshot of your Ola/Uber/Rapido fare and the AI will read the amount automatically.
+                Enter ride details and scan your receipt / {'\u0930\u093E\u0907\u0921 \u0935\u093F\u0935\u0930\u0923 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902 \u0914\u0930 \u0930\u0938\u0940\u0926 \u0938\u094D\u0915\u0948\u0928 \u0915\u0930\u0947\u0902'}
               </Text>
+
+              <Text style={styles.label}>Ride Type / {'\u0930\u093E\u0907\u0921 \u092A\u094D\u0930\u0915\u093E\u0930'} *</Text>
+              <View style={styles.rideTypeRow}>
+                {['Bike', 'Cab'].map((rt) => (
+                  <TouchableOpacity
+                    key={rt}
+                    style={[styles.rideTypeBtn, rideType === rt && styles.rideTypeBtnSelected]}
+                    onPress={() => {
+                      if (rt === rideType) return;
+                      setRideType(rt);
+                      setScanResult(null);
+                      setAmountRequested('');
+                      // Re-scan with new ride type if image already exists
+                      if (conveyanceImage) {
+                        setScanningRide(true);
+                        scanConveyanceReceipt(conveyanceImage.uri, conveyanceImage.mimeType, {
+                          from: convFrom.trim(),
+                          to: convTo.trim(),
+                          rideType: rt,
+                        }).then(res => {
+                          setAmountRequested(String(res.amount));
+                          setScanResult(res);
+                        }).catch(() => {
+                          showAlert('Re-scan failed', 'Please scan again or enter amount manually.');
+                        }).finally(() => setScanningRide(false));
+                      }
+                    }}
+                  >
+                    <Text style={[styles.rideTypeBtnText, rideType === rt && styles.rideTypeBtnTextSelected]}>
+                      {rt === 'Bike' ? '\uD83C\uDFCD\uFE0F' : '\uD83D\uDE95'} {rt}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={styles.label}>From / {'\u0915\u0939\u093E\u0901 \u0938\u0947'} *</Text>
+              <PlacesInput
+                value={convFrom}
+                onChangeText={setConvFrom}
+                placeholder="e.g. Connaught Place, Delhi"
+              />
+              <Text style={styles.label}>To / {'\u0915\u0939\u093E\u0901 \u0924\u0915'} *</Text>
+              <PlacesInput
+                value={convTo}
+                onChangeText={setConvTo}
+                placeholder="e.g. Nehru Place, Delhi"
+              />
+
               <TouchableOpacity
                 style={[styles.secondaryBtn, scanningRide && styles.btnDisabled]}
                 onPress={handleScanRideReceipt}
@@ -765,18 +889,40 @@ export default function ImprestScreen() {
               >
                 {scanningRide
                   ? <ActivityIndicator color="#fff" size="small" />
-                  : <Text style={styles.secondaryBtnText}>📷 Scan Ride Receipt</Text>}
+                  : <Text style={styles.secondaryBtnText}>{'\uD83D\uDCF7'} Scan Ride Receipt / {'\u0930\u0938\u0940\u0926 \u0938\u094D\u0915\u0948\u0928 \u0915\u0930\u0947\u0902'}</Text>}
               </TouchableOpacity>
               {conveyanceImage && (
                 <Image source={{ uri: conveyanceImage.uri }} style={styles.receiptPreview} resizeMode="contain" />
               )}
-              <Text style={styles.label}>Amount (₹) *</Text>
+
+              {/* Verification results */}
+              {scanResult && (
+                <View style={{ marginTop: 12 }}>
+                  {scanResult.locationMatch === false && (
+                    <View style={styles.verifyBadgeRed}>
+                      <Text style={styles.verifyBadgeRedText}>{'\u26A0\uFE0F'} Location mismatch detected / {'\u0938\u094D\u0925\u093E\u0928 \u092E\u0947\u0932 \u0928\u0939\u0940\u0902 \u0916\u093E\u0924\u093E'}</Text>
+                    </View>
+                  )}
+                  {scanResult.rideTypeMatch === false && (
+                    <View style={styles.verifyBadgeRed}>
+                      <Text style={styles.verifyBadgeRedText}>{'\u26A0\uFE0F'} Ride type mismatch / {'\u0930\u093E\u0907\u0921 \u092A\u094D\u0930\u0915\u093E\u0930 \u092E\u0947\u0932 \u0928\u0939\u0940\u0902 \u0916\u093E\u0924\u093E'}</Text>
+                    </View>
+                  )}
+                  {scanResult.locationMatch !== false && scanResult.rideTypeMatch !== false && (
+                    <View style={styles.verifyBadgeGreen}>
+                      <Text style={styles.verifyBadgeGreenText}>{'\u2705'} Verified / {'\u0938\u0924\u094D\u092F\u093E\u092A\u093F\u0924'}</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+
+              <Text style={styles.label}>Amount / {'\u0930\u093E\u0936\u093F'} ({'\u20B9'}) *</Text>
               <TextInput
                 style={styles.input}
                 value={amountRequested}
                 onChangeText={setAmountRequested}
                 keyboardType="numeric"
-                placeholder="Scanned or enter manually"
+                placeholder={'Scanned or enter manually / \u0938\u094D\u0915\u0948\u0928 \u092F\u093E \u092E\u0948\u0928\u094D\u092F\u0941\u0905\u0932 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902'}
                 placeholderTextColor="#9ca3af"
               />
             </View>
@@ -786,8 +932,8 @@ export default function ImprestScreen() {
         if (conveyanceMode === 'Own Vehicle') {
           return (
             <View style={styles.stepContent}>
-              <Text style={styles.stepTitle}>Own Vehicle Details *</Text>
-              <Text style={styles.label}>Vehicle Type *</Text>
+              <Text style={styles.stepTitle}>Own Vehicle Details / {'\u0928\u093F\u091C\u0940 \u0935\u093E\u0939\u0928 \u0935\u093F\u0935\u0930\u0923'} *</Text>
+              <Text style={styles.label}>Vehicle Type / {'\u0935\u093E\u0939\u0928 \u092A\u094D\u0930\u0915\u093E\u0930'} *</Text>
               <View style={styles.pickerWrapper}>
                 <Picker
                   selectedValue={vehicleType}
@@ -800,24 +946,20 @@ export default function ImprestScreen() {
               </View>
               <View style={styles.infoBox}>
                 <Text style={styles.infoHint}>
-                  Rate: ₹{vehicleType === 'Car' ? '10' : '8'}/km
+                  Rate: {'\u20B9'}{vehicleType === 'Car' ? '10' : '5'}/km
                 </Text>
               </View>
-              <Text style={styles.label}>From *</Text>
-              <TextInput
-                style={styles.input}
+              <Text style={styles.label}>From / {'\u0915\u0939\u093E\u0901 \u0938\u0947'} *</Text>
+              <PlacesInput
                 value={convFrom}
                 onChangeText={setConvFrom}
                 placeholder="e.g. Noida Sector 62"
-                placeholderTextColor="#9ca3af"
               />
-              <Text style={styles.label}>To *</Text>
-              <TextInput
-                style={styles.input}
+              <Text style={styles.label}>To / {'\u0915\u0939\u093E\u0901 \u0924\u0915'} *</Text>
+              <PlacesInput
                 value={convTo}
                 onChangeText={setConvTo}
                 placeholder="e.g. MAX Hospital, Delhi"
-                placeholderTextColor="#9ca3af"
               />
               <TouchableOpacity
                 style={[styles.secondaryBtn, estimating && styles.btnDisabled, { marginTop: 12 }]}
@@ -826,14 +968,14 @@ export default function ImprestScreen() {
               >
                 {estimating
                   ? <ActivityIndicator color="#fff" size="small" />
-                  : <Text style={styles.secondaryBtnText}>Calculate Cost</Text>}
+                  : <Text style={styles.secondaryBtnText}>Calculate Cost / {'\u0932\u093E\u0917\u0924 \u0917\u0923\u0928\u093E \u0915\u0930\u0947\u0902'}</Text>}
               </TouchableOpacity>
               {ownVehicleEstimate && (
                 <View style={styles.infoBox}>
                   <Text style={styles.infoText}>{ownVehicleEstimate.reasoning}</Text>
                 </View>
               )}
-              <Text style={styles.label}>Amount (₹) *</Text>
+              <Text style={styles.label}>Amount / {'\u0930\u093E\u0936\u093F'} ({'\u20B9'}) *</Text>
               <TextInput
                 style={styles.input}
                 value={amountRequested}
@@ -849,16 +991,42 @@ export default function ImprestScreen() {
         // Public Transport
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Public Transport Amount *</Text>
-            <Text style={styles.stepSubtitle}>Enter the fare you paid for public transport.</Text>
-            <Text style={styles.label}>Amount (₹) *</Text>
+            <Text style={styles.stepTitle}>Public Transport Amount / {'\u0938\u093E\u0930\u094D\u0935\u091C\u0928\u093F\u0915 \u092A\u0930\u093F\u0935\u0939\u0928 \u0930\u093E\u0936\u093F'} *</Text>
+            <Text style={styles.stepSubtitle}>Enter the fare you paid for public transport. / {'\u0938\u093E\u0930\u094D\u0935\u091C\u0928\u093F\u0915 \u092A\u0930\u093F\u0935\u0939\u0928 \u0915\u093E \u0915\u093F\u0930\u093E\u092F\u093E \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'}</Text>
+            <Text style={styles.label}>Amount / {'\u0930\u093E\u0936\u093F'} ({'\u20B9'}) *</Text>
             <TextInput
               style={styles.input}
               value={amountRequested}
               onChangeText={setAmountRequested}
               keyboardType="numeric"
-              placeholder="Enter amount in ₹"
+              placeholder={'Enter amount in \u20B9 / \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902'}
               placeholderTextColor="#9ca3af"
+            />
+          </View>
+        );
+
+      // ── Site Expense / Material Expense — requirement ───────────────────────
+      case 'requirement':
+        return (
+          <View style={styles.stepContent}>
+            <Text style={styles.stepTitle}>
+              {category === 'Site Expense' ? 'Site Expense Requirement / \u0938\u093E\u0907\u091F \u0916\u0930\u094D\u091A \u0906\u0935\u0936\u094D\u092F\u0915\u0924\u093E *' : 'Material Expense Requirement / \u0938\u093E\u092E\u0917\u094D\u0930\u0940 \u0916\u0930\u094D\u091A \u0906\u0935\u0936\u094D\u092F\u0915\u0924\u093E *'}
+            </Text>
+            <Text style={styles.stepSubtitle}>
+              {category === 'Site Expense'
+                ? 'Describe what the site expense is for / \u0938\u093E\u0907\u091F \u0916\u0930\u094D\u091A \u0915\u093E \u0935\u0930\u094D\u0923\u0928 \u0915\u0930\u0947\u0902'
+                : 'Describe what material is needed / \u0915\u093F\u0938 \u0938\u093E\u092E\u0917\u094D\u0930\u0940 \u0915\u0940 \u0906\u0935\u0936\u094D\u092F\u0915\u0924\u093E \u0939\u0948 \u0935\u0930\u094D\u0923\u0928 \u0915\u0930\u0947\u0902'}
+            </Text>
+            <TextInput
+              style={[styles.input, styles.textarea]}
+              value={requirement}
+              onChangeText={setRequirement}
+              placeholder={category === 'Site Expense'
+                ? 'e.g. Electrical wiring repair, plumbing work...'
+                : 'e.g. Cement bags, steel rods, paint...'}
+              placeholderTextColor="#9ca3af"
+              multiline
+              numberOfLines={4}
             />
           </View>
         );
@@ -867,7 +1035,7 @@ export default function ImprestScreen() {
       case 'labour_sub':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Labour Expense Type *</Text>
+            <Text style={styles.stepTitle}>Labour Expense Type / {'\u0936\u094D\u0930\u092E \u0916\u0930\u094D\u091A \u092A\u094D\u0930\u0915\u093E\u0930'} *</Text>
             <View style={styles.pickerWrapper}>
               <Picker
                 selectedValue={labourSub}
@@ -885,12 +1053,12 @@ export default function ImprestScreen() {
       case 'purpose':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Purpose / Notes *</Text>
+            <Text style={styles.stepTitle}>Purpose / {'\u0909\u0926\u094D\u0926\u0947\u0936\u094D\u092F'} *</Text>
             <TextInput
               style={[styles.input, styles.textarea]}
               value={purpose}
               onChangeText={setPurpose}
-              placeholder="Describe the purpose of this advance..."
+              placeholder={'e.g. Site visit expenses / \u0938\u093E\u0907\u091F \u0935\u093F\u091C\u093F\u091F \u0916\u0930\u094D\u091A'}
               placeholderTextColor="#9ca3af"
               multiline
               numberOfLines={4}
@@ -903,37 +1071,40 @@ export default function ImprestScreen() {
         const effectiveRate = site === 'Others' ? parseFloat(customFoodRate) || 0 : foodRate;
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Review & Submit</Text>
+            <Text style={styles.stepTitle}>Review / {'\u0938\u092E\u0940\u0915\u094D\u0937\u093E'}</Text>
             <View style={styles.summaryCard}>
-              <SummaryRow label="Site" value={site === 'Others' ? customSite.trim() : site} />
-              <SummaryRow label="Category" value={category} />
-              {category !== 'Conveyance' && <SummaryRow label="People" value={peopleCount} />}
+              <SummaryRow label={'Site / साइट'} value={site === 'Others' ? customSite.trim() : site} />
+              <SummaryRow label={'Category / श्रेणी'} value={category} />
+              {category !== 'Conveyance' && <SummaryRow label={'People / लोग'} value={peopleCount} />}
               {['Food Expense', 'Site Room Rent', 'Hotel Expense'].includes(category) && (dateFrom || dateTo) && (
-                <SummaryRow label="Duration" value={`${dateFrom} → ${dateTo} (${daysBetween(dateFrom, dateTo)} days)`} />
+                <SummaryRow label={'Duration / अवधि'} value={`${dateFrom} → ${dateTo} (${daysBetween(dateFrom, dateTo)} days)`} />
               )}
               {category === 'Travelling' && travelFrom && (
-                <SummaryRow label="Route" value={`${travelFrom} → ${travelTo}`} />
+                <SummaryRow label={'Route / मार्ग'} value={`${travelFrom} → ${travelTo}`} />
               )}
               {category === 'Travelling' && travelDate && (
-                <SummaryRow label="Travel Date" value={travelDate} />
+                <SummaryRow label={'Travel Date / यात्रा तिथि'} value={travelDate} />
               )}
               {category === 'Travelling' && (
-                <SummaryRow label="Mode" value={travelSubtype} />
+                <SummaryRow label={'Mode / प्रकार'} value={travelSubtype} />
               )}
               {category === 'Conveyance' && (
-                <SummaryRow label="Mode" value={conveyanceMode} />
+                <SummaryRow label={'Mode / प्रकार'} value={conveyanceMode} />
               )}
               {conveyanceMode === 'Own Vehicle' && vehicleType && (
-                <SummaryRow label="Vehicle" value={vehicleType} />
+                <SummaryRow label={'Vehicle / वाहन'} value={vehicleType} />
               )}
               {category === 'Labour Expense' && (
-                <SummaryRow label="Sub-type" value={labourSub} />
+                <SummaryRow label={'Sub-type / उप-प्रकार'} value={labourSub} />
+              )}
+              {['Site Expense', 'Material Expense'].includes(category) && requirement && (
+                <SummaryRow label={'Requirement / आवश्यकता'} value={requirement} />
               )}
               {category === 'Food Expense' && effectiveRate > 0 && (
                 <SummaryRow label="Rate/person/day" value={`₹${effectiveRate}`} />
               )}
-              <SummaryRow label="Amount" value={`₹${amountRequested}`} highlight />
-              {purpose ? <SummaryRow label="Purpose" value={purpose} /> : null}
+              <SummaryRow label={'Amount / राशि'} value={`₹${amountRequested}`} highlight />
+              {purpose ? <SummaryRow label={'Purpose / उद्देश्य'} value={purpose} /> : null}
             </View>
             <TouchableOpacity
               style={[styles.primaryBtn, submitting && styles.btnDisabled]}
@@ -942,7 +1113,7 @@ export default function ImprestScreen() {
             >
               {submitting
                 ? <ActivityIndicator color="#fff" />
-                : <Text style={styles.primaryBtnText}>Submit Request</Text>}
+                : <Text style={styles.primaryBtnText}>Submit / {'\u091C\u092E\u093E \u0915\u0930\u0947\u0902'}</Text>}
             </TouchableOpacity>
           </View>
         );
@@ -959,10 +1130,15 @@ export default function ImprestScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      {/* Amber header bar */}
+      <View style={styles.headerBar}>
+        <Text style={styles.headerBarText}>Imprest Request / {'\u0905\u0917\u094D\u0930\u093F\u092E \u0905\u0928\u0941\u0930\u094B\u0927'}</Text>
+      </View>
+
       <View style={styles.progressBg}>
         <View style={[styles.progressFill, { width: `${progress}%` }]} />
       </View>
-      <Text style={styles.stepCounter}>Step {stepIndex + 1} of {totalSteps}</Text>
+      <Text style={styles.stepCounter}>Step {stepIndex + 1} of {totalSteps} / {'\u091A\u0930\u0923'} {stepIndex + 1} / {totalSteps}</Text>
 
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         {renderStep()}
@@ -971,16 +1147,16 @@ export default function ImprestScreen() {
       {stepIndex > 0 && currentStep !== 'review' && (
         <View style={styles.navRow}>
           <TouchableOpacity style={styles.backBtn} onPress={handleBack}>
-            <Text style={styles.backBtnText}>← Back</Text>
+            <Text style={styles.backBtnText}>{'\u2190'} Back / {'\u0935\u093E\u092A\u0938'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.primaryBtn} onPress={handleNext}>
-            <Text style={styles.primaryBtnText}>Next →</Text>
+            <Text style={styles.primaryBtnText}>Next / {'\u0906\u0917\u0947'} {'\u2192'}</Text>
           </TouchableOpacity>
         </View>
       )}
       {currentStep === 'review' && (
         <TouchableOpacity style={styles.backBtnSmall} onPress={handleBack}>
-          <Text style={styles.backBtnText}>← Back</Text>
+          <Text style={styles.backBtnText}>{'\u2190'} Back / {'\u0935\u093E\u092A\u0938'}</Text>
         </TouchableOpacity>
       )}
     </KeyboardAvoidingView>
@@ -998,6 +1174,21 @@ function SummaryRow({ label, value, highlight }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9fafb' },
+
+  // Amber header bar
+  headerBar: {
+    backgroundColor: '#e8a24a',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'ios' ? 50 : 14,
+  },
+  headerBarText: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+
   progressBg: { height: 4, backgroundColor: '#e5e7eb' },
   progressFill: { height: 4, backgroundColor: '#e8a24a' },
   stepCounter: { fontSize: 11, color: '#9ca3af', textAlign: 'right', paddingHorizontal: 20, paddingTop: 8 },
@@ -1006,8 +1197,8 @@ const styles = StyleSheet.create({
 
   greeting: { fontSize: 22, fontWeight: '700', color: '#111827', marginBottom: 8 },
   stepTitle: { fontSize: 20, fontWeight: '700', color: '#111827', marginBottom: 8 },
-  stepSubtitle: { fontSize: 14, color: '#6b7280', marginBottom: 16, lineHeight: 20 },
-  label: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6, marginTop: 12 },
+  stepSubtitle: { fontSize: 15, color: '#6b7280', marginBottom: 16, lineHeight: 22 },
+  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 6, marginTop: 12 },
 
   pickerWrapper: {
     borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10,
@@ -1032,21 +1223,61 @@ const styles = StyleSheet.create({
   receiptPreview: { width: '100%', height: 180, borderRadius: 8, marginTop: 12, borderWidth: 1, borderColor: '#e5e7eb' },
 
   primaryBtn: {
-    backgroundColor: '#e8a24a', borderRadius: 10, paddingVertical: 14,
+    backgroundColor: '#e8a24a', borderRadius: 12, paddingVertical: 16,
     alignItems: 'center', marginTop: 20,
   },
-  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 17 },
   secondaryBtn: {
-    backgroundColor: '#111827', borderRadius: 10, paddingVertical: 12,
+    backgroundColor: '#111827', borderRadius: 12, paddingVertical: 14,
     alignItems: 'center', marginTop: 12,
   },
-  secondaryBtnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  secondaryBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
   btnDisabled: { opacity: 0.6 },
 
   navRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 20, paddingTop: 8 },
   backBtn: { justifyContent: 'center', paddingHorizontal: 4 },
   backBtnSmall: { paddingHorizontal: 20, paddingBottom: 16 },
   backBtnText: { color: '#6b7280', fontSize: 14, fontWeight: '600' },
+
+  // Category card grid
+  categoryGrid: {
+    flexDirection: 'row', flexWrap: 'wrap', marginTop: 12, gap: 10,
+  },
+  categoryCard: {
+    width: '45%', minWidth: 100, borderWidth: 1.5, borderColor: '#d1d5db', borderRadius: 12,
+    padding: 16, alignItems: 'center', backgroundColor: '#fff',
+  },
+  categoryCardSelected: {
+    borderColor: '#e8a24a', backgroundColor: '#fffbeb',
+  },
+  categoryIcon: { fontSize: 32, marginBottom: 8 },
+  categoryLabel: { fontSize: 13, fontWeight: '600', color: '#374151', textAlign: 'center' },
+  categoryLabelSelected: { color: '#92400e' },
+
+  // Ride type toggle
+  rideTypeRow: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  rideTypeBtn: {
+    flex: 1, borderWidth: 1.5, borderColor: '#d1d5db', borderRadius: 10,
+    paddingVertical: 12, alignItems: 'center', backgroundColor: '#fff',
+  },
+  rideTypeBtnSelected: { borderColor: '#e8a24a', backgroundColor: '#fffbeb' },
+  rideTypeBtnText: { fontSize: 15, fontWeight: '600', color: '#374151' },
+  rideTypeBtnTextSelected: { color: '#92400e' },
+
+  // Verification badges
+  verifyBadgeRed: {
+    backgroundColor: '#fef2f2', borderRadius: 8, padding: 10, marginTop: 8,
+    borderWidth: 1, borderColor: '#fecaca',
+  },
+  verifyBadgeRedText: { color: '#dc2626', fontSize: 13, fontWeight: '600' },
+  verifyBadgeGreen: {
+    backgroundColor: '#f0fdf4', borderRadius: 8, padding: 10, marginTop: 8,
+    borderWidth: 1, borderColor: '#bbf7d0',
+  },
+  verifyBadgeGreenText: { color: '#16a34a', fontSize: 13, fontWeight: '600' },
+
+  // Success checkmark
+  successCheckmark: { fontSize: 64, marginBottom: 16 },
 
   summaryCard: {
     backgroundColor: '#fff', borderRadius: 12, padding: 16, marginTop: 8,
@@ -1065,4 +1296,23 @@ const styles = StyleSheet.create({
   resultTitle: { fontSize: 22, fontWeight: '700', color: '#111827', marginBottom: 8 },
   resultRef: { fontSize: 16, color: '#e8a24a', fontWeight: '700', marginBottom: 12 },
   resultMessage: { fontSize: 14, color: '#6b7280', textAlign: 'center', marginBottom: 32, lineHeight: 20 },
+
+  // Requested To step — radio card styles
+  optionCard: {
+    borderWidth: 1.5, borderColor: '#d1d5db', borderRadius: 12,
+    padding: 16, marginBottom: 12, backgroundColor: '#fff',
+  },
+  optionCardSelected: {
+    borderColor: '#e8a24a', backgroundColor: '#fffbeb',
+  },
+  optionRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  radioOuter: {
+    width: 22, height: 22, borderRadius: 11, borderWidth: 2,
+    borderColor: '#d1d5db', alignItems: 'center', justifyContent: 'center',
+  },
+  radioOuterSelected: { borderColor: '#e8a24a' },
+  radioInner: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#e8a24a' },
+  optionLabel: { fontSize: 16, fontWeight: '600', color: '#374151' },
+  optionLabelSelected: { color: '#92400e' },
+  optionHint: { fontSize: 12, color: '#9ca3af', marginTop: 2 },
 });

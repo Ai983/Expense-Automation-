@@ -13,8 +13,9 @@ export async function getExpenseDetails(expenseId) {
   return data.data;
 }
 
-export async function approveExpense(expenseId) {
-  const { data } = await api.post(`/api/expenses/${expenseId}/approve`);
+export async function approveExpense(expenseId, adjustedAmount) {
+  const body = adjustedAmount != null ? { adjustedAmount } : {};
+  const { data } = await api.post(`/api/expenses/${expenseId}/approve`, body);
   return data.data;
 }
 

@@ -79,6 +79,21 @@ export const OWN_VEHICLE_TYPES = ['Bike', 'Car'];
 export const TRAVEL_SUBTYPES = ['Flight', 'Train', 'Bus', 'Contractual Cab'];
 export const LABOUR_SUBCATEGORIES = ['Wage Per Day', 'Food Expense', 'Conveyance'];
 
+// Maps imprest categories to the closest matching expense category
+export const IMPREST_TO_EXPENSE_CATEGORY = {
+  'Food Expense': 'Food Expense',
+  'Site Room Rent': 'Site Room',
+  'Travelling': 'Travelling',
+  'Conveyance': 'Travelling',
+  'Labour Expense': 'Labour Expense',
+  'Porter': 'Porter Expenses',
+  'Hotel Expense': 'Site Room',
+  'Site Expense': 'Site Expense',
+  'Material Expense': 'Material Expense',
+  'Office Expense': 'Office Expense',
+  'Other': 'Office Expense',
+};
+
 export const IMPREST_STATUS_LABELS = {
   pending: 'Awaiting Approval',
   approved: 'Approved ✓',

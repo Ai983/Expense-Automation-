@@ -55,15 +55,41 @@ function deviationClass(deviation, requested) {
 // Returns a one-line summary of category-specific details
 function categoryDetail(req) {
   const parts = [];
-  if (req.travel_subtype) parts.push(req.travel_subtype);
-  if (req.travel_from && req.travel_to) parts.push(`${req.travel_from} → ${req.travel_to}`);
-  if (req.travel_date) parts.push(`on ${fmtDate(req.travel_date)}`);
-  if (req.conveyance_mode) parts.push(req.conveyance_mode);
-  if (req.vehicle_type) parts.push(req.vehicle_type);
-  if (req.labour_subcategory) parts.push(req.labour_subcategory);
+  if (req.category === 'Travelling' && req.travel_subtype) parts.push(req.travel_subtype);
+  if (req.category === 'Travelling' && req.travel_from && req.travel_to) parts.push(`${req.travel_from} → ${req.travel_to}`);
+  if (req.category === 'Travelling' && req.travel_date) parts.push(`on ${fmtDate(req.travel_date)}`);
+  if (req.category === 'Conveyance' && req.conveyance_mode) parts.push(req.conveyance_mode);
+  if (req.category === 'Conveyance' && req.vehicle_type) parts.push(req.vehicle_type);
+  if (req.category === 'Labour Expense' && req.labour_subcategory) parts.push(req.labour_subcategory);
   if (req.date_from && req.date_to) parts.push(`${fmtDate(req.date_from)} – ${fmtDate(req.date_to)}`);
   if (req.per_person_rate) parts.push(`₹${req.per_person_rate}/person/day`);
   return parts.join(' · ');
+}
+
+function downloadImprestCSV(requests) {
+  const headers = ['Ref ID', 'Employee', 'Site', 'Category', 'Purpose', 'People', 'Amount Requested', 'Approved Amount', 'Old Balance', 'Status', 'Founder Review', 'Submitted'];
+  const rows = requests.map((r) => [
+    r.ref_id,
+    r.employee?.name || '',
+    r.site,
+    r.category,
+    (r.purpose || '').replace(/"/g, '""'),
+    r.people_count,
+    r.amount_requested,
+    r.approved_amount ?? '',
+    r.old_balance ?? '',
+    r.status,
+    r.founder_review_status || '',
+    new Date(r.submitted_at).toLocaleDateString('en-IN'),
+  ]);
+  const csv = [headers, ...rows].map((r) => r.map((v) => `"${v}"`).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `imprest_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export default function ImprestQueuePage() {
@@ -89,6 +115,8 @@ export default function ImprestQueuePage() {
   const [rejectReason, setRejectReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [payReq, setPayReq] = useState(null);                 // pay modal
+  const [payReceipt, setPayReceipt] = useState(null);
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
@@ -145,6 +173,20 @@ export default function ImprestQueuePage() {
     finally { setActionLoading(false); }
   };
 
+  const handlePay = async () => {
+    if (!payReq) return;
+    setActionLoading(true); setActionError('');
+    try {
+      const formData = new FormData();
+      if (payReceipt) formData.append('receipt', payReceipt);
+      await api.post(`/api/imprest/${payReq.id}/pay`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setPayReq(null); setPayReceipt(null); fetchQueue();
+    } catch (e) { setActionError(e.response?.data?.error || 'Pay failed'); }
+    finally { setActionLoading(false); }
+  };
+
   const totalPages = Math.ceil(total / limit);
 
   return (
@@ -190,6 +232,13 @@ export default function ImprestQueuePage() {
           className="text-sm text-gray-500 hover:text-gray-700 px-2"
         >Clear</button>
         <span className="ml-auto text-sm text-gray-500 self-center">{total} request{total !== 1 ? 's' : ''}</span>
+        <button
+          onClick={() => downloadImprestCSV(requests)}
+          className="btn-secondary text-sm whitespace-nowrap"
+          title="Download filtered data as CSV"
+        >
+          Download CSV
+        </button>
       </div>
 
       {/* Table */}
@@ -210,7 +259,9 @@ export default function ImprestQueuePage() {
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">People</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Requested</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Approved</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Old Balance</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Founder Review</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Submitted</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions</th>
                 </tr>
@@ -232,6 +283,11 @@ export default function ImprestQueuePage() {
                         <div className="font-medium text-gray-900">{req.employee?.name || '—'}</div>
                         <div className="text-xs text-gray-500">{req.site}</div>
                         {req.employee?.phone && <div className="text-xs text-gray-400">{req.employee.phone}</div>}
+                        {req.employee_total_balance > 0 && (
+                          <div className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded bg-red-50 border border-red-200">
+                            <span className="text-xs font-semibold text-red-600">Prev Balance: {fmt(req.employee_total_balance)}</span>
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-gray-800">{req.category}</div>
@@ -256,6 +312,20 @@ export default function ImprestQueuePage() {
                           </span>
                         ) : <span className="text-gray-300 text-xs">—</span>}
                       </td>
+                      <td className="px-4 py-3 text-right">
+                        {req.old_balance != null ? (
+                          req.old_balance > 0 ? (
+                            <span className="font-bold text-red-600">{fmt(req.old_balance)}</span>
+                          ) : (
+                            <span className="text-green-600 text-xs font-semibold">Settled</span>
+                          )
+                        ) : <span className="text-gray-300 text-xs">—</span>}
+                        {req.total_expenses_submitted > 0 && (
+                          <div className="text-xs text-gray-400 mt-0.5">
+                            Spent: {fmt(req.total_expenses_submitted)}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${STATUS_STYLES[req.status] || 'bg-gray-100 text-gray-600'}`}>
                           {STATUS_LABELS[req.status] || req.status}
@@ -264,6 +334,38 @@ export default function ImprestQueuePage() {
                           <div className="text-xs text-red-500 mt-1 max-w-[120px] line-clamp-1" title={req.rejection_reason}>
                             {req.rejection_reason}
                           </div>
+                        )}
+                      </td>
+                      {/* Founder Review */}
+                      <td className="px-4 py-3">
+                        {req.requires_founder_approval ? (
+                          <div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-gray-500">{req.requested_to_user?.name || (req.approval_route === 'avisha_director_finance' ? 'Bhaskar Sir' : 'Ritu Ma\'am')}</span>
+                            </div>
+                            {req.founder_review_status === 'approved' && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-700 mt-1">
+                                Approved
+                              </span>
+                            )}
+                            {req.founder_review_status === 'rejected' && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-700 mt-1">
+                                Rejected
+                              </span>
+                            )}
+                            {req.founder_review_status === 'pending' && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-yellow-100 text-yellow-800 mt-1">
+                                Awaiting
+                              </span>
+                            )}
+                            {req.founder_review_comment && (
+                              <div className="text-xs text-gray-500 mt-1 max-w-[140px] line-clamp-2" title={req.founder_review_comment}>
+                                "{req.founder_review_comment}"
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-300">N/A</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-500">
@@ -277,7 +379,12 @@ export default function ImprestQueuePage() {
                           >
                             Details
                           </button>
-                          {req.status === 'pending' && (
+                          {req.current_stage === 'director_rejected' && (
+                            <div className="text-xs bg-red-50 text-red-700 px-2 py-1 rounded">
+                              Rejected by Director
+                            </div>
+                          )}
+                          {req.current_stage === 's3_pending' && (
                             <>
                               <button onClick={() => openApprove(req)}
                                 className="text-xs bg-green-600 text-white px-3 py-1 rounded-lg hover:bg-green-700 transition-colors">
@@ -288,6 +395,17 @@ export default function ImprestQueuePage() {
                                 Reject
                               </button>
                             </>
+                          )}
+                          {req.current_stage === 's3_approved' && !req.paid && (
+                            <button onClick={() => { setPayReq(req); setPayReceipt(null); setActionError(''); }}
+                              className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 transition-colors">
+                              Pay
+                            </button>
+                          )}
+                          {req.paid && (
+                            <span className="text-xs text-green-600 font-semibold">
+                              Paid {fmtDate(req.paid_at)}
+                            </span>
                           )}
                         </div>
                       </td>
@@ -339,6 +457,7 @@ export default function ImprestQueuePage() {
               {/* Request Info */}
               <Section title="Request Details">
                 <Row label="Category" value={detailReq.category} />
+                {detailReq.requested_to_name && <Row label="Requested To" value={detailReq.requested_to_name} />}
                 <Row label="People Count" value={detailReq.people_count} />
                 <Row label="Amount Requested" value={fmt(detailReq.amount_requested)} bold />
                 {detailReq.per_person_rate && (
@@ -407,6 +526,55 @@ export default function ImprestQueuePage() {
                 </Section>
               )}
 
+              {/* Approval Journey */}
+              <Section title="Approval Journey">
+                <Row label="Stage 1 (Review)" value={
+                  detailReq.s1_approved_at ? `Approved on ${fmtDate(detailReq.s1_approved_at)}` : 'Pending'
+                } className={detailReq.s1_approved_at ? 'text-green-600' : 'text-yellow-600'} />
+                {detailReq.s1_notes && <Row label="S1 Notes" value={detailReq.s1_notes} />}
+
+                <Row label="Stage 2 (Approval)" value={
+                  detailReq.approval_route === 'avisha_director_finance'
+                    ? (detailReq.founder_review_status === 'approved' ? `Director Approved ${fmtDate(detailReq.founder_review_at) || ''}`
+                      : detailReq.founder_review_status === 'rejected' ? 'Director Rejected'
+                      : detailReq.current_stage === 's2_pending' ? 'Awaiting Director (WhatsApp)' : 'Pending')
+                    : (detailReq.s2_approved_at ? `Approved on ${fmtDate(detailReq.s2_approved_at)}` : 'Pending')
+                } className={
+                  (detailReq.founder_review_status === 'rejected' || detailReq.current_stage === 'director_rejected') ? 'text-red-600'
+                  : (detailReq.s2_approved_at || detailReq.founder_review_status === 'approved') ? 'text-green-600' : 'text-yellow-600'
+                } />
+                {detailReq.founder_review_comment && <Row label="Director Comment" value={detailReq.founder_review_comment} />}
+                {detailReq.s2_notes && <Row label="S2 Notes" value={detailReq.s2_notes} />}
+                {detailReq.director_approved_amount && (
+                  <Row label="Director Ceiling" value={fmt(detailReq.director_approved_amount)} className="text-purple-600" bold />
+                )}
+
+                <Row label="Stage 3 (Finance)" value={
+                  detailReq.current_stage === 's3_approved' || detailReq.paid ? `Approved ${fmtDate(detailReq.approved_at) || ''}` : 'Pending'
+                } className={(detailReq.current_stage === 's3_approved' || detailReq.paid) ? 'text-green-600' : 'text-yellow-600'} />
+
+                <Row label="Payment" value={
+                  detailReq.paid ? `Paid ${fmt(detailReq.paid_amount)} on ${fmtDate(detailReq.paid_at)}` : 'Not yet paid'
+                } className={detailReq.paid ? 'text-green-600' : 'text-gray-400'} bold />
+
+                {detailReq.payment_receipt_url && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-500 shrink-0">Payment Receipt</span>
+                    <a href={detailReq.payment_receipt_url} target="_blank" rel="noopener noreferrer"
+                      className="text-sm font-medium text-blue-600 hover:underline">View Receipt</a>
+                  </div>
+                )}
+              </Section>
+
+              {/* Balance Deduction */}
+              {detailReq.old_balance_deducted > 0 && (
+                <Section title="Balance Adjustment">
+                  <Row label="Approved Amount" value={fmt(detailReq.approved_amount || detailReq.amount_requested)} />
+                  <Row label="Old Balance Deducted" value={`-${fmt(detailReq.old_balance_deducted)}`} className="text-orange-600" />
+                  <Row label="Net Amount to Pay" value={fmt(detailReq.net_approved_amount || 0)} bold className="text-green-700" />
+                </Section>
+              )}
+
               {/* Approval Info */}
               {(detailReq.approved_amount != null || detailReq.rejection_reason) && (
                 <Section title="Approval Info">
@@ -421,6 +589,19 @@ export default function ImprestQueuePage() {
                   {detailReq.approver?.name && <Row label="Approved By" value={detailReq.approver.name} />}
                   {detailReq.approved_at && <Row label="Approved On" value={fmtDate(detailReq.approved_at)} />}
                   {detailReq.rejection_reason && <Row label="Rejection Reason" value={detailReq.rejection_reason} className="text-red-600" />}
+                </Section>
+              )}
+
+              {/* Old Balance */}
+              {detailReq.old_balance != null && (
+                <Section title="Balance Tracking">
+                  <Row label="Expenses Submitted" value={fmt(detailReq.total_expenses_submitted || 0)} />
+                  <Row
+                    label="Old Balance"
+                    value={detailReq.old_balance > 0 ? fmt(detailReq.old_balance) : 'Fully Settled'}
+                    bold
+                    className={detailReq.old_balance > 0 ? 'text-red-600' : 'text-green-600'}
+                  />
                 </Section>
               )}
             </div>
@@ -474,6 +655,9 @@ export default function ImprestQueuePage() {
                 <Row label="Amount Requested" value={fmt(selected.amount_requested)} bold />
                 {selected.ai_estimated_amount && <Row label="AI Estimate" value={fmt(selected.ai_estimated_amount)} />}
                 {selected.purpose && <Row label="Purpose" value={selected.purpose} />}
+                {selected.employee_total_balance > 0 && (
+                  <Row label="Employee Prev Balance" value={fmt(selected.employee_total_balance)} className="text-red-600" bold />
+                )}
               </div>
 
               {modalMode === 'approve' && (
@@ -487,6 +671,16 @@ export default function ImprestQueuePage() {
                   />
                   {parseFloat(approveAmount) < parseFloat(selected.amount_requested) && approveAmount && (
                     <p className="text-xs text-blue-600 mt-1">This will be recorded as a partial approval.</p>
+                  )}
+                  {selected?.director_approved_amount && (
+                    <p className="text-xs text-orange-600 mt-1">
+                      Director approved {fmt(selected.director_approved_amount)} — you cannot exceed this amount.
+                    </p>
+                  )}
+                  {selected?.old_balance_deducted > 0 && (
+                    <p className="text-xs text-amber-600 mt-1">
+                      Old balance deduction: {fmt(selected.old_balance_deducted)} will be subtracted from the approved amount.
+                    </p>
                   )}
                 </div>
               )}
@@ -525,6 +719,41 @@ export default function ImprestQueuePage() {
                   {actionLoading ? 'Rejecting…' : 'Reject'}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pay Modal */}
+      {payReq && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="p-6 border-b">
+              <h2 className="text-lg font-bold text-gray-900">Mark as Paid</h2>
+              <p className="text-sm text-gray-500 mt-1">{payReq.ref_id} — {payReq.employee?.name}</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-gray-500">Amount</span><span className="font-bold">{fmt(payReq.net_approved_amount || payReq.approved_amount)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Category</span><span>{payReq.category}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Site</span><span>{payReq.site}</span></div>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Payment Receipt (optional)</label>
+                <input type="file" accept="image/*,application/pdf"
+                  onChange={(e) => setPayReceipt(e.target.files[0] || null)}
+                  className="w-full text-sm text-gray-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+                <p className="text-xs text-gray-400 mt-1">Upload a payment slip or receipt as proof. This will only be visible to finance team.</p>
+              </div>
+              {actionError && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{actionError}</p>}
+            </div>
+            <div className="p-6 border-t flex justify-end gap-3">
+              <button onClick={() => { setPayReq(null); setPayReceipt(null); setActionError(''); }}
+                className="px-4 py-2 text-sm text-gray-600 border rounded-lg">Cancel</button>
+              <button onClick={handlePay} disabled={actionLoading}
+                className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60">
+                {actionLoading ? 'Processing…' : 'Confirm Payment'}
+              </button>
             </div>
           </div>
         </div>

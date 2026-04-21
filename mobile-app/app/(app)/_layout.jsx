@@ -52,6 +52,14 @@ export default function AppLayout() {
           tabBarIcon: ({ color, size }) => <Ionicons name="time-outline" color={color} size={size} />,
         }}
       />
+      <Tabs.Screen
+        name="feedback"
+        options={{
+          title: 'Feedback',
+          tabBarLabel: 'Feedback',
+          tabBarIcon: ({ color, size }) => <Ionicons name="chatbubble-ellipses-outline" color={color} size={size} />,
+        }}
+      />
     </Tabs>
   );
 }
