@@ -7,6 +7,7 @@ function getNavItems(role) {
       return [
         { to: '/s1-queue', label: 'Imprest Review', icon: '📋' },
         { to: '/imprest-analytics', label: 'Imprest Analytics', icon: '📈' },
+        { to: '/procurement-queue', label: 'Procurement Payments', icon: '📦' },
       ];
     case 'approver_s2':
       return [
