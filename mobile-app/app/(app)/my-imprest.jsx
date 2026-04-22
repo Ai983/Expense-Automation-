@@ -74,6 +74,7 @@ export default function MyImprestScreen() {
 const STAGE_LABELS = {
   's1_pending': 'Under Review',
   's1_approved': 'Forwarded',
+  's1_rejected': 'Rejected at Stage 1',
   's2_pending': 'Awaiting Approval',
   's2_approved': 'Approved',
   's2_rejected': 'Rejected',
@@ -85,6 +86,7 @@ const STAGE_LABELS = {
 };
 const STAGE_COLOURS = {
   's1_pending': '#f59e0b',
+  's1_rejected': '#ef4444',
   's2_pending': '#f97316',
   's3_pending': '#3b82f6',
   's3_approved': '#10b981',
