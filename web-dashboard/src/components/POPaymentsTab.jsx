@@ -23,7 +23,7 @@ export default function POPaymentsTab() {
     setLoading(true);
     try {
       const { data } = await api.get('/api/po-payments/finance-queue');
-      setQueue(data || []);
+      setQueue(data?.data || []);
     } catch {
       setQueue([]);
     } finally {

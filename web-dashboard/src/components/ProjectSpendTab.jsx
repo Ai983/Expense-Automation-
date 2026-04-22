@@ -13,7 +13,7 @@ export default function ProjectSpendTab() {
 
   useEffect(() => {
     api.get('/api/po-payments/project-spend')
-      .then(res => setData(res.data || []))
+      .then(res => setData(res.data?.data || []))
       .catch(() => setData([]))
       .finally(() => setLoading(false));
   }, []);
