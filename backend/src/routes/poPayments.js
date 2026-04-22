@@ -89,7 +89,7 @@ router.post('/ingest', async (req, res, next) => {
         payment_terms_confidence: payment_terms_confidence ? parseInt(payment_terms_confidence) : null,
         payment_due_date: payment_due_date || null,
         payment_terms_notes: payment_terms_notes || null,
-        status: 'pending_procurement',
+        status: 'pending_payment',
       })
       .select()
       .single();
