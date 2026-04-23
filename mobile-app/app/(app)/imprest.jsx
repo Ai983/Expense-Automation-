@@ -427,7 +427,15 @@ export default function ImprestScreen() {
         setResult(res);
       }, 1500);
     } catch (e) {
-      showAlert('Submission failed / \u091C\u092E\u093E \u0935\u093F\u092B\u0932', e?.response?.data?.error || 'Please try again. / \u0915\u0943\u092A\u092F\u093E \u092A\u0941\u0928\u0903 \u092A\u094D\u0930\u092F\u093E\u0938 \u0915\u0930\u0947\u0902\u0964');
+      const errMsg = e?.response?.data?.error || '';
+      if (e?.response?.status === 429 || errMsg.startsWith('WEEKLY_LIMIT:')) {
+        showAlert(
+          'Weekly Emergency Limit / साप्ताहिक सीमा',
+          'Your site's weekly emergency advance (>₹10,000) has already been raised this week. First fill the expense against it and then you will get the amount after this week. / इस सप्ताह आपकी साइट का आपातकालीन अग्रिम पहले ही लिया जा चुका है। पहले उस खर्च को जमा करें।'
+        );
+      } else {
+        showAlert('Submission failed / जमा विफल', errMsg || 'Please try again. / कृपया पुनः प्रयास करें।');
+      }
     } finally {
       setSubmitting(false);
     }

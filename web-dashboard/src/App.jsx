@@ -13,8 +13,15 @@ import S2QueuePage from './pages/S2QueuePage';
 import ResetPassword from './pages/ResetPassword';
 import FeedbackPage from './pages/FeedbackPage';
 import ProcurementQueuePage from './pages/ProcurementQueuePage';
+import HeadDashboardPage from './pages/HeadDashboardPage';
+import HeadKanbanPage from './pages/HeadKanbanPage';
+import HeadProjectSpendPage from './pages/HeadProjectSpendPage';
+import HeadExpenseListPage from './pages/HeadExpenseListPage';
+import HeadImprestListPage from './pages/HeadImprestListPage';
+import HeadPOListPage from './pages/HeadPOListPage';
 
 function getDefaultRoute(role) {
+  if (role === 'head') return '/head';
   if (role === 'approver_s1') return '/s1-queue';
   if (role === 'approver_s2') return '/s2-queue';
   if (role === 'procurement_finance') return '/procurement-queue';
@@ -52,6 +59,12 @@ function AppRoutes() {
       <Route path="/s2-queue" element={<ProtectedLayout><S2QueuePage /></ProtectedLayout>} />
       <Route path="/feedback" element={<ProtectedLayout><FeedbackPage /></ProtectedLayout>} />
       <Route path="/procurement-queue" element={<ProtectedLayout><ProcurementQueuePage /></ProtectedLayout>} />
+      <Route path="/head" element={<ProtectedLayout><HeadDashboardPage /></ProtectedLayout>} />
+      <Route path="/head/kanban" element={<ProtectedLayout><HeadKanbanPage /></ProtectedLayout>} />
+      <Route path="/head/projects" element={<ProtectedLayout><HeadProjectSpendPage /></ProtectedLayout>} />
+      <Route path="/head/expenses" element={<ProtectedLayout><HeadExpenseListPage /></ProtectedLayout>} />
+      <Route path="/head/imprest" element={<ProtectedLayout><HeadImprestListPage /></ProtectedLayout>} />
+      <Route path="/head/po" element={<ProtectedLayout><HeadPOListPage /></ProtectedLayout>} />
       <Route path="/" element={<Navigate to={user ? defaultRoute : '/login'} replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -3,6 +3,15 @@ import { useAuth } from '../../context/AuthContext';
 
 function getNavItems(role) {
   switch (role) {
+    case 'head':
+      return [
+        { to: '/head', label: 'Overview', icon: '🏠' },
+        { to: '/head/kanban', label: 'Workflow Board', icon: '📌' },
+        { to: '/head/projects', label: 'Project Spend', icon: '🏗️' },
+        { to: '/head/expenses', label: 'All Expenses', icon: '📋' },
+        { to: '/head/imprest', label: 'All Imprest', icon: '💰' },
+        { to: '/head/po', label: 'All POs', icon: '📦' },
+      ];
     case 'approver_s1':
       return [
         { to: '/s1-queue', label: 'Imprest Review', icon: '📋' },

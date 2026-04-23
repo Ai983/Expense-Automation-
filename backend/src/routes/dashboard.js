@@ -3,7 +3,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { roleGuard } from '../middleware/roleGuard.js';
 import { ok } from '../utils/responseHelper.js';
-import { FINANCE_ROLES, ALL_DASHBOARD_ROLES } from '../config/constants.js';
+import { FINANCE_HEAD_ROLES, ALL_DASHBOARD_ROLES } from '../config/constants.js';
 
 const router = Router();
 
@@ -11,7 +11,7 @@ const router = Router();
 router.use(authMiddleware);
 
 // GET /api/dashboard/metrics — key headline numbers (finance only)
-router.get('/metrics', roleGuard(FINANCE_ROLES), async (req, res, next) => {
+router.get('/metrics', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
     const [totalRes, pendingRes, autoVerifiedRes, totalAmountRes] = await Promise.all([
       supabaseAdmin.from('expenses').select('id', { count: 'exact', head: true }),
@@ -45,7 +45,7 @@ router.get('/metrics', roleGuard(FINANCE_ROLES), async (req, res, next) => {
 });
 
 // GET /api/dashboard/by-site — expense counts and amounts grouped by site
-router.get('/by-site', roleGuard(FINANCE_ROLES), async (req, res, next) => {
+router.get('/by-site', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('expenses')
@@ -72,7 +72,7 @@ router.get('/by-site', roleGuard(FINANCE_ROLES), async (req, res, next) => {
 });
 
 // GET /api/dashboard/by-category
-router.get('/by-category', roleGuard(FINANCE_ROLES), async (req, res, next) => {
+router.get('/by-category', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('expenses')
@@ -101,7 +101,7 @@ router.get('/by-category', roleGuard(FINANCE_ROLES), async (req, res, next) => {
 });
 
 // GET /api/dashboard/by-status
-router.get('/by-status', roleGuard(FINANCE_ROLES), async (req, res, next) => {
+router.get('/by-status', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('expenses')
@@ -123,7 +123,7 @@ router.get('/by-status', roleGuard(FINANCE_ROLES), async (req, res, next) => {
 });
 
 // GET /api/dashboard/recent-activity — last 20 actions from audit trail
-router.get('/recent-activity', roleGuard(FINANCE_ROLES), async (req, res, next) => {
+router.get('/recent-activity', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('audit_trail')
@@ -142,7 +142,7 @@ router.get('/recent-activity', roleGuard(FINANCE_ROLES), async (req, res, next) 
 });
 
 // GET /api/dashboard/by-employee — per-employee expense breakdown
-router.get('/by-employee', roleGuard(FINANCE_ROLES), async (req, res, next) => {
+router.get('/by-employee', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
     const { site, from, to } = req.query;
 
@@ -409,7 +409,7 @@ router.get('/imprest/employee-balance', roleGuard(ALL_DASHBOARD_ROLES), async (r
 // ════════════════════════════════════════════════════════════════════════════
 
 // GET /api/dashboard/by-site/:site/details — employee breakdown for expense site
-router.get('/by-site/:site/details', roleGuard(FINANCE_ROLES), async (req, res, next) => {
+router.get('/by-site/:site/details', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('expenses')
@@ -430,7 +430,7 @@ router.get('/by-site/:site/details', roleGuard(FINANCE_ROLES), async (req, res, 
 });
 
 // GET /api/dashboard/by-category/:category/details
-router.get('/by-category/:category/details', roleGuard(FINANCE_ROLES), async (req, res, next) => {
+router.get('/by-category/:category/details', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('expenses')

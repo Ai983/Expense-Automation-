@@ -13,7 +13,7 @@ import {
 import { extractRideFare } from '../services/visionService.js';
 import { generateImprestRefId } from '../utils/refIdGenerator.js';
 import { ok, fail } from '../utils/responseHelper.js';
-import { FINANCE_ROLES, S1_ROLES, S2_ROLES, RITU_ALWAYS_SITES, DIRECTOR_APPROVAL_THRESHOLD } from '../config/constants.js';
+import { FINANCE_ROLES, FINANCE_HEAD_ROLES, S1_ROLES, S2_ROLES, RITU_ALWAYS_SITES, DIRECTOR_APPROVAL_THRESHOLD } from '../config/constants.js';
 import { broadcastNewImprest } from '../index.js';
 import { sendImprestApprovalReminder, notifyS1, notifyS2, notifyFinance } from '../services/whatsappService.js';
 import { triggerSubmissionConfirmation, triggerFounderApproval } from '../services/n8nService.js';
@@ -132,6 +132,34 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
 
     if (!site || !category || !peopleCount || !amountRequested) {
       return fail(res, 'site, category, peopleCount, and amountRequested are required');
+    }
+
+    // Weekly site emergency limit: only one imprest > ₹10,000 per site per calendar week
+    if (parseFloat(amountRequested) > 10000) {
+      const now = new Date();
+      const dayOfWeek = now.getDay(); // 0=Sunday, 1=Monday …
+      const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - daysFromMonday);
+      weekStart.setHours(0, 0, 0, 0);
+
+      const { data: weeklyCheck } = await supabaseAdmin
+        .from('imprest_requests')
+        .select('id, ref_id')
+        .eq('site', site)
+        .gt('amount_requested', 10000)
+        .gte('submitted_at', weekStart.toISOString())
+        .not('current_stage', 'in', '("s1_rejected","s2_rejected","s3_rejected","director_rejected")')
+        .neq('status', 'rejected')
+        .limit(1);
+
+      if (weeklyCheck?.length > 0) {
+        return fail(
+          res,
+          'WEEKLY_LIMIT: Your site\'s weekly emergency advance (>₹10,000) has already been raised this week. Please submit the expense for that advance first, and you can raise a new emergency advance after this week.',
+          429
+        );
+      }
     }
 
     const refId = await generateImprestRefId();
@@ -385,7 +413,7 @@ router.get('/my-requests/:employeeId', authMiddleware, async (req, res, next) =>
 });
 
 // ── GET /api/imprest/finance/queue ────────────────────────────────────────────
-router.get('/finance/queue', authMiddleware, roleGuard(FINANCE_ROLES), async (req, res, next) => {
+router.get('/finance/queue', authMiddleware, roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
     const { status, site, category, dateFrom, dateTo, employeeName, page = 1, limit = 50 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -504,7 +532,7 @@ router.get('/finance/queue', authMiddleware, roleGuard(FINANCE_ROLES), async (re
 });
 
 // ── GET /api/imprest/finance/reminders ───────────────────────────────────────
-router.get('/finance/reminders', authMiddleware, roleGuard(FINANCE_ROLES), async (req, res, next) => {
+router.get('/finance/reminders', authMiddleware, roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
     const now = new Date().toISOString();
 
@@ -723,7 +751,7 @@ async function buildStageQueue(req, stageFilter, routeFilter) {
 }
 
 // GET /api/imprest/s1/queue — Avisha's queue
-router.get('/s1/queue', authMiddleware, roleGuard(S1_ROLES), async (req, res, next) => {
+router.get('/s1/queue', authMiddleware, roleGuard([...S1_ROLES, 'head']), async (req, res, next) => {
   try {
     const result = await buildStageQueue(req, 's1_pending', null);
     return ok(res, result);
@@ -845,7 +873,7 @@ router.post('/:id/s1-reject', authMiddleware, roleGuard(S1_ROLES), async (req, r
 // ════════════════════════════════════════════════════════════════════════════
 
 // GET /api/imprest/s2/queue — Ritu's queue (only avisha_ritu_finance route)
-router.get('/s2/queue', authMiddleware, roleGuard(S2_ROLES), async (req, res, next) => {
+router.get('/s2/queue', authMiddleware, roleGuard([...S2_ROLES, 'head']), async (req, res, next) => {
   try {
     const result = await buildStageQueue(req, 's2_pending', 'avisha_ritu_finance');
     return ok(res, result);

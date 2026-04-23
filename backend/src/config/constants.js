@@ -40,7 +40,7 @@ export const CATEGORIES = [
   'Porter Expenses',
 ];
 
-export const ROLES = ['employee', 'finance', 'manager', 'admin', 'approver_s1', 'approver_s2'];
+export const ROLES = ['employee', 'finance', 'manager', 'admin', 'approver_s1', 'approver_s2', 'procurement_finance', 'head'];
 
 export const FINANCE_ROLES = ['finance', 'manager', 'admin'];
 
@@ -48,7 +48,13 @@ export const FINANCE_ROLES = ['finance', 'manager', 'admin'];
 export const S1_ROLES = ['approver_s1', 'admin'];
 export const S2_ROLES = ['approver_s2', 'admin'];
 export const S3_ROLES = ['finance', 'manager', 'admin'];
-export const ALL_DASHBOARD_ROLES = ['approver_s1', 'approver_s2', 'finance', 'manager', 'admin'];
+export const ALL_DASHBOARD_ROLES = ['approver_s1', 'approver_s2', 'finance', 'manager', 'admin', 'head'];
+
+// Head role — read-only across all modules
+export const HEAD_ROLES = ['head', 'admin'];
+
+// Finance roles + head (for read-only GET routes that finance views)
+export const FINANCE_HEAD_ROLES = ['finance', 'manager', 'admin', 'head'];
 
 // Sites that always go through Ritu (not Bhaskar) regardless of amount
 export const RITU_ALWAYS_SITES = ['Head Office', 'Bangalore Office'];

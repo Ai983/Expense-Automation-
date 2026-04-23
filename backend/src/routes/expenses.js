@@ -9,7 +9,7 @@ import { checkDuplicates } from '../services/duplicateService.js';
 import { logAudit } from '../services/auditService.js';
 import { generateRefId } from '../utils/refIdGenerator.js';
 import { ok, fail } from '../utils/responseHelper.js';
-import { SITES, CATEGORIES, FINANCE_ROLES } from '../config/constants.js';
+import { SITES, CATEGORIES, FINANCE_ROLES, FINANCE_HEAD_ROLES } from '../config/constants.js';
 import { broadcastNewExpense } from '../index.js';
 
 const router = Router();
@@ -280,7 +280,7 @@ router.post(
 router.get(
   '/finance/queue',
   authMiddleware,
-  roleGuard(FINANCE_ROLES),
+  roleGuard(FINANCE_HEAD_ROLES),
   async (req, res, next) => {
     try {
       const { status, site, dateFrom, dateTo, employeeId, page = 1, limit = 50 } = req.query;

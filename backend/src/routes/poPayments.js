@@ -14,7 +14,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 // ── Roles ──────────────────────────────────────────────────────────────────
 const PROCUREMENT_ROLES = ['procurement_finance', 'admin'];
 const FINANCE_ROLES = ['finance', 'manager', 'admin'];
-const ALL_VIEWER_ROLES = ['procurement_finance', 'finance', 'manager', 'admin'];
+const ALL_VIEWER_ROLES = ['procurement_finance', 'finance', 'manager', 'admin', 'head'];
 
 // ── Receipt upload helper ──────────────────────────────────────────────────
 async function uploadPaymentReceipt(file, storagePath) {
@@ -125,7 +125,7 @@ router.get('/procurement-queue', authMiddleware, roleGuard(PROCUREMENT_ROLES), a
 // GET /api/po-payments/finance-queue
 // Stage 2 queue — Finance Team Dashboard
 // ─────────────────────────────────────────────────────────────────────────
-router.get('/finance-queue', authMiddleware, roleGuard(FINANCE_ROLES), async (req, res, next) => {
+router.get('/finance-queue', authMiddleware, roleGuard([...FINANCE_ROLES, 'head']), async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('po_payments')

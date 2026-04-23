@@ -22,8 +22,10 @@ export default function Login() {
         setError('This portal is for finance team only. Use the mobile app to submit expenses.');
         return;
       }
-      const route = role === 'approver_s1' ? '/s1-queue'
+      const route = role === 'head' ? '/head'
+                  : role === 'approver_s1' ? '/s1-queue'
                   : role === 'approver_s2' ? '/s2-queue'
+                  : role === 'procurement_finance' ? '/procurement-queue'
                   : '/queue';
       navigate(route);
     } catch (err) {
