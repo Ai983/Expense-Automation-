@@ -19,3 +19,10 @@ export const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KE
 
 // Anon client - used only for verifying Supabase Auth tokens
 export const supabaseAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// CPS Procurement System client - used to confirm payment back to CPS
+const CPS_SUPABASE_URL = process.env.CPS_SUPABASE_URL;
+const CPS_SUPABASE_SERVICE_KEY = process.env.CPS_SUPABASE_SERVICE_KEY;
+export const cpsSupabase = CPS_SUPABASE_URL && CPS_SUPABASE_SERVICE_KEY
+  ? createClient(CPS_SUPABASE_URL, CPS_SUPABASE_SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } })
+  : null;

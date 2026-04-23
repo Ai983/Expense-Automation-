@@ -2,7 +2,7 @@
 // SPEC-02 — PO Payment processing: Procurement review (Stage 1) → Finance payment (Stage 2)
 import express from 'express';
 import multer from 'multer';
-import { supabaseAdmin } from '../config/supabase.js';
+import { supabaseAdmin, cpsSupabase } from '../config/supabase.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { roleGuard } from '../middleware/roleGuard.js';
 import { ok, fail } from '../utils/responseHelper.js';
@@ -332,6 +332,16 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
       entityId: id,
       newValue: { paid_amount: parsedPaid, has_receipt: !!receiptPath, po_ref: current.cps_po_ref },
     });
+
+    // Fire-and-forget: confirm payment back to CPS procurement system
+    if (cpsSupabase && current.cps_po_ref) {
+      cpsSupabase
+        .from('cps_purchase_orders')
+        .update({ finance_paid_at: data.paid_at, finance_paid_amount: parsedPaid })
+        .eq('po_number', current.cps_po_ref)
+        .then(({ error }) => { if (error) console.error('[CPS sync] finance_paid update failed:', error.message); })
+        .catch(err => console.error('[CPS sync] error:', err.message));
+    }
 
     return ok(res, data);
   } catch (err) { next(err); }
