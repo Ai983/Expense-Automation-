@@ -135,7 +135,8 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
     }
 
     // Weekly site emergency limit: only one imprest > ₹10,000 per site per calendar week
-    if (parseFloat(amountRequested) > 10000) {
+    // Head Office is exempt — no upper limit applies there
+    if (parseFloat(amountRequested) > 10000 && site !== 'Head Office') {
       const now = new Date();
       const dayOfWeek = now.getDay(); // 0=Sunday, 1=Monday …
       const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;

@@ -323,13 +323,19 @@ export default function ExpenseQueue() {
         <p className="text-xs text-gray-400">
           {searchQuery ? `${displayedExpenses.length} of ${total}` : total} expense{total !== 1 ? 's' : ''} found
         </p>
-        <button
-          onClick={() => downloadCSV(displayedExpenses)}
-          className="btn-secondary text-sm"
-          title="Download filtered data as CSV"
-        >
-          Download CSV
-        </button>
+        <div className="flex items-center gap-4">
+          <span className="text-xs text-gray-500 flex items-center gap-1.5">
+            <span className="text-red-500 font-bold">🚩</span>
+            No Imprest Request — verify manually
+          </span>
+          <button
+            onClick={() => downloadCSV(displayedExpenses)}
+            className="btn-secondary text-sm"
+            title="Download filtered data as CSV"
+          >
+            Download CSV
+          </button>
+        </div>
       </div>
 
       {/* Bulk action bar */}
@@ -379,7 +385,7 @@ export default function ExpenseQueue() {
                 displayedExpenses.map((exp) => {
                   const canSelect = ['pending', 'verified', 'manual_review'].includes(exp.status);
                   return (
-                    <tr key={exp.id} className="hover:bg-gray-50 transition-colors">
+                    <tr key={exp.id} className={`transition-colors ${!exp.imprest_id ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-50'}`}>
                       <td className="px-4 py-3">
                         {canSelect && (
                           <input
@@ -393,6 +399,12 @@ export default function ExpenseQueue() {
                       <td className="px-4 py-3 font-mono text-xs text-gray-700">
                         {exp.ref_id}
                         {exp.duplicate_flag && <span className="ml-1 text-orange-500" title="Duplicate warning">⚠</span>}
+                        {!exp.imprest_id && (
+                          <span
+                            className="ml-1 text-red-500"
+                            title="No Imprest Request found — this expense was submitted without a prior imprest approval. Verify manually."
+                          >🚩</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-gray-800">{exp.employee?.name}</td>
                       <td className="px-4 py-3 text-gray-600">{exp.site}</td>

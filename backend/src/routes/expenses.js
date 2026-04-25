@@ -48,6 +48,42 @@ router.post(
         return fail(res, 'At least one payment screenshot is required');
       }
 
+      // Expenses must be linked to a paid Imprest Request
+      if (!imprestId) {
+        return fail(res, 'An approved Imprest Request is required before submitting an expense. Please raise an Imprest Request and get it paid first.');
+      }
+
+      const { data: linkedImprest, error: imprestFetchErr } = await supabaseAdmin
+        .from('imprest_requests')
+        .select('id, ref_id, employee_id, amount_requested, approved_amount, current_stage')
+        .eq('id', imprestId)
+        .single();
+
+      if (imprestFetchErr || !linkedImprest) {
+        return fail(res, 'Invalid Imprest Request. Please select a valid imprest from your pending list.');
+      }
+      if (linkedImprest.employee_id !== req.user.id) {
+        return fail(res, 'You can only submit expenses against your own Imprest Requests.');
+      }
+      if (linkedImprest.current_stage !== 'paid') {
+        return fail(res, `Imprest ${linkedImprest.ref_id} has not been disbursed yet. You can only submit expenses against a paid imprest.`);
+      }
+
+      // Check remaining balance on this imprest
+      const { data: priorExpenses } = await supabaseAdmin
+        .from('expenses')
+        .select('amount')
+        .eq('imprest_id', imprestId)
+        .not('status', 'in', '("rejected","blocked")');
+
+      const alreadySpent = (priorExpenses || []).reduce((sum, e) => sum + parseFloat(e.amount), 0);
+      const approvedAmt = parseFloat(linkedImprest.approved_amount || linkedImprest.amount_requested);
+      const remainingBalance = Math.max(0, approvedAmt - alreadySpent);
+
+      if (parsedAmount > remainingBalance + 1) {
+        return fail(res, `Expense amount (₹${parsedAmount.toLocaleString('en-IN')}) exceeds the remaining imprest balance of ₹${remainingBalance.toLocaleString('en-IN')} for ${linkedImprest.ref_id}.`);
+      }
+
       const submittedAt = new Date().toISOString();
 
       // 1. Generate reference ID
@@ -145,6 +181,7 @@ router.post(
         site,
         submittedAt,
         transactionId: ocrData?.transactionId || null,
+        imprestId: imprestId || null,
       });
 
       // 5. Determine final status
@@ -193,19 +230,12 @@ router.post(
           duplicate_ref: duplicateResult.blockReason ? 'BLOCKED' : null,
           submitted_at: submittedAt,
           verified_at: finalStatus === 'verified' ? submittedAt : null,
+          imprest_id: imprestId,
         })
         .select()
         .single();
 
       if (insertError) throw insertError;
-
-      // Link expense to imprest if provided (column added in migration 012)
-      if (imprestId && expense?.id) {
-        await supabaseAdmin
-          .from('expenses')
-          .update({ imprest_id: imprestId })
-          .eq('id', expense.id);
-      }
 
       // 8. Insert verification logs
       const logRows = verificationChecks.map((check) => ({
@@ -290,7 +320,7 @@ router.get(
         .from('expenses')
         .select(`
           id, ref_id, site, amount, category, description, status,
-          duplicate_flag, duplicate_ref, submitted_at, verified_at,
+          duplicate_flag, duplicate_ref, submitted_at, verified_at, imprest_id,
           approved_at, rejection_reason, screenshot_metadata,
           employee:employee_id (id, name, email, phone, site),
           approver:approved_by (id, name)
