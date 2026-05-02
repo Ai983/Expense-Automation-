@@ -113,26 +113,9 @@ export default function SubmitExpenseScreen() {
     setImages((prev) => prev.filter((_, i) => i !== index));
   }
 
-  async function handleSubmit() {
-    if (!activeImprestId) {
-      return Alert.alert('Imprest Required', 'Please select a pending Imprest Request above before submitting an expense.');
-    }
-    if (!form.amount || isNaN(parseFloat(form.amount)) || parseFloat(form.amount) <= 0) {
-      return Alert.alert('Error', 'Enter a valid amount');
-    }
-    if (imprestRemainingBalance !== null && parseFloat(form.amount) > imprestRemainingBalance + 1) {
-      return Alert.alert(
-        'Amount Too High',
-        `The expense amount (₹${parseFloat(form.amount).toLocaleString('en-IN')}) exceeds the remaining imprest balance of ₹${imprestRemainingBalance.toLocaleString('en-IN')}.`
-      );
-    }
-    if (images.length === 0) {
-      return Alert.alert('Error', 'Upload at least one payment screenshot or PDF');
-    }
-
+  async function doSubmit() {
     setLoading(true);
     setResult(null);
-
     try {
       const expenseAmount = parseFloat(form.amount);
       const res = await submitExpense({
@@ -145,7 +128,6 @@ export default function SubmitExpenseScreen() {
       });
       setResult(res);
       setImages([]);
-
       if (activeReminderId) {
         try { await fulfillReminder(activeReminderId, expenseAmount); } catch { /* ignore */ }
       }
@@ -160,6 +142,35 @@ export default function SubmitExpenseScreen() {
       }
     } finally {
       setLoading(false);
+    }
+  }
+
+  function handleSubmit() {
+    if (!activeImprestId) {
+      return Alert.alert('Imprest Required', 'Please select a pending Imprest Request above before submitting an expense.');
+    }
+    if (!form.amount || isNaN(parseFloat(form.amount)) || parseFloat(form.amount) <= 0) {
+      return Alert.alert('Error', 'Enter a valid amount');
+    }
+    if (images.length === 0) {
+      return Alert.alert('Error', 'Upload at least one payment screenshot or PDF');
+    }
+
+    const enteredAmt = parseFloat(form.amount);
+    const isOverspend = imprestRemainingBalance !== null && enteredAmt > imprestRemainingBalance + 0.01;
+
+    if (isOverspend) {
+      const overspendAmt = (enteredAmt - imprestRemainingBalance).toLocaleString('en-IN');
+      Alert.alert(
+        'Overspend Warning',
+        `You are spending ₹${overspendAmt} more than your remaining imprest balance of ₹${imprestRemainingBalance.toLocaleString('en-IN')}.\n\nThe extra amount will be flagged for finance review.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Submit Anyway', style: 'default', onPress: doSubmit },
+        ]
+      );
+    } else {
+      doSubmit();
     }
   }
 
@@ -300,11 +311,17 @@ export default function SubmitExpenseScreen() {
               onChangeText={(v) => set('amount', v)}
               keyboardType="numeric"
             />
-            {imprestRemainingBalance !== null && (
-              <Text style={styles.balanceHint}>
-                Available balance: ₹{imprestRemainingBalance.toLocaleString('en-IN')}
-              </Text>
-            )}
+            {imprestRemainingBalance !== null && (() => {
+              const entered = parseFloat(form.amount || 0);
+              const over = entered > imprestRemainingBalance + 0.01;
+              return (
+                <Text style={[styles.balanceHint, over && { color: '#dc2626' }]}>
+                  {over
+                    ? `⚠️ Overspend by ₹${(entered - imprestRemainingBalance).toLocaleString('en-IN')} — will need finance approval`
+                    : `Available balance: ₹${imprestRemainingBalance.toLocaleString('en-IN')}`}
+                </Text>
+              );
+            })()}
 
             {/* Category — locked to imprest */}
             <Text style={styles.label}>Category</Text>
