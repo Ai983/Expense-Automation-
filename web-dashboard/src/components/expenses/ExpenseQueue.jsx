@@ -326,7 +326,11 @@ export default function ExpenseQueue() {
         <div className="flex items-center gap-4">
           <span className="text-xs text-gray-500 flex items-center gap-1.5">
             <span className="text-red-500 font-bold">🚩</span>
-            No Imprest Request — verify manually
+            No Imprest Request
+          </span>
+          <span className="text-xs text-gray-500 flex items-center gap-1.5">
+            <span className="text-purple-600 font-bold">💸</span>
+            Overspend flagged
           </span>
           <button
             onClick={() => downloadCSV(displayedExpenses)}
@@ -404,6 +408,12 @@ export default function ExpenseQueue() {
                             className="ml-1 text-red-500"
                             title="No Imprest Request found — this expense was submitted without a prior imprest approval. Verify manually."
                           >🚩</span>
+                        )}
+                        {exp.overspend_amount > 0 && (
+                          <span
+                            className="ml-1 text-purple-600"
+                            title={`Overspend: ₹${Number(exp.overspend_amount).toLocaleString('en-IN')} above imprest balance`}
+                          >💸</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-gray-800">{exp.employee?.name}</td>

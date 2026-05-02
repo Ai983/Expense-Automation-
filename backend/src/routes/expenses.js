@@ -80,9 +80,8 @@ router.post(
       const approvedAmt = parseFloat(linkedImprest.approved_amount || linkedImprest.amount_requested);
       const remainingBalance = Math.max(0, approvedAmt - alreadySpent);
 
-      if (parsedAmount > remainingBalance + 1) {
-        return fail(res, `Expense amount (₹${parsedAmount.toLocaleString('en-IN')}) exceeds the remaining imprest balance of ₹${remainingBalance.toLocaleString('en-IN')} for ${linkedImprest.ref_id}.`);
-      }
+      // Track overspend but allow the submission — finance reconciles the balance
+      const overspendAmount = Math.max(0, parsedAmount - remainingBalance);
 
       const submittedAt = new Date().toISOString();
 
@@ -231,6 +230,7 @@ router.post(
           submitted_at: submittedAt,
           verified_at: finalStatus === 'verified' ? submittedAt : null,
           imprest_id: imprestId,
+          overspend_amount: overspendAmount,
         })
         .select()
         .single();
@@ -321,7 +321,7 @@ router.get(
         .select(`
           id, ref_id, site, amount, category, description, status,
           duplicate_flag, duplicate_ref, submitted_at, verified_at, imprest_id,
-          approved_at, rejection_reason, screenshot_metadata,
+          approved_at, rejection_reason, screenshot_metadata, overspend_amount,
           employee:employee_id (id, name, email, phone, site),
           approver:approved_by (id, name)
         `, { count: 'exact' })
