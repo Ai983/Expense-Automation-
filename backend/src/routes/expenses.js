@@ -23,7 +23,7 @@ router.post(
   upload.fields([{ name: 'screenshots', maxCount: 5 }, { name: 'screenshot', maxCount: 1 }]),
   async (req, res, next) => {
     try {
-      const { site, amount, category, description, imprestId } = req.body;
+      const { site, amount, category, description, imprestId, settlementForExpenseId } = req.body;
       // Support both multi-file (screenshots) and legacy single-file (screenshot)
       const files = [
         ...(req.files?.screenshots || []),
@@ -232,6 +232,7 @@ router.post(
           verified_at: finalStatus === 'verified' ? submittedAt : null,
           imprest_id: imprestId,
           overspend_amount: overspendAmount,
+          settlement_for_expense_id: settlementForExpenseId || null,
         })
         .select()
         .single();
@@ -344,6 +345,52 @@ router.get(
     }
   }
 );
+
+// ── GET /api/expenses/my-adjustments/:employeeId ─────────────────────────────
+// Returns approved expenses where finance reduced the amount — employee must settle the gap
+router.get('/my-adjustments/:employeeId', authMiddleware, async (req, res, next) => {
+  try {
+    if (req.user.role === 'employee' && req.user.id !== req.params.employeeId) {
+      return fail(res, 'Access denied', 403);
+    }
+
+    const { data: rows, error } = await supabaseAdmin
+      .from('expenses')
+      .select('id, ref_id, site, amount, original_amount, category, imprest_id, approved_at')
+      .eq('employee_id', req.params.employeeId)
+      .eq('status', 'approved')
+      .not('original_amount', 'is', null)
+      .order('approved_at', { ascending: false });
+
+    if (error) throw error;
+
+    // Keep only rows where finance actually reduced the amount
+    const reduced = (rows || []).filter(
+      (e) => parseFloat(e.original_amount) > parseFloat(e.amount) + 0.01
+    );
+
+    // For each, subtract already-approved settlement expenses
+    const adjustments = await Promise.all(
+      reduced.map(async (adj) => {
+        const { data: settlements } = await supabaseAdmin
+          .from('expenses')
+          .select('amount')
+          .eq('settlement_for_expense_id', adj.id)
+          .not('status', 'in', '("rejected","blocked")');
+
+        const settledSoFar = (settlements || []).reduce((sum, s) => sum + parseFloat(s.amount), 0);
+        const gapAmount = parseFloat(adj.original_amount) - parseFloat(adj.amount);
+        const remaining = Math.max(0, Math.round((gapAmount - settledSoFar) * 100) / 100);
+        return { ...adj, remaining, settledSoFar: Math.round(settledSoFar * 100) / 100 };
+      })
+    );
+
+    // Only surface adjustments that still have an unsettled balance
+    return ok(res, { adjustments: adjustments.filter((a) => a.remaining > 0.01) });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ── GET /api/expenses/my-expenses/:employeeId ─────────────────────────────────
 router.get('/my-expenses/:employeeId', authMiddleware, async (req, res, next) => {

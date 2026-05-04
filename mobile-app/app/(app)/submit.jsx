@@ -6,7 +6,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useAuth } from '../../src/context/AuthContext';
-import { submitExpense } from '../../src/services/expenseService';
+import { submitExpense, getMyAdjustments } from '../../src/services/expenseService';
 import { getMyReminders, fulfillReminder } from '../../src/services/imprestService';
 import { SITES, CATEGORIES, IMPREST_TO_EXPENSE_CATEGORY } from '../../src/constants';
 
@@ -23,6 +23,9 @@ export default function SubmitExpenseScreen() {
   const [activeImprestId, setActiveImprestId] = useState(null);
   const [imprestApprovedAmount, setImprestApprovedAmount] = useState(null);
   const [imprestRemainingBalance, setImprestRemainingBalance] = useState(null);
+  const [adjustments, setAdjustments] = useState([]);
+  const [activeAdjustmentId, setActiveAdjustmentId] = useState(null);
+  const [settlementForExpenseId, setSettlementForExpenseId] = useState(null);
   const { user } = useAuth();
 
   const fetchReminders = useCallback(async () => {
@@ -34,7 +37,15 @@ export default function SubmitExpenseScreen() {
     finally { setLoadingReminders(false); }
   }, [user]);
 
-  useEffect(() => { fetchReminders(); }, [fetchReminders]);
+  const fetchAdjustments = useCallback(async () => {
+    if (!user) return;
+    try {
+      const res = await getMyAdjustments(user.id);
+      setAdjustments(res.adjustments || []);
+    } catch { /* silently ignore */ }
+  }, [user]);
+
+  useEffect(() => { fetchReminders(); fetchAdjustments(); }, [fetchReminders, fetchAdjustments]);
 
   function set(key, value) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -65,8 +76,28 @@ export default function SubmitExpenseScreen() {
     setResult(null);
   }
 
+  function applyAdjustment(adj) {
+    const remaining = adj.remaining ?? Math.round((parseFloat(adj.original_amount) - parseFloat(adj.amount)) * 100) / 100;
+    setForm({
+      site: SITES.includes(adj.site) ? adj.site : SITES[0],
+      amount: String(remaining),
+      category: CATEGORIES.includes(adj.category) ? adj.category : CATEGORIES[0],
+      description: `Settlement for finance-adjusted expense ${adj.ref_id}`,
+    });
+    setActiveAdjustmentId(adj.id);
+    setSettlementForExpenseId(adj.id);
+    setActiveImprestId(adj.imprest_id);
+    setImprestApprovedAmount(null);
+    setImprestRemainingBalance(remaining);
+    setActiveReminderId(null);
+    setImages([]);
+    setResult(null);
+  }
+
   function clearImprest() {
     setActiveReminderId(null);
+    setActiveAdjustmentId(null);
+    setSettlementForExpenseId(null);
     setActiveImprestId(null);
     setImprestApprovedAmount(null);
     setImprestRemainingBalance(null);
@@ -125,6 +156,7 @@ export default function SubmitExpenseScreen() {
         description: form.description,
         images,
         imprestId: activeImprestId,
+        settlementForExpenseId,
       });
       setResult(res);
       setImages([]);
@@ -133,6 +165,7 @@ export default function SubmitExpenseScreen() {
       }
       clearImprest();
       fetchReminders();
+      fetchAdjustments();
     } catch (err) {
       const msg = err.response?.data?.error || 'Submission failed. Check your connection.';
       if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
@@ -192,6 +225,48 @@ export default function SubmitExpenseScreen() {
             {result.duplicateWarnings?.map((w, i) => (
               <Text key={i} style={styles.resultWarn}>⚠ {w}</Text>
             ))}
+          </View>
+        )}
+
+        {/* ── Pending Settlements (finance-adjusted expenses) ──────── */}
+        {adjustments.length > 0 && (
+          <View style={styles.settlementSection}>
+            <View style={styles.settlementHeader}>
+              <Text style={styles.settlementTitle}>⚠ Pending Settlements</Text>
+              <Text style={styles.settlementSubtitle}>
+                Finance reduced these expenses. Tap a card to resubmit proof for the remaining amount.
+              </Text>
+            </View>
+            {adjustments.map((adj) => {
+              const remaining = adj.remaining ?? Math.round((parseFloat(adj.original_amount) - parseFloat(adj.amount)) * 100) / 100;
+              const isActive = activeAdjustmentId === adj.id;
+              return (
+                <TouchableOpacity
+                  key={adj.id}
+                  style={[styles.settlementCard, isActive && styles.settlementCardActive]}
+                  onPress={() => applyAdjustment(adj)}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.reminderRow}>
+                    <Text style={styles.settlementRef}>{adj.ref_id}</Text>
+                    <Text style={styles.settlementBadge}>Settle ₹{remaining.toLocaleString('en-IN')}</Text>
+                  </View>
+                  <Text style={styles.settlementDetail}>{adj.category} · {adj.site}</Text>
+                  <Text style={styles.settlementAmounts}>
+                    Claimed ₹{parseFloat(adj.original_amount).toLocaleString('en-IN')}  →  Approved ₹{parseFloat(adj.amount).toLocaleString('en-IN')}
+                  </Text>
+                  {adj.settledSoFar > 0 && (
+                    <Text style={styles.settlementSettled}>
+                      Already settled: ₹{adj.settledSoFar.toLocaleString('en-IN')}
+                    </Text>
+                  )}
+                  <Text style={styles.settlementWarning}>
+                    ₹{remaining.toLocaleString('en-IN')} still outstanding — submit payment proof to settle
+                  </Text>
+                  {isActive && <Text style={styles.reminderActive}>✓ Selected — fill the form below and submit</Text>}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         )}
 
@@ -499,4 +574,21 @@ const styles = StyleSheet.create({
   resultMsg: { fontSize: 13, color: '#374151', marginBottom: 4 },
   resultConf: { fontSize: 12, color: '#3b82f6', fontWeight: '600' },
   resultWarn: { fontSize: 12, color: '#f97316', marginTop: 4 },
+
+  // Pending settlements
+  settlementSection: { marginBottom: 20 },
+  settlementHeader: { marginBottom: 10 },
+  settlementTitle: { fontSize: 15, fontWeight: '700', color: '#c2410c', marginBottom: 4 },
+  settlementSubtitle: { fontSize: 12, color: '#78716c' },
+  settlementCard: {
+    backgroundColor: '#fff7ed', borderWidth: 1.5, borderColor: '#f97316',
+    borderRadius: 12, padding: 14, marginBottom: 10,
+  },
+  settlementCardActive: { borderColor: '#16a34a', backgroundColor: '#f0fdf4', borderWidth: 2 },
+  settlementRef: { fontSize: 13, fontWeight: '700', color: '#c2410c', fontFamily: 'monospace' },
+  settlementBadge: { fontSize: 12, fontWeight: '700', color: '#fff', backgroundColor: '#f97316', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
+  settlementDetail: { fontSize: 13, color: '#374151', marginTop: 4, marginBottom: 2 },
+  settlementAmounts: { fontSize: 13, fontWeight: '600', color: '#111827', marginBottom: 4 },
+  settlementSettled: { fontSize: 12, color: '#16a34a', fontWeight: '600', marginBottom: 2 },
+  settlementWarning: { fontSize: 12, color: '#b45309', fontWeight: '600' },
 });

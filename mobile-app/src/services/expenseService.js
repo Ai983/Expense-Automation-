@@ -6,13 +6,14 @@ import api from './api';
  * `images` is an array of { uri, mimeType, name? } objects.
  * Also supports legacy single-image via imageUri/imageMimeType.
  */
-export async function submitExpense({ site, amount, category, description, images, imageUri, imageMimeType, imprestId }) {
+export async function submitExpense({ site, amount, category, description, images, imageUri, imageMimeType, imprestId, settlementForExpenseId }) {
   const formData = new FormData();
   formData.append('site', site);
   formData.append('amount', String(amount));
   formData.append('category', category);
   if (description) formData.append('description', description);
   if (imprestId) formData.append('imprestId', imprestId);
+  if (settlementForExpenseId) formData.append('settlementForExpenseId', settlementForExpenseId);
 
   // Normalize to array: support both new `images` array and legacy single image
   const imageList = images?.length ? images : (imageUri ? [{ uri: imageUri, mimeType: imageMimeType || 'image/jpeg' }] : []);
@@ -51,5 +52,14 @@ export async function getMyExpenses(employeeId, page = 1) {
   const { data } = await api.get(`/api/expenses/my-expenses/${employeeId}`, {
     params: { page, limit: 20 },
   });
+  return data.data;
+}
+
+/**
+ * Fetches expenses where finance reduced the approved amount.
+ * Employee must resubmit proof for the remaining gap.
+ */
+export async function getMyAdjustments(employeeId) {
+  const { data } = await api.get(`/api/expenses/my-adjustments/${employeeId}`);
   return data.data;
 }

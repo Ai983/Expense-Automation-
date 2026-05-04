@@ -8,7 +8,7 @@ export default function ExpenseCard({ expense }) {
 
   const claimed = expense.original_amount ? parseFloat(expense.original_amount) : null;
   const approved = parseFloat(expense.amount);
-  const isReduced = claimed != null && expense.status === 'approved' && Math.abs(claimed - approved) > 0.01;
+  const isReduced = claimed != null && expense.status === 'approved' && claimed - approved > 0.01;
   const notReimbursed = isReduced ? Math.round((claimed - approved) * 100) / 100 : 0;
 
   return (
