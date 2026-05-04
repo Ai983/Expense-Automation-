@@ -431,7 +431,7 @@ export default function ImprestScreen() {
       if (e?.response?.status === 429 || errMsg.startsWith('WEEKLY_LIMIT:')) {
         showAlert(
           'Weekly Emergency Limit / साप्ताहिक सीमा',
-          'Your site's weekly emergency advance (>₹10,000) has already been raised this week. First fill the expense against it and then you will get the amount after this week. / इस सप्ताह आपकी साइट का आपातकालीन अग्रिम पहले ही लिया जा चुका है। पहले उस खर्च को जमा करें।'
+          "Your site's weekly emergency advance (>₹10,000) has already been raised this week. First fill the expense against it and then you will get the amount after this week. / इस सप्ताह आपकी साइट का आपातकालीन अग्रिम पहले ही लिया जा चुका है। पहले उस खर्च को जमा करें।"
         );
       } else {
         showAlert('Submission failed / जमा विफल', errMsg || 'Please try again. / कृपया पुनः प्रयास करें।');
