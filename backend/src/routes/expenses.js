@@ -220,6 +220,7 @@ router.post(
           employee_id: req.user.id,
           site,
           amount: parsedAmount,
+          original_amount: parsedAmount,
           category,
           description: description || null,
           screenshot_url: screenshotPaths[0],
@@ -357,7 +358,7 @@ router.get('/my-expenses/:employeeId', authMiddleware, async (req, res, next) =>
 
     const { data: expenses, error, count } = await supabaseAdmin
       .from('expenses')
-      .select('id, ref_id, site, amount, category, description, status, submitted_at, verified_at, approved_at, rejection_reason, duplicate_flag, screenshot_metadata', { count: 'exact' })
+      .select('id, ref_id, site, amount, original_amount, category, description, status, submitted_at, verified_at, approved_at, rejection_reason, duplicate_flag, screenshot_metadata', { count: 'exact' })
       .eq('employee_id', req.params.employeeId)
       .order('submitted_at', { ascending: false })
       .range(offset, offset + parseInt(limit) - 1);
@@ -422,7 +423,7 @@ router.post(
       const { adjustedAmount } = req.body || {};
       const { data: expense, error: fetchErr } = await supabaseAdmin
         .from('expenses')
-        .select('id, ref_id, status, amount, employee_id')
+        .select('id, ref_id, status, amount, original_amount, employee_id')
         .eq('id', req.params.expenseId)
         .single();
 
@@ -443,6 +444,10 @@ router.post(
       if (finalAmount != null) {
         if (isNaN(finalAmount) || finalAmount <= 0) return fail(res, 'Invalid adjusted amount');
         updateFields.amount = finalAmount;
+        // Preserve original_amount if not already set (first-time approval with adjustment)
+        if (!expense.original_amount) {
+          updateFields.original_amount = expense.amount;
+        }
       }
 
       const { error: updateErr } = await supabaseAdmin
@@ -452,13 +457,35 @@ router.post(
 
       if (updateErr) throw updateErr;
 
+      // If finance reduced the amount, write a verification log so the employee
+      // can see exactly what was approved and what remains to be settled.
+      const claimedAmt = expense.original_amount || expense.amount;
+      const approvedAmt = finalAmount || expense.amount;
+      const isPartial = finalAmount != null && Math.abs(approvedAmt - claimedAmt) > 0.01;
+
+      if (isPartial) {
+        const remaining = Math.round((claimedAmt - approvedAmt) * 100) / 100;
+        await supabaseAdmin.from('verification_logs').insert({
+          expense_id: expense.id,
+          step: 'finance_adjustment',
+          result: 'warn',
+          confidence: null,
+          details: {
+            claimedAmount: claimedAmt,
+            approvedAmount: approvedAmt,
+            reducedBy: remaining,
+            note: `Finance approved ₹${approvedAmt.toLocaleString('en-IN')} against claimed ₹${claimedAmt.toLocaleString('en-IN')}. ₹${remaining.toLocaleString('en-IN')} was not reimbursed — please settle this amount separately.`,
+          },
+        });
+      }
+
       await logAudit({
         userId: req.user.id,
         action: 'approve',
         entityType: 'expense',
         entityId: expense.id,
         oldValue: { status: expense.status, amount: expense.amount },
-        newValue: { status: 'approved', amount: finalAmount || expense.amount },
+        newValue: { status: 'approved', amount: approvedAmt },
         ipAddress: req.ip,
       });
 
