@@ -25,6 +25,7 @@ export default function SubmitExpenseScreen() {
   const [imprestRemainingBalance, setImprestRemainingBalance] = useState(null);
   const [adjustments, setAdjustments] = useState([]);
   const [activeAdjustmentId, setActiveAdjustmentId] = useState(null);
+  const [settlementForExpenseId, setSettlementForExpenseId] = useState(null);
   const { user } = useAuth();
 
   const fetchReminders = useCallback(async () => {
@@ -76,7 +77,7 @@ export default function SubmitExpenseScreen() {
   }
 
   function applyAdjustment(adj) {
-    const remaining = Math.round((parseFloat(adj.original_amount) - parseFloat(adj.amount)) * 100) / 100;
+    const remaining = adj.remaining ?? Math.round((parseFloat(adj.original_amount) - parseFloat(adj.amount)) * 100) / 100;
     setForm({
       site: SITES.includes(adj.site) ? adj.site : SITES[0],
       amount: String(remaining),
@@ -84,6 +85,7 @@ export default function SubmitExpenseScreen() {
       description: `Settlement for finance-adjusted expense ${adj.ref_id}`,
     });
     setActiveAdjustmentId(adj.id);
+    setSettlementForExpenseId(adj.id);
     setActiveImprestId(adj.imprest_id);
     setImprestApprovedAmount(null);
     setImprestRemainingBalance(remaining);
@@ -95,6 +97,7 @@ export default function SubmitExpenseScreen() {
   function clearImprest() {
     setActiveReminderId(null);
     setActiveAdjustmentId(null);
+    setSettlementForExpenseId(null);
     setActiveImprestId(null);
     setImprestApprovedAmount(null);
     setImprestRemainingBalance(null);
@@ -153,6 +156,7 @@ export default function SubmitExpenseScreen() {
         description: form.description,
         images,
         imprestId: activeImprestId,
+        settlementForExpenseId,
       });
       setResult(res);
       setImages([]);
@@ -234,7 +238,7 @@ export default function SubmitExpenseScreen() {
               </Text>
             </View>
             {adjustments.map((adj) => {
-              const remaining = Math.round((parseFloat(adj.original_amount) - parseFloat(adj.amount)) * 100) / 100;
+              const remaining = adj.remaining ?? Math.round((parseFloat(adj.original_amount) - parseFloat(adj.amount)) * 100) / 100;
               const isActive = activeAdjustmentId === adj.id;
               return (
                 <TouchableOpacity
@@ -251,8 +255,13 @@ export default function SubmitExpenseScreen() {
                   <Text style={styles.settlementAmounts}>
                     Claimed ₹{parseFloat(adj.original_amount).toLocaleString('en-IN')}  →  Approved ₹{parseFloat(adj.amount).toLocaleString('en-IN')}
                   </Text>
+                  {adj.settledSoFar > 0 && (
+                    <Text style={styles.settlementSettled}>
+                      Already settled: ₹{adj.settledSoFar.toLocaleString('en-IN')}
+                    </Text>
+                  )}
                   <Text style={styles.settlementWarning}>
-                    ₹{remaining.toLocaleString('en-IN')} not reimbursed — submit payment proof to settle
+                    ₹{remaining.toLocaleString('en-IN')} still outstanding — submit payment proof to settle
                   </Text>
                   {isActive && <Text style={styles.reminderActive}>✓ Selected — fill the form below and submit</Text>}
                 </TouchableOpacity>
@@ -580,5 +589,6 @@ const styles = StyleSheet.create({
   settlementBadge: { fontSize: 12, fontWeight: '700', color: '#fff', backgroundColor: '#f97316', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   settlementDetail: { fontSize: 13, color: '#374151', marginTop: 4, marginBottom: 2 },
   settlementAmounts: { fontSize: 13, fontWeight: '600', color: '#111827', marginBottom: 4 },
+  settlementSettled: { fontSize: 12, color: '#16a34a', fontWeight: '600', marginBottom: 2 },
   settlementWarning: { fontSize: 12, color: '#b45309', fontWeight: '600' },
 });
