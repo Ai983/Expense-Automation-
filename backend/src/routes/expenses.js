@@ -345,6 +345,35 @@ router.get(
   }
 );
 
+// ── GET /api/expenses/my-adjustments/:employeeId ─────────────────────────────
+// Returns approved expenses where finance reduced the amount — employee must settle the gap
+router.get('/my-adjustments/:employeeId', authMiddleware, async (req, res, next) => {
+  try {
+    if (req.user.role === 'employee' && req.user.id !== req.params.employeeId) {
+      return fail(res, 'Access denied', 403);
+    }
+
+    const { data: rows, error } = await supabaseAdmin
+      .from('expenses')
+      .select('id, ref_id, site, amount, original_amount, category, imprest_id, approved_at')
+      .eq('employee_id', req.params.employeeId)
+      .eq('status', 'approved')
+      .not('original_amount', 'is', null)
+      .order('approved_at', { ascending: false });
+
+    if (error) throw error;
+
+    // Keep only rows where finance actually reduced the amount
+    const adjustments = (rows || []).filter(
+      (e) => parseFloat(e.original_amount) > parseFloat(e.amount) + 0.01
+    );
+
+    return ok(res, { adjustments });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── GET /api/expenses/my-expenses/:employeeId ─────────────────────────────────
 router.get('/my-expenses/:employeeId', authMiddleware, async (req, res, next) => {
   try {

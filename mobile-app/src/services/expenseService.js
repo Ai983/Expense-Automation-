@@ -53,3 +53,12 @@ export async function getMyExpenses(employeeId, page = 1) {
   });
   return data.data;
 }
+
+/**
+ * Fetches expenses where finance reduced the approved amount.
+ * Employee must resubmit proof for the remaining gap.
+ */
+export async function getMyAdjustments(employeeId) {
+  const { data } = await api.get(`/api/expenses/my-adjustments/${employeeId}`);
+  return data.data;
+}
