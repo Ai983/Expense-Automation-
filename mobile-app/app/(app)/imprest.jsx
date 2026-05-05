@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+﻿import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Image, Animated,
@@ -225,10 +225,10 @@ export default function ImprestScreen() {
   // ── Travel estimate ──────────────────────────────────────────────────────────
   const handleEstimateTravel = useCallback(async () => {
     if (!travelFrom.trim() || !travelTo.trim()) {
-      return showAlert('Missing info / \u091C\u093E\u0928\u0915\u093E\u0930\u0940 \u0905\u0927\u0942\u0930\u0940', 'Please enter both From and To locations. / \u0915\u0943\u092A\u092F\u093E \u0926\u094B\u0928\u094B\u0902 \u0938\u094D\u0925\u093E\u0928 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964');
+      return showAlert('Jankari Chahiye', 'Kahan Se aur Kahan Tak dono bharein');
     }
     if (['Flight', 'Train', 'Bus'].includes(travelSubtype) && !travelDate) {
-      return showAlert('Missing info / \u091C\u093E\u0928\u0915\u093E\u0930\u0940 \u0905\u0927\u0942\u0930\u0940', 'Please enter the travel date. / \u0915\u0943\u092A\u092F\u093E \u092F\u093E\u0924\u094D\u0930\u093E \u0924\u093F\u0925\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964');
+      return showAlert('Jankari Chahiye', 'Yatra ki date bharein');
     }
     setEstimating(true);
     setAiEstimate(null);
@@ -244,7 +244,7 @@ export default function ImprestScreen() {
       setAmountRequested(String(estimate.estimatedAmount));
       setUserEditedAmount(false);
     } catch {
-      showAlert('Estimation failed / \u0905\u0928\u0941\u092E\u093E\u0928 \u0935\u093F\u092B\u0932', 'Could not estimate cost. Please enter manually. / \u0915\u0943\u092A\u092F\u093E \u092E\u0948\u0928\u094D\u092F\u0941\u0905\u0932 \u0930\u0942\u092A \u0938\u0947 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964');
+      showAlert('Andaza Nahi Laga', 'Kharcha andaza nahi hua. Khud bharein.');
     } finally {
       setEstimating(false);
     }
@@ -253,7 +253,7 @@ export default function ImprestScreen() {
   // ── Own Vehicle estimate ─────────────────────────────────────────────────────
   const handleEstimateOwnVehicle = useCallback(async () => {
     if (!convFrom.trim() || !convTo.trim()) {
-      return showAlert('Missing info / \u091C\u093E\u0928\u0915\u093E\u0930\u0940 \u0905\u0927\u0942\u0930\u0940', 'Please enter both From and To locations. / \u0915\u0943\u092A\u092F\u093E \u0926\u094B\u0928\u094B\u0902 \u0938\u094D\u0925\u093E\u0928 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964');
+      return showAlert('Jankari Chahiye', 'Kahan Se aur Kahan Tak dono bharein');
     }
     setEstimating(true);
     setOwnVehicleEstimate(null);
@@ -268,7 +268,7 @@ export default function ImprestScreen() {
       setAmountRequested(String(estimate.estimatedAmount));
       setUserEditedAmount(false);
     } catch {
-      showAlert('Estimation failed / \u0905\u0928\u0941\u092E\u093E\u0928 \u0935\u093F\u092B\u0932', 'Could not estimate. Please enter manually. / \u0915\u0943\u092A\u092F\u093E \u092E\u0948\u0928\u094D\u092F\u0941\u0905\u0932 \u0930\u0942\u092A \u0938\u0947 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964');
+      showAlert('Andaza Nahi Laga', 'Andaza nahi laga. Khud bharein.');
     } finally {
       setEstimating(false);
     }
@@ -302,7 +302,7 @@ export default function ImprestScreen() {
       setAmountRequested(String(res.amount));
       setScanResult(res);
     } catch (e) {
-      showAlert('Scan failed / \u0938\u094D\u0915\u0948\u0928 \u0935\u093F\u092B\u0932', e?.response?.data?.error || 'Could not read amount. Please enter manually. / \u0915\u0943\u092A\u092F\u093E \u092E\u0948\u0928\u094D\u092F\u0941\u0905\u0932 \u0930\u0942\u092A \u0938\u0947 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964');
+      showAlert('Scan Nahi Hua', e?.response?.data?.error || 'Receipt nahi padh saka. Khud rashi bharein.');
     } finally {
       setScanningRide(false);
     }
@@ -312,69 +312,69 @@ export default function ImprestScreen() {
   const validateCurrentStep = () => {
     switch (currentStep) {
       case 'site':
-        if (!site) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please select a site. / \u0915\u0943\u092A\u092F\u093E \u090F\u0915 \u0938\u093E\u0907\u091F \u091A\u0941\u0928\u0947\u0902\u0964'); return false; }
-        if (site === 'Others' && !customSite.trim()) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter the site name. / \u0915\u0943\u092A\u092F\u093E \u0938\u093E\u0907\u091F \u0915\u093E \u0928\u093E\u092E \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
+        if (!site) { showAlert('Zaroori', 'Ek site chunein.'); return false; }
+        if (site === 'Others' && !customSite.trim()) { showAlert('Zaroori', 'Site ka naam likhein.'); return false; }
         return true;
       case 'category':
-        if (!category) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please select a category. / \u0915\u0943\u092A\u092F\u093E \u090F\u0915 \u0936\u094D\u0930\u0947\u0923\u0940 \u091A\u0941\u0928\u0947\u0902\u0964'); return false; }
+        if (!category) { showAlert('Zaroori', 'Ek category chunein.'); return false; }
         return true;
       case 'people':
-        if (!peopleCount || parseInt(peopleCount) < 1) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter number of people. / \u0915\u0943\u092A\u092F\u093E \u0932\u094B\u0917\u094B\u0902 \u0915\u0940 \u0938\u0902\u0916\u094D\u092F\u093E \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
+        if (!peopleCount || parseInt(peopleCount) < 1) { showAlert('Zaroori', 'Kitne log hain? Number bharein.'); return false; }
         return true;
       case 'food_dates':
       case 'dates':
-        if (!dateFrom) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please select start date. / \u0915\u0943\u092A\u092F\u093E \u0936\u0941\u0930\u0942 \u0924\u093F\u0925\u093F \u091A\u0941\u0928\u0947\u0902\u0964'); return false; }
-        if (!dateTo) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please select end date. / \u0915\u0943\u092A\u092F\u093E \u0905\u0902\u0924\u093F\u092E \u0924\u093F\u0925\u093F \u091A\u0941\u0928\u0947\u0902\u0964'); return false; }
-        if (new Date(dateTo) < new Date(dateFrom)) { showAlert('Invalid / \u0905\u092E\u093E\u0928\u094D\u092F', 'End date must be after start date. / \u0905\u0902\u0924\u093F\u092E \u0924\u093F\u0925\u093F \u0936\u0941\u0930\u0942 \u0924\u093F\u0925\u093F \u0915\u0947 \u092C\u093E\u0926 \u0939\u094B\u0928\u0940 \u091A\u093E\u0939\u093F\u090F\u0964'); return false; }
+        if (!dateFrom) { showAlert('Zaroori', 'Shuru ki date chunein.'); return false; }
+        if (!dateTo) { showAlert('Zaroori', 'Khatam ki date chunein.'); return false; }
+        if (new Date(dateTo) < new Date(dateFrom)) { showAlert('Galat Date', 'Khatam ki date, shuru ki date ke baad honi chahiye.'); return false; }
         return true;
       case 'food_amount':
-        if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Amount is required. / \u0930\u093E\u0936\u093F \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948\u0964'); return false; }
+        if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Zaroori', 'Rashi zaroori hai.'); return false; }
         if (site === 'Others') {
           const r = parseFloat(customFoodRate);
-          if (!r || r <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter per-person daily rate. / \u0915\u0943\u092A\u092F\u093E \u092A\u094D\u0930\u0924\u093F \u0935\u094D\u092F\u0915\u094D\u0924\u093F \u0926\u0948\u0928\u093F\u0915 \u0926\u0930 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
-          if (r > 600) { showAlert('Limit exceeded / \u0938\u0940\u092E\u093E \u092A\u093E\u0930', 'Rate cannot exceed \u20B9600 per person per day. / \u0926\u0930 \u20B9600 \u092A\u094D\u0930\u0924\u093F \u0935\u094D\u092F\u0915\u094D\u0924\u093F \u092A\u094D\u0930\u0924\u093F \u0926\u093F\u0928 \u0938\u0947 \u0905\u0927\u093F\u0915 \u0928\u0939\u0940\u0902 \u0939\u094B \u0938\u0915\u0924\u0940\u0964'); return false; }
+          if (!r || r <= 0) { showAlert('Zaroori', 'Per person roz ka rate bharein.'); return false; }
+          if (r > 600) { showAlert('Seema Se Zyada', 'Rate \u20B9600 se zyada nahi ho sakta (per person per day).'); return false; }
         }
         return true;
       case 'amount':
-        if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Amount is required. / \u0930\u093E\u0936\u093F \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948\u0964'); return false; }
+        if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Zaroori', 'Rashi zaroori hai.'); return false; }
         return true;
       case 'travel_subtype':
-        if (!travelSubtype) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please select travel type. / \u0915\u0943\u092A\u092F\u093E \u092F\u093E\u0924\u094D\u0930\u093E \u092A\u094D\u0930\u0915\u093E\u0930 \u091A\u0941\u0928\u0947\u0902\u0964'); return false; }
+        if (!travelSubtype) { showAlert('Zaroori', 'Yatra ka prakar chunein.'); return false; }
         return true;
       case 'travel_route':
-        if (!travelFrom.trim()) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter From location. / \u0915\u0943\u092A\u092F\u093E \u0915\u0939\u093E\u0901 \u0938\u0947 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
-        if (!travelTo.trim()) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter To location. / \u0915\u0943\u092A\u092F\u093E \u0915\u0939\u093E\u0901 \u0924\u0915 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
+        if (!travelFrom.trim()) { showAlert('Zaroori', 'Kahan Se location bharein.'); return false; }
+        if (!travelTo.trim()) { showAlert('Zaroori', 'Kahan Tak location bharein.'); return false; }
         if (['Flight', 'Train', 'Bus'].includes(travelSubtype) && !travelDate) {
-          showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter travel date. / \u0915\u0943\u092A\u092F\u093E \u092F\u093E\u0924\u094D\u0930\u093E \u0924\u093F\u0925\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false;
+          showAlert('Zaroori', 'Yatra ki date bharein.'); return false;
         }
         return true;
       case 'travel_amount':
-        if (!aiEstimate) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please click the estimate button first to get a cost estimate. / \u0915\u0943\u092A\u092F\u093E \u092A\u0939\u0932\u0947 \u0905\u0928\u0941\u092E\u093E\u0928 \u092C\u091F\u0928 \u092A\u0930 \u0915\u094D\u0932\u093F\u0915 \u0915\u0930\u0947\u0902\u0964'); return false; }
-        if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Amount is required. / \u0930\u093E\u0936\u093F \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948\u0964'); return false; }
+        if (!aiEstimate) { showAlert('Zaroori', 'Pehle Andaza / Estimate button dabayein.'); return false; }
+        if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Zaroori', 'Rashi zaroori hai.'); return false; }
         return true;
       case 'conveyance_mode':
-        if (!conveyanceMode) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please select mode. / \u0915\u0943\u092A\u092F\u093E \u0935\u093E\u0939\u0928 \u0915\u093E \u092A\u094D\u0930\u0915\u093E\u0930 \u091A\u0941\u0928\u0947\u0902\u0964'); return false; }
+        if (!conveyanceMode) { showAlert('Zaroori', 'Wahan ka prakar chunein.'); return false; }
         return true;
       case 'conveyance_detail':
         if (conveyanceMode === 'Ola/Rapido/Uber') {
-          if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please scan receipt or enter amount. / \u0915\u0943\u092A\u092F\u093E \u0930\u0938\u0940\u0926 \u0938\u094D\u0915\u0948\u0928 \u0915\u0930\u0947\u0902 \u092F\u093E \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
+          if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Zaroori', 'Receipt scan karein ya rashi bharein.'); return false; }
         }
         if (conveyanceMode === 'Own Vehicle') {
-          if (!convFrom.trim() || !convTo.trim()) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter From and To locations. / \u0915\u0943\u092A\u092F\u093E \u0926\u094B\u0928\u094B\u0902 \u0938\u094D\u0925\u093E\u0928 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
-          if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please get estimate or enter amount. / \u0915\u0943\u092A\u092F\u093E \u0905\u0928\u0941\u092E\u093E\u0928 \u0932\u0947\u0902 \u092F\u093E \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
+          if (!convFrom.trim() || !convTo.trim()) { showAlert('Zaroori', 'Kahan Se aur Kahan Tak dono bharein.'); return false; }
+          if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Zaroori', 'Andaza lein ya rashi bharein.'); return false; }
         }
         if (conveyanceMode === 'Public Transport') {
-          if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter amount. / \u0915\u0943\u092A\u092F\u093E \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
+          if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Zaroori', 'Rashi bharein.'); return false; }
         }
         return true;
       case 'requirement':
-        if (!requirement.trim()) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please describe the requirement. / \u0915\u0943\u092A\u092F\u093E \u0906\u0935\u0936\u094D\u092F\u0915\u0924\u093E \u0915\u093E \u0935\u0930\u094D\u0923\u0928 \u0915\u0930\u0947\u0902\u0964'); return false; }
+        if (!requirement.trim()) { showAlert('Zaroori', 'Zaroorat ka vivaran bharein.'); return false; }
         return true;
       case 'labour_sub':
-        if (!labourSub) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please select sub-category. / \u0915\u0943\u092A\u092F\u093E \u0909\u092A-\u0936\u094D\u0930\u0947\u0923\u0940 \u091A\u0941\u0928\u0947\u0902\u0964'); return false; }
+        if (!labourSub) { showAlert('Zaroori', 'Ek sub-category chunein.'); return false; }
         return true;
       case 'purpose':
-        if (!purpose.trim()) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Purpose / notes are required. / \u0909\u0926\u094D\u0926\u0947\u0936\u094D\u092F / \u0928\u094B\u091F\u094D\u0938 \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948\u0902\u0964'); return false; }
+        if (!purpose.trim()) { showAlert('Zaroori', 'Uddeshya / notes zaroori hai.'); return false; }
         return true;
       default:
         return true;
@@ -396,7 +396,7 @@ export default function ImprestScreen() {
   const handleSubmit = async () => {
     const systemLockedFood = category === 'Food Expense' && foodRate && site !== 'Others' && !canOverrideFoodRate;
     if (!systemLockedFood && (!amountRequested || parseAmt(amountRequested) <= 0)) {
-      return showAlert('Invalid amount / \u0905\u092E\u093E\u0928\u094D\u092F \u0930\u093E\u0936\u093F', 'Please enter a valid amount. / \u0915\u0943\u092A\u092F\u093E \u090F\u0915 \u0935\u0948\u0927 \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964');
+      return showAlert('Galat Rashi', 'Sahi rashi bharein.');
     }
     setSubmitting(true);
     try {
@@ -548,7 +548,7 @@ export default function ImprestScreen() {
             </View>
             {site === 'Others' && (
               <View>
-                <Text style={styles.label}>Enter Site Name / {'\u0938\u093E\u0907\u091F \u0915\u093E \u0928\u093E\u092E \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902'} *</Text>
+                <Text style={styles.label}>{'Site Ka Naam Likhein *'}</Text>
                 <TextInput
                   style={styles.input}
                   value={customSite}
@@ -601,7 +601,7 @@ export default function ImprestScreen() {
       case 'people':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Number of People / {'\u0932\u094B\u0917\u094B\u0902 \u0915\u0940 \u0938\u0902\u0916\u094D\u092F\u093E'} *</Text>
+            <Text style={styles.stepTitle}>{'Kitne Log? / Number of People *'}</Text>
             <TextInput
               style={styles.input}
               value={peopleCount}
@@ -617,19 +617,19 @@ export default function ImprestScreen() {
       case 'food_dates':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Food Expense Duration / {'\u0916\u093E\u0928\u093E \u0916\u0930\u094D\u091A \u0905\u0935\u0927\u093F'} *</Text>
-            <Text style={styles.stepSubtitle}>Select the date range for food expense / {'\u0916\u093E\u0928\u093E \u0916\u0930\u094D\u091A \u0915\u0947 \u0932\u093F\u090F \u0924\u093F\u0925\u093F \u0938\u0940\u092E\u093E \u091A\u0941\u0928\u0947\u0902'}</Text>
-            <DateInput label={'From / \u0915\u092C \u0938\u0947'} value={dateFrom} onChange={(v) => {
+            <Text style={styles.stepTitle}>{'Food Expense Ki Avadhi / Duration *'}</Text>
+            <Text style={styles.stepSubtitle}>{'Khane ke dates chunein'}</Text>
+            <DateInput label={'From / Kab Se'} value={dateFrom} onChange={(v) => {
               setDateFrom(v);
               setAmountRequested('');
             }} />
-            <DateInput label={'To / \u0915\u092C \u0924\u0915'} value={dateTo} minDate={dateFrom} onChange={(v) => {
+            <DateInput label={'To / Kab Tak'} value={dateTo} minDate={dateFrom} onChange={(v) => {
               setDateTo(v);
               setAmountRequested('');
             }} />
             {dateFrom && dateTo && new Date(dateTo) >= new Date(dateFrom) && (
               <View style={styles.infoBox}>
-                <Text style={styles.infoText}>Duration / {'\u0905\u0935\u0927\u093F'}: {daysBetween(dateFrom, dateTo)} day(s) / {'\u0926\u093F\u0928'}</Text>
+                <Text style={styles.infoText}>{'Kul Din / Duration: '}{daysBetween(dateFrom, dateTo)}{' din'}</Text>
               </View>
             )}
           </View>
@@ -644,7 +644,7 @@ export default function ImprestScreen() {
 
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Food Amount / {'\u0916\u093E\u0928\u093E \u0930\u093E\u0936\u093F'}</Text>
+            <Text style={styles.stepTitle}>{'Khane Ki Rashi / Food Amount'}</Text>
 
             {foodRateLoading && <ActivityIndicator color="#e8a24a" style={{ marginVertical: 16 }} />}
             {foodRateError ? <Text style={styles.errorText}>{foodRateError}</Text> : null}
