@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
-  StyleSheet, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Image,
+  StyleSheet, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Image, Animated,
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -28,6 +28,21 @@ const CATEGORY_ICONS = {
   'Material Expense': '\uD83D\uDCE6',
   'Office Expense': '\uD83C\uDFE2',
   'Other': '\uD83D\uDCCB',
+};
+
+// \u2500\u2500 Category pastel colors \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+const CATEGORY_COLORS = {
+  'Food Expense':    { bg: '#fff7ed', border: '#fed7aa' },
+  'Site Room Rent':  { bg: '#eff6ff', border: '#bfdbfe' },
+  'Travelling':      { bg: '#f5f3ff', border: '#ddd6fe' },
+  'Conveyance':      { bg: '#f0fdf4', border: '#bbf7d0' },
+  'Labour Expense':  { bg: '#fef2f2', border: '#fecaca' },
+  'Porter':          { bg: '#fefce8', border: '#fef08a' },
+  'Hotel Expense':   { bg: '#f0fdfa', border: '#99f6e4' },
+  'Site Expense':    { bg: '#f8fafc', border: '#cbd5e1' },
+  'Material Expense':{ bg: '#faf5ff', border: '#e9d5ff' },
+  'Office Expense':  { bg: '#fdf4ff', border: '#f0abfc' },
+  'Other':           { bg: '#faf5ff', border: '#e9d5ff' },
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -472,14 +487,7 @@ export default function ImprestScreen() {
 
   // ── Success animation screen ────────────────────────────────────────────────
   if (showSuccess) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.resultCard}>
-          <Text style={styles.successCheckmark}>{'\u2705'}</Text>
-          <Text style={styles.resultTitle}>Submitted Successfully! / \u0938\u092B\u0932\u0924\u093E\u092A\u0942\u0930\u094D\u0935\u0915 \u091C\u092E\u093E!</Text>
-        </View>
-      </View>
-    );
+    return <SuccessScreen />;
   }
 
   // ── Result screen ────────────────────────────────────────────────────────────
@@ -487,12 +495,18 @@ export default function ImprestScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.resultCard}>
-          <Text style={styles.resultIcon}>{'\u2713'}</Text>
-          <Text style={styles.resultTitle}>Request Submitted / \u0905\u0928\u0941\u0930\u094B\u0927 \u091C\u092E\u093E</Text>
-          <Text style={styles.resultRef}>{result.refId}</Text>
+          <View style={styles.resultIconCircle}>
+            <Text style={styles.resultIconCheck}>{'\u2713'}</Text>
+          </View>
+          <Text style={styles.resultTitle}>{'Request Submit Ho Gayi!'}</Text>
+          <Text style={styles.resultSubtitle}>{'Aapki advance request finance team ko mil gayi hai'}</Text>
+          <View style={styles.resultRefBox}>
+            <Text style={styles.resultRefLabel}>Reference Number</Text>
+            <Text style={styles.resultRef}>{result.refId}</Text>
+          </View>
           <Text style={styles.resultMessage}>{result.message}</Text>
           <TouchableOpacity style={styles.primaryBtn} onPress={resetForm}>
-            <Text style={styles.primaryBtnText}>New Request / \u0928\u092F\u093E \u0905\u0928\u0941\u0930\u094B\u0927</Text>
+            <Text style={styles.primaryBtnText}>{'Nayi Request / New Request'}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -506,13 +520,13 @@ export default function ImprestScreen() {
       case 'intro':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.greeting}>Hi, {user?.name?.split(' ')[0] || 'there'} {'\uD83D\uDC4B'}</Text>
-            <Text style={styles.stepTitle}>Request an Imprest / Advance{'\n'}{'\u0905\u0917\u094D\u0930\u093F\u092E \u0905\u0928\u0941\u0930\u094B\u0927'}</Text>
+            <Text style={styles.greeting}>{'Hi, '}{user?.name?.split(' ')[0] || 'there'}{' \uD83D\uDC4B'}</Text>
+            <Text style={styles.stepTitle}>{'Imprest / Advance Request'}</Text>
             <Text style={styles.stepSubtitle}>
-              This form will take you through a few quick steps to submit your advance request.{'\n'}{'\u092F\u0939 \u092B\u0949\u0930\u094D\u092E \u0906\u092A\u0915\u094B \u0905\u0917\u094D\u0930\u093F\u092E \u0905\u0928\u0941\u0930\u094B\u0927 \u091C\u092E\u093E \u0915\u0930\u0928\u0947 \u092E\u0947\u0902 \u092E\u0926\u0926 \u0915\u0930\u0947\u0917\u093E\u0964'}
+              {'Yeh form aapko apna advance request jaldi submit karne mein help karega.\nThis will only take a few steps!'}
             </Text>
             <TouchableOpacity style={styles.primaryBtn} onPress={() => setStepIndex(1)}>
-              <Text style={styles.primaryBtnText}>Let's Start / {'\u0936\u0941\u0930\u0942 \u0915\u0930\u0947\u0902'} {'\u2192'}</Text>
+              <Text style={styles.primaryBtnText}>{'Shuru Karen / Let\'s Start \u2192'}</Text>
             </TouchableOpacity>
           </View>
         );
@@ -520,7 +534,8 @@ export default function ImprestScreen() {
       case 'site':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Select your site / {'\u0905\u092A\u0928\u0940 \u0938\u093E\u0907\u091F \u091A\u0941\u0928\u0947\u0902'} *</Text>
+            <Text style={styles.stepTitle}>{'Apni Site Chunein *'}</Text>
+            <Text style={styles.stepSubtitle}>{'Select your work site / Kaam ki site select karen'}</Text>
             <View style={styles.pickerWrapper}>
               <Picker
                 selectedValue={site}
@@ -551,21 +566,28 @@ export default function ImprestScreen() {
       case 'category':
         return (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>What is this advance for? / {'\u092F\u0939 \u0905\u0917\u094D\u0930\u093F\u092E \u0915\u093F\u0938\u0932\u093F\u090F \u0939\u0948?'} *</Text>
+            <Text style={styles.stepTitle}>{'Yeh advance kisliye hai?'}</Text>
+            <Text style={styles.stepSubtitle}>{'Apni category chunein / Select your category'}</Text>
             <View style={styles.categoryGrid}>
               {IMPREST_CATEGORIES.map((c) => {
                 const isSelected = category === c;
                 const icon = CATEGORY_ICONS[c] || '\uD83D\uDCCB';
+                const colors = CATEGORY_COLORS[c] || { bg: '#f9fafb', border: '#e5e7eb' };
                 return (
                   <TouchableOpacity
                     key={c}
-                    style={[styles.categoryCard, isSelected && styles.categoryCardSelected]}
+                    style={[
+                      styles.categoryCard,
+                      { backgroundColor: colors.bg, borderColor: isSelected ? '#e8a24a' : colors.border },
+                      isSelected && styles.categoryCardSelected,
+                    ]}
                     onPress={() => {
                       setCategory(c);
                       setAmountRequested('');
                       setAiEstimate(null);
                       setOwnVehicleEstimate(null);
                     }}
+                    activeOpacity={0.75}
                   >
                     <Text style={styles.categoryIcon}>{icon}</Text>
                     <Text style={[styles.categoryLabel, isSelected && styles.categoryLabelSelected]} numberOfLines={2}>{c}</Text>
@@ -1126,7 +1148,7 @@ export default function ImprestScreen() {
             >
               {submitting
                 ? <ActivityIndicator color="#fff" />
-                : <Text style={styles.primaryBtnText}>Submit / {'\u091C\u092E\u093E \u0915\u0930\u0947\u0902'}</Text>}
+                : <Text style={styles.primaryBtnText}>{'Jama Karen / Submit'}</Text>}
             </TouchableOpacity>
           </View>
         );
@@ -1145,13 +1167,13 @@ export default function ImprestScreen() {
     >
       {/* Amber header bar */}
       <View style={styles.headerBar}>
-        <Text style={styles.headerBarText}>Imprest Request / {'\u0905\u0917\u094D\u0930\u093F\u092E \u0905\u0928\u0941\u0930\u094B\u0927'}</Text>
+        <Text style={styles.headerBarText}>{'Imprest Request / Agrim Anurodh'}</Text>
       </View>
 
       <View style={styles.progressBg}>
         <View style={[styles.progressFill, { width: `${progress}%` }]} />
       </View>
-      <Text style={styles.stepCounter}>Step {stepIndex + 1} of {totalSteps} / {'\u091A\u0930\u0923'} {stepIndex + 1} / {totalSteps}</Text>
+      <Text style={styles.stepCounter}>{'Charan (Step) '}{stepIndex + 1}{' / '}{totalSteps}</Text>
 
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         {renderStep()}
@@ -1160,19 +1182,48 @@ export default function ImprestScreen() {
       {stepIndex > 0 && currentStep !== 'review' && (
         <View style={styles.navRow}>
           <TouchableOpacity style={styles.backBtn} onPress={handleBack}>
-            <Text style={styles.backBtnText}>{'\u2190'} Back / {'\u0935\u093E\u092A\u0938'}</Text>
+            <Text style={styles.backBtnText}>{'\u2190 Wapas / Back'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.primaryBtn} onPress={handleNext}>
-            <Text style={styles.primaryBtnText}>Next / {'\u0906\u0917\u0947'} {'\u2192'}</Text>
+            <Text style={styles.primaryBtnText}>{'Aage / Next \u2192'}</Text>
           </TouchableOpacity>
         </View>
       )}
       {currentStep === 'review' && (
         <TouchableOpacity style={styles.backBtnSmall} onPress={handleBack}>
-          <Text style={styles.backBtnText}>{'\u2190'} Back / {'\u0935\u093E\u092A\u0938'}</Text>
+          <Text style={styles.backBtnText}>{'\u2190 Wapas / Back'}</Text>
         </TouchableOpacity>
       )}
     </KeyboardAvoidingView>
+  );
+}
+
+function SuccessScreen() {
+  const scale = useRef(new Animated.Value(0.3)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(scale, { toValue: 1, useNativeDriver: true, friction: 4, tension: 80 }),
+      Animated.timing(opacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.resultCard}>
+        <Animated.View style={{ transform: [{ scale }], opacity }}>
+          <View style={styles.successCircle}>
+            <Text style={styles.successCheckmark}>{'✅'}</Text>
+          </View>
+        </Animated.View>
+        <Animated.View style={{ opacity }}>
+          <Text style={[styles.resultTitle, { marginTop: 20, textAlign: 'center' }]}>{'Jama Ho Gayi! 🎉'}</Text>
+          <Text style={[styles.resultTitle, { fontSize: 16, fontWeight: '500', color: '#6b7280', textAlign: 'center', marginTop: 4 }]}>{'Submitted Successfully!'}</Text>
+          <Text style={[styles.resultSubtitle, { textAlign: 'center', marginTop: 8 }]}>{'Aapki request finance team ko bhej di gayi hai'}</Text>
+        </Animated.View>
+      </View>
+    </View>
   );
 }
 
@@ -1305,10 +1356,26 @@ const styles = StyleSheet.create({
   summaryHighlight: { color: '#e8a24a', fontSize: 15 },
 
   resultCard: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  resultIcon: { fontSize: 56, marginBottom: 16 },
-  resultTitle: { fontSize: 22, fontWeight: '700', color: '#111827', marginBottom: 8 },
-  resultRef: { fontSize: 16, color: '#e8a24a', fontWeight: '700', marginBottom: 12 },
-  resultMessage: { fontSize: 14, color: '#6b7280', textAlign: 'center', marginBottom: 32, lineHeight: 20 },
+  resultIconCircle: {
+    width: 80, height: 80, borderRadius: 40, backgroundColor: '#dcfce7',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 20,
+    borderWidth: 3, borderColor: '#86efac',
+  },
+  resultIconCheck: { fontSize: 36, color: '#16a34a', fontWeight: '700' },
+  resultTitle: { fontSize: 22, fontWeight: '700', color: '#111827', marginBottom: 8, textAlign: 'center' },
+  resultSubtitle: { fontSize: 14, color: '#6b7280', textAlign: 'center', marginBottom: 20, lineHeight: 20 },
+  resultRefBox: {
+    backgroundColor: '#fef3c7', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 20,
+    marginBottom: 16, alignItems: 'center', borderWidth: 1, borderColor: '#fde68a',
+  },
+  resultRefLabel: { fontSize: 11, color: '#92400e', fontWeight: '600', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
+  resultRef: { fontSize: 18, color: '#d97706', fontWeight: '800' },
+  resultMessage: { fontSize: 14, color: '#6b7280', textAlign: 'center', marginBottom: 24, lineHeight: 20 },
+  successCircle: {
+    width: 100, height: 100, borderRadius: 50, backgroundColor: '#dcfce7',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 3, borderColor: '#86efac',
+  },
 
   // Requested To step — radio card styles
   optionCard: {
