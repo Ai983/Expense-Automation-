@@ -8,6 +8,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { useAuth } from '../../src/context/AuthContext';
 import { submitExpense, getMyAdjustments } from '../../src/services/expenseService';
 import { getMyReminders, fulfillReminder } from '../../src/services/imprestService';
+import { Picker } from '@react-native-picker/picker';
 import { SITES, CATEGORIES, IMPREST_TO_EXPENSE_CATEGORY } from '../../src/constants';
 
 const INITIAL_FORM = { site: SITES[0], amount: '', category: CATEGORIES[0], description: '' };
@@ -26,6 +27,7 @@ export default function SubmitExpenseScreen() {
   const [adjustments, setAdjustments] = useState([]);
   const [activeAdjustmentId, setActiveAdjustmentId] = useState(null);
   const [settlementForExpenseId, setSettlementForExpenseId] = useState(null);
+  const [imprestSiteExtra, setImprestSiteExtra] = useState(null); // site from imprest when not in SITES list
   const { user } = useAuth();
 
   const fetchReminders = useCallback(async () => {
@@ -57,7 +59,10 @@ export default function SubmitExpenseScreen() {
     // Use actual_submitted (sum of finance-approved expense amounts) over stale fulfilled_amount
     const previouslyFulfilled = parseFloat(reminder.actual_submitted ?? reminder.fulfilled_amount ?? 0);
     const remainingBalance = Math.max(0, approvedAmt - previouslyFulfilled);
-    const site = imp?.site && SITES.includes(imp.site) ? imp.site : SITES[0];
+    // Use the imprest site as-is — don't fall back to SITES[0] which loses the real site
+    const site = imp?.site || SITES[0];
+    if (imp?.site && !SITES.includes(imp.site)) setImprestSiteExtra(imp.site);
+    else setImprestSiteExtra(null);
     const mappedCategory = IMPREST_TO_EXPENSE_CATEGORY[imp?.category] || null;
     const category = mappedCategory && CATEGORIES.includes(mappedCategory)
       ? mappedCategory
@@ -102,6 +107,7 @@ export default function SubmitExpenseScreen() {
     setActiveImprestId(null);
     setImprestApprovedAmount(null);
     setImprestRemainingBalance(null);
+    setImprestSiteExtra(null);
     setForm(INITIAL_FORM);
     setImages([]);
   }
@@ -371,11 +377,20 @@ export default function SubmitExpenseScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Site — locked to imprest */}
+            {/* Site — pre-filled from imprest, user can change */}
             <Text style={styles.label}>Site</Text>
-            <View style={styles.lockedField}>
-              <Text style={styles.lockedFieldValue}>{form.site}</Text>
-              <Text style={styles.lockedFieldBadge}>🔒 Locked to imprest</Text>
+            <View style={styles.pickerWrapper}>
+              <Picker
+                selectedValue={form.site}
+                onValueChange={(v) => set('site', v)}
+                style={styles.picker}
+                dropdownIconColor="#e8a24a"
+              >
+                {imprestSiteExtra && (
+                  <Picker.Item key={imprestSiteExtra} label={imprestSiteExtra} value={imprestSiteExtra} />
+                )}
+                {SITES.map((s) => <Picker.Item key={s} label={s} value={s} />)}
+              </Picker>
             </View>
 
             {/* Amount — editable, constrained to remaining balance */}
@@ -400,11 +415,17 @@ export default function SubmitExpenseScreen() {
               );
             })()}
 
-            {/* Category — locked to imprest */}
+            {/* Category — pre-filled from imprest, user can change */}
             <Text style={styles.label}>Category</Text>
-            <View style={styles.lockedField}>
-              <Text style={styles.lockedFieldValue}>{form.category}</Text>
-              <Text style={styles.lockedFieldBadge}>🔒 Locked to imprest</Text>
+            <View style={styles.pickerWrapper}>
+              <Picker
+                selectedValue={form.category}
+                onValueChange={(v) => set('category', v)}
+                style={styles.picker}
+                dropdownIconColor="#e8a24a"
+              >
+                {CATEGORIES.map((c) => <Picker.Item key={c} label={c} value={c} />)}
+              </Picker>
             </View>
 
             {/* Description */}
@@ -538,6 +559,13 @@ const styles = StyleSheet.create({
   label: { fontSize: 13, fontWeight: '600', color: '#374151', marginTop: 16, marginBottom: 6 },
   input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: '#111827', backgroundColor: '#fff' },
   textarea: { height: 80, textAlignVertical: 'top' },
+
+  // Picker
+  pickerWrapper: {
+    borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10,
+    backgroundColor: '#fff', marginBottom: 12, overflow: 'hidden',
+  },
+  picker: { height: 50, color: '#111827' },
 
   // Locked fields
   lockedField: {
