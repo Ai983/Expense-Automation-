@@ -54,7 +54,8 @@ export default function SubmitExpenseScreen() {
   function applyReminder(reminder) {
     const imp = reminder.imprest;
     const approvedAmt = parseFloat(imp?.approved_amount || imp?.amount_requested || 0);
-    const previouslyFulfilled = parseFloat(reminder.fulfilled_amount || 0);
+    // Use actual_submitted (sum of finance-approved expense amounts) over stale fulfilled_amount
+    const previouslyFulfilled = parseFloat(reminder.actual_submitted ?? reminder.fulfilled_amount ?? 0);
     const remainingBalance = Math.max(0, approvedAmt - previouslyFulfilled);
     const site = imp?.site && SITES.includes(imp.site) ? imp.site : SITES[0];
     const mappedCategory = IMPREST_TO_EXPENSE_CATEGORY[imp?.category] || null;
@@ -310,7 +311,8 @@ export default function SubmitExpenseScreen() {
               const isActive = activeReminderId === r.id;
               const isExpired = r.status === 'expired' || msLeft < 0;
               const approvedAmt = parseFloat(imp?.approved_amount || imp?.amount_requested || 0);
-              const fulfilledAmt = parseFloat(r.fulfilled_amount || 0);
+              // actual_submitted reflects finance-approved amounts; fall back to fulfilled_amount if not present
+              const fulfilledAmt = parseFloat(r.actual_submitted ?? r.fulfilled_amount ?? 0);
               const remainingBal = Math.max(0, approvedAmt - fulfilledAmt);
               const hasPartial = fulfilledAmt > 0;
 

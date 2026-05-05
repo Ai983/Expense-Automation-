@@ -342,7 +342,27 @@ router.get('/my-reminders/:employeeId', authMiddleware, async (req, res, next) =
       .in('status', ['pending', 'expired'])
       .order('deadline', { ascending: true });
     if (error) throw error;
-    return ok(res, { reminders: data || [] });
+
+    // Calculate actual submitted amount from expenses (uses finance-approved amounts, not submission amounts)
+    const imprestIds = (data || []).map((r) => r.imprest_id).filter(Boolean);
+    const submittedMap = {};
+    if (imprestIds.length > 0) {
+      const { data: expRows } = await supabaseAdmin
+        .from('expenses')
+        .select('imprest_id, amount')
+        .in('imprest_id', imprestIds)
+        .not('status', 'in', '(rejected,blocked)');
+      for (const e of expRows || []) {
+        submittedMap[e.imprest_id] = Math.round(((submittedMap[e.imprest_id] || 0) + parseFloat(e.amount)) * 100) / 100;
+      }
+    }
+
+    const reminders = (data || []).map((r) => ({
+      ...r,
+      actual_submitted: submittedMap[r.imprest_id] || 0,
+    }));
+
+    return ok(res, { reminders });
   } catch (err) { next(err); }
 });
 
