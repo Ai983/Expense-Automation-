@@ -34,7 +34,7 @@ router.post(
       if (!site || !amount || !category) {
         return fail(res, 'site, amount, and category are required');
       }
-      if (!SITES.includes(site)) {
+      if (!imprestId && !SITES.includes(site)) {
         return fail(res, `Invalid site. Must be one of: ${SITES.join(', ')}`);
       }
       if (!CATEGORIES.includes(category)) {
