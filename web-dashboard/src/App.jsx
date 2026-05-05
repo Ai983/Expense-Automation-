@@ -13,6 +13,7 @@ import S2QueuePage from './pages/S2QueuePage';
 import ResetPassword from './pages/ResetPassword';
 import FeedbackPage from './pages/FeedbackPage';
 import ProcurementQueuePage from './pages/ProcurementQueuePage';
+import AdjustmentSettlementsPage from './pages/AdjustmentSettlementsPage';
 import HeadDashboardPage from './pages/HeadDashboardPage';
 import HeadKanbanPage from './pages/HeadKanbanPage';
 import HeadProjectSpendPage from './pages/HeadProjectSpendPage';
@@ -55,6 +56,7 @@ function AppRoutes() {
       <Route path="/dashboard" element={<ProtectedLayout><DashboardPage /></ProtectedLayout>} />
       <Route path="/imprest-analytics" element={<ProtectedLayout><ImprestAnalyticsPage /></ProtectedLayout>} />
       <Route path="/reports" element={<ProtectedLayout><EmployeeReportPage /></ProtectedLayout>} />
+      <Route path="/adjustments" element={<ProtectedLayout><AdjustmentSettlementsPage /></ProtectedLayout>} />
       <Route path="/s1-queue" element={<ProtectedLayout><S1QueuePage /></ProtectedLayout>} />
       <Route path="/s2-queue" element={<ProtectedLayout><S2QueuePage /></ProtectedLayout>} />
       <Route path="/feedback" element={<ProtectedLayout><FeedbackPage /></ProtectedLayout>} />

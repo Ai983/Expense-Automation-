@@ -74,7 +74,7 @@ router.post(
         .from('expenses')
         .select('amount')
         .eq('imprest_id', imprestId)
-        .not('status', 'in', '("rejected","blocked")');
+        .not('status', 'in', '(rejected,blocked)');
 
       const alreadySpent = (priorExpenses || []).reduce((sum, e) => sum + parseFloat(e.amount), 0);
       const approvedAmt = parseFloat(linkedImprest.approved_amount || linkedImprest.amount_requested);
@@ -307,6 +307,122 @@ router.post(
   }
 );
 
+// ── GET /api/expenses/finance/adjustments ────────────────────────────────────
+// Finance view: all employees with finance-adjusted expenses that are not yet
+// fully settled, grouped by employee with per-expense detail.
+router.get(
+  '/finance/adjustments',
+  authMiddleware,
+  roleGuard(FINANCE_HEAD_ROLES),
+  async (req, res, next) => {
+    try {
+      // 1. All approved expenses where finance reduced the amount (no FK join)
+      const { data: adjusted, error: adjErr } = await supabaseAdmin
+        .from('expenses')
+        .select('id, ref_id, site, amount, original_amount, category, approved_at, imprest_id, employee_id')
+        .eq('status', 'approved')
+        .not('original_amount', 'is', null)
+        .order('approved_at', { ascending: false });
+
+      if (adjErr) throw adjErr;
+
+      console.log('[finance/adjustments] total approved with original_amount:', (adjusted || []).length);
+      const reduced = (adjusted || []).filter(
+        (e) => parseFloat(e.original_amount) > parseFloat(e.amount) + 0.01
+      );
+      console.log('[finance/adjustments] reduced by finance:', reduced.length, reduced.map(e => ({ ref: e.ref_id, orig: e.original_amount, amt: e.amount })));
+
+      if (reduced.length === 0) return ok(res, { employees: [], totalUnsettled: 0 });
+
+      // 2. Fetch employee details separately (avoids FK join nulls)
+      const uniqueEmpIds = [...new Set(reduced.map((e) => e.employee_id).filter(Boolean))];
+      const empById = {};
+      if (uniqueEmpIds.length > 0) {
+        const { data: empRows } = await supabaseAdmin
+          .from('employees')
+          .select('id, name, email, site')
+          .in('id', uniqueEmpIds);
+        for (const emp of empRows || []) empById[emp.id] = emp;
+      }
+
+      // 3. All settlement expenses linked to these adjusted expenses
+      const adjustedIds = reduced.map((e) => e.id);
+      let settlements = [];
+      try {
+        const { data: rows, error: settleErr } = await supabaseAdmin
+          .from('expenses')
+          .select('settlement_for_expense_id, amount, status')
+          .in('settlement_for_expense_id', adjustedIds)
+          .not('status', 'in', '(rejected,blocked)');
+        if (!settleErr) settlements = rows || [];
+      } catch {
+        // settlement_for_expense_id column may not exist yet — treat as no settlements
+      }
+
+      console.log('[finance/adjustments] settlements found:', settlements.length, settlements.map(s => ({ id: s.settlement_for_expense_id?.slice(0,8), amt: s.amount, status: s.status })));
+
+      // 4. Build settlement map: adjustedExpenseId → total settled
+      const settledMap = {};
+      for (const s of settlements || []) {
+        const key = s.settlement_for_expense_id;
+        settledMap[key] = (settledMap[key] || 0) + parseFloat(s.amount);
+      }
+
+      // 5. Compute remaining per expense, keep only unsettled ones
+      const unsettled = reduced
+        .map((e) => {
+          const gap = parseFloat(e.original_amount) - parseFloat(e.amount);
+          const settledSoFar = Math.round((settledMap[e.id] || 0) * 100) / 100;
+          const remaining = Math.max(0, Math.round((gap - settledSoFar) * 100) / 100);
+          return { ...e, gap: Math.round(gap * 100) / 100, settledSoFar, remaining };
+        })
+        .filter((e) => e.remaining > 0.01);
+
+      console.log('[finance/adjustments] unsettled after step5:', unsettled.map(e => ({ ref: e.ref_id, empId: e.employee_id, gap: e.gap, remaining: e.remaining })));
+      console.log('[finance/adjustments] empById keys:', Object.keys(empById));
+
+      // 6. Group by employee — use 'unknown' bucket if employee_id is null
+      const empMap = {};
+      for (const e of unsettled) {
+        const empId = e.employee_id || `unknown_${e.id}`;
+        const emp = empById[e.employee_id] || { id: e.employee_id, name: e.employee_id ? 'Unknown Employee' : '(no employee linked)', email: '', site: e.site || '' };
+        console.log('[finance/adjustments] step6 empId:', empId, 'emp:', emp.name);
+        if (!empMap[empId]) {
+          empMap[empId] = {
+            employeeId: empId,
+            name: emp.name,
+            email: emp.email,
+            site: emp.site,
+            totalRemaining: 0,
+            totalGap: 0,
+            adjustments: [],
+          };
+        }
+        empMap[empId].totalRemaining = Math.round((empMap[empId].totalRemaining + e.remaining) * 100) / 100;
+        empMap[empId].totalGap = Math.round((empMap[empId].totalGap + e.gap) * 100) / 100;
+        empMap[empId].adjustments.push({
+          id: e.id,
+          ref_id: e.ref_id,
+          site: e.site,
+          category: e.category,
+          originalAmount: parseFloat(e.original_amount),
+          approvedAmount: parseFloat(e.amount),
+          gap: e.gap,
+          settledSoFar: e.settledSoFar,
+          remaining: e.remaining,
+          approvedAt: e.approved_at,
+          imprestId: e.imprest_id,
+        });
+      }
+
+      const employees = Object.values(empMap).sort((a, b) => b.totalRemaining - a.totalRemaining);
+      return ok(res, { employees, totalUnsettled: employees.reduce((s, e) => s + e.totalRemaining, 0) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 // ── GET /api/expenses/finance/queue ──────────────────────────────────────────
 // Finance team views the expense queue with filters
 router.get(
@@ -372,13 +488,16 @@ router.get('/my-adjustments/:employeeId', authMiddleware, async (req, res, next)
     // For each, subtract already-approved settlement expenses
     const adjustments = await Promise.all(
       reduced.map(async (adj) => {
-        const { data: settlements } = await supabaseAdmin
-          .from('expenses')
-          .select('amount')
-          .eq('settlement_for_expense_id', adj.id)
-          .not('status', 'in', '("rejected","blocked")');
+        let settledSoFar = 0;
+        try {
+          const { data: settlements } = await supabaseAdmin
+            .from('expenses')
+            .select('amount')
+            .eq('settlement_for_expense_id', adj.id)
+            .not('status', 'in', '(rejected,blocked)');
+          settledSoFar = (settlements || []).reduce((sum, s) => sum + parseFloat(s.amount), 0);
+        } catch { /* settlement_for_expense_id column may not exist yet */ }
 
-        const settledSoFar = (settlements || []).reduce((sum, s) => sum + parseFloat(s.amount), 0);
         const gapAmount = parseFloat(adj.original_amount) - parseFloat(adj.amount);
         const remaining = Math.max(0, Math.round((gapAmount - settledSoFar) * 100) / 100);
         return { ...adj, remaining, settledSoFar: Math.round(settledSoFar * 100) / 100 };

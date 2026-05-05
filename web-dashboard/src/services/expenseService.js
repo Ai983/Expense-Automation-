@@ -28,3 +28,8 @@ export async function bulkApprove(expenseIds) {
   const { data } = await api.post('/api/expenses/bulk-approve', { expenseIds });
   return data.data;
 }
+
+export async function getFinanceAdjustments() {
+  const { data } = await api.get('/api/expenses/finance/adjustments');
+  return data.data;
+}

@@ -35,6 +35,7 @@ function getNavItems(role) {
         { to: '/dashboard', label: 'Expense Analytics', icon: '📊' },
         { to: '/imprest-analytics', label: 'Imprest Analytics', icon: '📈' },
         { to: '/reports', label: 'Employee Report', icon: '👥' },
+        { to: '/adjustments', label: 'Pending Settlements', icon: '⚠️' },
       ];
   }
 }
