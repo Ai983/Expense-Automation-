@@ -106,6 +106,9 @@ function getStepLabels(category) {
   }
 }
 
+// Strip commas before parsing — users often type "10,500" which parseFloat reads as 10
+const parseAmt = (v) => parseFloat(String(v || '').replace(/,/g, '')) || 0;
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function ImprestScreen() {
@@ -310,7 +313,7 @@ export default function ImprestScreen() {
         if (new Date(dateTo) < new Date(dateFrom)) { showAlert('Invalid / \u0905\u092E\u093E\u0928\u094D\u092F', 'End date must be after start date. / \u0905\u0902\u0924\u093F\u092E \u0924\u093F\u0925\u093F \u0936\u0941\u0930\u0942 \u0924\u093F\u0925\u093F \u0915\u0947 \u092C\u093E\u0926 \u0939\u094B\u0928\u0940 \u091A\u093E\u0939\u093F\u090F\u0964'); return false; }
         return true;
       case 'food_amount':
-        if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Amount is required. / \u0930\u093E\u0936\u093F \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948\u0964'); return false; }
+        if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Amount is required. / \u0930\u093E\u0936\u093F \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948\u0964'); return false; }
         if (site === 'Others') {
           const r = parseFloat(customFoodRate);
           if (!r || r <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter per-person daily rate. / \u0915\u0943\u092A\u092F\u093E \u092A\u094D\u0930\u0924\u093F \u0935\u094D\u092F\u0915\u094D\u0924\u093F \u0926\u0948\u0928\u093F\u0915 \u0926\u0930 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
@@ -318,7 +321,7 @@ export default function ImprestScreen() {
         }
         return true;
       case 'amount':
-        if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Amount is required. / \u0930\u093E\u0936\u093F \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948\u0964'); return false; }
+        if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Amount is required. / \u0930\u093E\u0936\u093F \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948\u0964'); return false; }
         return true;
       case 'travel_subtype':
         if (!travelSubtype) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please select travel type. / \u0915\u0943\u092A\u092F\u093E \u092F\u093E\u0924\u094D\u0930\u093E \u092A\u094D\u0930\u0915\u093E\u0930 \u091A\u0941\u0928\u0947\u0902\u0964'); return false; }
@@ -332,21 +335,21 @@ export default function ImprestScreen() {
         return true;
       case 'travel_amount':
         if (!aiEstimate) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please click the estimate button first to get a cost estimate. / \u0915\u0943\u092A\u092F\u093E \u092A\u0939\u0932\u0947 \u0905\u0928\u0941\u092E\u093E\u0928 \u092C\u091F\u0928 \u092A\u0930 \u0915\u094D\u0932\u093F\u0915 \u0915\u0930\u0947\u0902\u0964'); return false; }
-        if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Amount is required. / \u0930\u093E\u0936\u093F \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948\u0964'); return false; }
+        if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Amount is required. / \u0930\u093E\u0936\u093F \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948\u0964'); return false; }
         return true;
       case 'conveyance_mode':
         if (!conveyanceMode) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please select mode. / \u0915\u0943\u092A\u092F\u093E \u0935\u093E\u0939\u0928 \u0915\u093E \u092A\u094D\u0930\u0915\u093E\u0930 \u091A\u0941\u0928\u0947\u0902\u0964'); return false; }
         return true;
       case 'conveyance_detail':
         if (conveyanceMode === 'Ola/Rapido/Uber') {
-          if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please scan receipt or enter amount. / \u0915\u0943\u092A\u092F\u093E \u0930\u0938\u0940\u0926 \u0938\u094D\u0915\u0948\u0928 \u0915\u0930\u0947\u0902 \u092F\u093E \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
+          if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please scan receipt or enter amount. / \u0915\u0943\u092A\u092F\u093E \u0930\u0938\u0940\u0926 \u0938\u094D\u0915\u0948\u0928 \u0915\u0930\u0947\u0902 \u092F\u093E \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
         }
         if (conveyanceMode === 'Own Vehicle') {
           if (!convFrom.trim() || !convTo.trim()) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter From and To locations. / \u0915\u0943\u092A\u092F\u093E \u0926\u094B\u0928\u094B\u0902 \u0938\u094D\u0925\u093E\u0928 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
-          if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please get estimate or enter amount. / \u0915\u0943\u092A\u092F\u093E \u0905\u0928\u0941\u092E\u093E\u0928 \u0932\u0947\u0902 \u092F\u093E \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
+          if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please get estimate or enter amount. / \u0915\u0943\u092A\u092F\u093E \u0905\u0928\u0941\u092E\u093E\u0928 \u0932\u0947\u0902 \u092F\u093E \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
         }
         if (conveyanceMode === 'Public Transport') {
-          if (!amountRequested || parseFloat(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter amount. / \u0915\u0943\u092A\u092F\u093E \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
+          if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Required / \u0906\u0935\u0936\u094D\u092F\u0915', 'Please enter amount. / \u0915\u0943\u092A\u092F\u093E \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964'); return false; }
         }
         return true;
       case 'requirement':
@@ -377,7 +380,7 @@ export default function ImprestScreen() {
   // ── Submit ───────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     const systemLockedFood = category === 'Food Expense' && foodRate && site !== 'Others' && !canOverrideFoodRate;
-    if (!systemLockedFood && (!amountRequested || parseFloat(amountRequested) <= 0)) {
+    if (!systemLockedFood && (!amountRequested || parseAmt(amountRequested) <= 0)) {
       return showAlert('Invalid amount / \u0905\u092E\u093E\u0928\u094D\u092F \u0930\u093E\u0936\u093F', 'Please enter a valid amount. / \u0915\u0943\u092A\u092F\u093E \u090F\u0915 \u0935\u0948\u0927 \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964');
     }
     setSubmitting(true);
@@ -391,7 +394,7 @@ export default function ImprestScreen() {
       const foodLocked = category === 'Food Expense' && effectiveFoodRate && site !== 'Others' && !canOverrideFoodRate;
       const finalAmount = foodLocked
         ? effectiveFoodRate * (parseInt(peopleCount) || 1) * daysBetween(dateFrom, dateTo)
-        : parseFloat(amountRequested);
+        : parseAmt(amountRequested);
 
       const payload = {
         site: site === 'Others' ? customSite.trim() : site,
@@ -631,8 +634,9 @@ export default function ImprestScreen() {
                   style={styles.input}
                   value={customFoodRate}
                   onChangeText={(v) => {
-                    setCustomFoodRate(v);
-                    const r = parseFloat(v) || 0;
+                    const clean = v.replace(/,/g, '');
+                    setCustomFoodRate(clean);
+                    const r = parseFloat(clean) || 0;
                     if (r > 0) recalcFoodAmount(r, peopleCount, dateFrom, dateTo);
                     else setAmountRequested('');
                   }}
@@ -716,7 +720,7 @@ export default function ImprestScreen() {
             <TextInput
               style={styles.input}
               value={amountRequested}
-              onChangeText={setAmountRequested}
+              onChangeText={(v) => setAmountRequested(v.replace(/,/g, ''))}
               keyboardType="numeric"
               placeholder={'Enter amount in \u20B9 / \u0930\u093E\u0936\u093F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902'}
               placeholderTextColor="#9ca3af"
@@ -801,8 +805,9 @@ export default function ImprestScreen() {
               style={styles.input}
               value={amountRequested}
               onChangeText={(v) => {
-                setAmountRequested(v);
-                if (aiEstimate && v !== String(aiEstimate.estimatedAmount)) setUserEditedAmount(true);
+                const clean = v.replace(/,/g, '');
+                setAmountRequested(clean);
+                if (aiEstimate && clean !== String(aiEstimate.estimatedAmount)) setUserEditedAmount(true);
               }}
               keyboardType="numeric"
               placeholder="0"
@@ -928,7 +933,7 @@ export default function ImprestScreen() {
               <TextInput
                 style={styles.input}
                 value={amountRequested}
-                onChangeText={setAmountRequested}
+                onChangeText={(v) => setAmountRequested(v.replace(/,/g, ''))}
                 keyboardType="numeric"
                 placeholder={'Scanned or enter manually / \u0938\u094D\u0915\u0948\u0928 \u092F\u093E \u092E\u0948\u0928\u094D\u092F\u0941\u0905\u0932 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902'}
                 placeholderTextColor="#9ca3af"
@@ -987,7 +992,7 @@ export default function ImprestScreen() {
               <TextInput
                 style={styles.input}
                 value={amountRequested}
-                onChangeText={(v) => { setAmountRequested(v); if (ownVehicleEstimate) setUserEditedAmount(true); }}
+                onChangeText={(v) => { const c = v.replace(/,/g, ''); setAmountRequested(c); if (ownVehicleEstimate) setUserEditedAmount(true); }}
                 keyboardType="numeric"
                 placeholder="0"
                 placeholderTextColor="#9ca3af"
