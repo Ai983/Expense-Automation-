@@ -389,24 +389,32 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
       return fail(res, `Cannot pay — current status is ${current?.status}`, 400);
     }
 
-    // The authoritative amount to settle against
-    const authoritativeAmount = parseFloat(
-      current.finance_adjusted_amount ||
-      current.procurement_approved_amount ||
-      current.total_amount
+    // finance_adjusted_amount = installment ceiling for THIS cycle only.
+    // Real total is always total_amount (or procurement_approved_amount).
+    const realTotal = parseFloat(
+      current.procurement_approved_amount || current.total_amount
     );
+    // Cap this cycle's payment at the adjusted amount if set, otherwise use the real total
+    const cycleLimit = current.finance_adjusted_amount
+      ? parseFloat(current.finance_adjusted_amount)
+      : realTotal;
 
     const alreadyPaid = parseFloat(current.paid_amount || 0);
     const thisPayment = parseFloat(paid_amount);
-    const remaining = authoritativeAmount - alreadyPaid;
+    const remainingInCycle = cycleLimit - alreadyPaid;
 
     if (thisPayment <= 0) return fail(res, 'Payment amount must be positive', 400);
-    if (thisPayment > remaining + 0.01) {
-      return fail(res, `Payment of ₹${thisPayment.toLocaleString('en-IN')} exceeds remaining balance of ₹${remaining.toLocaleString('en-IN')}`, 400);
+    if (thisPayment > remainingInCycle + 0.01) {
+      return fail(res, `Payment of ₹${thisPayment.toLocaleString('en-IN')} exceeds current cycle balance of ₹${remainingInCycle.toLocaleString('en-IN')}`, 400);
     }
 
     const newTotalPaid = alreadyPaid + thisPayment;
-    const isFullySettled = newTotalPaid >= authoritativeAmount - 0.01;
+    // Only mark as fully paid when the REAL total is settled
+    const isFullySettled = newTotalPaid >= realTotal - 0.01;
+    // If we've hit the cycle limit but not the real total, clear the adjustment
+    // so the next payment is evaluated against the full remaining balance
+    const cycleComplete = newTotalPaid >= cycleLimit - 0.01;
+    const clearAdjustment = cycleComplete && !isFullySettled;
 
     let receiptPath = null;
     if (req.file) {
@@ -424,17 +432,22 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
       receipt_path: receiptPath || null,
     };
 
+    const updatePayload = {
+      status: isFullySettled ? 'paid' : 'partially_paid',
+      paid_amount: newTotalPaid,
+      paid_by: req.user.id,
+      paid_at: isFullySettled ? nowIso : current.paid_at,
+      payment_receipt_path: receiptPath || current.payment_receipt_path,
+      finance_notes: notes || current.finance_notes || null,
+      payment_logs: [...existingLogs, newLogEntry],
+    };
+    // Clear the finance adjustment once that installment is paid so the
+    // remaining balance is visible against the real total next time
+    if (clearAdjustment) updatePayload.finance_adjusted_amount = null;
+
     const { data, error } = await supabaseAdmin
       .from('po_payments')
-      .update({
-        status: isFullySettled ? 'paid' : 'partially_paid',
-        paid_amount: newTotalPaid,
-        paid_by: req.user.id,
-        paid_at: isFullySettled ? nowIso : current.paid_at,
-        payment_receipt_path: receiptPath || current.payment_receipt_path,
-        finance_notes: notes || current.finance_notes || null,
-        payment_logs: [...existingLogs, newLogEntry],
-      })
+      .update(updatePayload)
       .eq('id', id)
       .select()
       .single();
@@ -449,8 +462,9 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
       newValue: {
         this_payment: thisPayment,
         total_paid: newTotalPaid,
-        remaining: Math.max(0, authoritativeAmount - newTotalPaid),
+        remaining: Math.max(0, realTotal - newTotalPaid),
         fully_settled: isFullySettled,
+        cycle_limit_reached: cycleComplete,
         has_receipt: !!receiptPath,
         po_ref: current.cps_po_ref,
       },
@@ -470,8 +484,8 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
       ...data,
       this_payment: thisPayment,
       total_paid: newTotalPaid,
-      authoritative_amount: authoritativeAmount,
-      remaining_balance: Math.max(0, authoritativeAmount - newTotalPaid),
+      real_total: realTotal,
+      remaining_balance: Math.max(0, realTotal - newTotalPaid),
       fully_settled: isFullySettled,
     });
   } catch (err) { next(err); }
