@@ -264,6 +264,37 @@ export default function POPaymentsTab() {
                   {isExpanded && (
                     <div className="border-t bg-gray-50 p-5 space-y-5">
 
+                      {/* Payment history log */}
+                      {Array.isArray(po.payment_logs) && po.payment_logs.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Payment History</p>
+                          <div className="space-y-2">
+                            {po.payment_logs.map((log, idx) => (
+                              <div key={idx} className="flex items-center justify-between bg-white border border-green-100 rounded-lg px-3 py-2">
+                                <div className="flex items-center gap-3">
+                                  <span className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
+                                  <div>
+                                    <p className="text-xs text-gray-500">{log.paid_at ? fmtDate(log.paid_at) : '—'}</p>
+                                    {log.notes && <p className="text-xs text-gray-400 italic">"{log.notes}"</p>}
+                                    {log.paid_by_name && <p className="text-xs text-gray-400">by {log.paid_by_name}</p>}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-sm font-semibold text-green-700">{fmt(log.amount)}</p>
+                                  {log.receipt_path && (
+                                    <a href={log.receipt_path} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">Receipt</a>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                            <div className="flex justify-between text-xs text-gray-500 px-3 pt-1 border-t">
+                              <span>Total Paid</span>
+                              <span className="font-semibold text-green-700">{fmt(po.payment_logs.reduce((s, l) => s + (l.amount || 0), 0))}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Payment terms raw */}
                       {po.payment_terms_raw && (
                         <div>
@@ -341,17 +372,33 @@ export default function POPaymentsTab() {
           <h3 className="text-sm font-medium text-gray-400 mb-3">Paid ({paid.length})</h3>
           <div className="space-y-2">
             {paid.slice(0, 20).map(po => (
-              <div key={po.id} className="flex items-center justify-between py-3 px-4 bg-gray-50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <span className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
-                  <span className="font-mono text-sm text-gray-600">{po.cps_po_ref}</span>
-                  <span className="text-sm text-gray-600">{po.project_name}</span>
-                  <span className="text-xs text-gray-400">{po.supplier_name}</span>
+              <div key={po.id} className="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
+                <div className="flex items-center justify-between py-3 px-4">
+                  <div className="flex items-center gap-3">
+                    <span className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
+                    <div>
+                      <p className="font-mono text-sm text-gray-600">{po.cps_po_ref}</p>
+                      <p className="text-sm text-gray-600">{po.project_name}</p>
+                      <p className="text-xs text-gray-400">{po.supplier_name}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-gray-400">PO Total: {fmt(po.total_amount)}</p>
+                    <p className="text-sm font-semibold text-green-700">Paid: {fmt(po.paid_amount)}</p>
+                    <p className="text-xs text-gray-400">{fmtDate(po.paid_at)}</p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-sm font-medium">{fmt(po.paid_amount)}</p>
-                  <p className="text-xs text-gray-400">{fmtDate(po.paid_at)}</p>
-                </div>
+                {Array.isArray(po.payment_logs) && po.payment_logs.length > 1 && (
+                  <div className="border-t px-4 py-2 space-y-1">
+                    <p className="text-xs text-gray-400 font-medium uppercase">Payment History</p>
+                    {po.payment_logs.map((log, idx) => (
+                      <div key={idx} className="flex justify-between text-xs text-gray-500">
+                        <span>{log.paid_at ? fmtDate(log.paid_at) : '—'}{log.notes ? ` — ${log.notes}` : ''}</span>
+                        <span className="font-medium text-green-700">{fmt(log.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>

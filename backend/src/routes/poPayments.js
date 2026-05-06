@@ -162,7 +162,7 @@ router.get('/finance-queue', authMiddleware, roleGuard([...FINANCE_ROLES, 'head'
         procurement_approved_amount, procurement_notes, procurement_approved_at,
         finance_adjusted_amount, finance_adjusted_by, finance_adjusted_at,
         paid_amount, paid_by, paid_at, finance_notes,
-        payment_receipt_path,
+        payment_receipt_path, payment_logs,
         created_at, ingested_at
       `)
       .in('status', ['pending_payment', 'partially_paid', 'paid', 'payment_rejected'])
@@ -381,7 +381,7 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
 
     const { data: current } = await supabaseAdmin
       .from('po_payments')
-      .select('id, status, procurement_approved_amount, finance_adjusted_amount, total_amount, paid_amount, cps_po_ref')
+      .select('id, status, procurement_approved_amount, finance_adjusted_amount, total_amount, paid_amount, cps_po_ref, payment_logs, finance_notes, payment_receipt_path')
       .eq('id', id)
       .single();
 
@@ -413,15 +413,27 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
       receiptPath = await uploadPaymentReceipt(req.file, `po-receipts/${id}-${Date.now()}`);
     }
 
+    const nowIso = new Date().toISOString();
+    const existingLogs = Array.isArray(current.payment_logs) ? current.payment_logs : [];
+    const newLogEntry = {
+      amount: thisPayment,
+      paid_at: nowIso,
+      paid_by: req.user.id,
+      paid_by_name: req.user.name || req.user.email || 'Finance',
+      notes: notes || null,
+      receipt_path: receiptPath || null,
+    };
+
     const { data, error } = await supabaseAdmin
       .from('po_payments')
       .update({
         status: isFullySettled ? 'paid' : 'partially_paid',
         paid_amount: newTotalPaid,
         paid_by: req.user.id,
-        paid_at: isFullySettled ? new Date().toISOString() : current.paid_at,
+        paid_at: isFullySettled ? nowIso : current.paid_at,
         payment_receipt_path: receiptPath || current.payment_receipt_path,
         finance_notes: notes || current.finance_notes || null,
+        payment_logs: [...existingLogs, newLogEntry],
       })
       .eq('id', id)
       .select()
