@@ -1,0 +1,2 @@
+﻿-- Fix HI-PO-2026-0067 + backfill payment_logs for all old paid POs
+-- See apply_migration call for full SQL
