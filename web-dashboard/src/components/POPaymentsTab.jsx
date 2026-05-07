@@ -388,7 +388,7 @@ export default function POPaymentsTab() {
                     <p className="text-xs text-gray-400">{fmtDate(po.paid_at)}</p>
                   </div>
                 </div>
-                {Array.isArray(po.payment_logs) && po.payment_logs.length > 1 && (
+                {Array.isArray(po.payment_logs) && po.payment_logs.length > 0 && (
                   <div className="border-t px-4 py-2 space-y-1">
                     <p className="text-xs text-gray-400 font-medium uppercase">Payment History</p>
                     {po.payment_logs.map((log, idx) => (

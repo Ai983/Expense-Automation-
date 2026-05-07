@@ -138,7 +138,7 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
     // Head Office is exempt — no upper limit applies there
     if (parseFloat(amountRequested) > 10000 && site !== 'Head Office') {
       const now = new Date();
-      const dayOfWeek = now.getDay(); // 0=Sunday, 1=Monday …
+      const dayOfWeek = now.getDay();
       const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
       const weekStart = new Date(now);
       weekStart.setDate(now.getDate() - daysFromMonday);

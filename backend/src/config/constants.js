@@ -60,7 +60,7 @@ export const FINANCE_HEAD_ROLES = ['finance', 'manager', 'admin', 'head'];
 export const RITU_ALWAYS_SITES = ['Head Office', 'Bangalore Office'];
 
 // Amount threshold for director approval
-export const DIRECTOR_APPROVAL_THRESHOLD = 10000;
+export const DIRECTOR_APPROVAL_THRESHOLD = 9999;
 
 export const EXPENSE_STATUSES = [
   'pending',
