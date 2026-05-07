@@ -517,21 +517,36 @@ router.get('/:id/comparison', authMiddleware, roleGuard([...FINANCE_ROLES, ...PR
     // Look up the PO in CPS to get the comparison_sheet_id and PDF URL
     const { data: cpsPo } = await cpsSupabase
       .from('cps_purchase_orders')
-      .select('id, comparison_sheet_id, supplier_id, rfq_id, grand_total, status, po_pdf_url')
+      .select('id, comparison_sheet_id, supplier_id, rfq_id, grand_total, status, po_pdf_url, parent_po_id, po_number')
       .eq('po_number', localPo.cps_po_ref)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (!cpsPo?.comparison_sheet_id) {
-      return ok(res, { po: localPo, has_comparison: false, po_pdf_url: cpsPo?.po_pdf_url || null, reason: 'No comparison sheet in CPS' });
+    // Revised POs may not have a PDF yet — fall back to parent PO's PDF
+    let pdfUrl = cpsPo?.po_pdf_url || null;
+    let pdfIsRevision = true;
+    if (!pdfUrl && cpsPo?.parent_po_id) {
+      const { data: parentPo } = await cpsSupabase
+        .from('cps_purchase_orders')
+        .select('po_pdf_url, po_number')
+        .eq('id', cpsPo.parent_po_id)
+        .maybeSingle();
+      if (parentPo?.po_pdf_url) {
+        pdfUrl = parentPo.po_pdf_url;
+        pdfIsRevision = false;
+      }
     }
 
-    // Fetch comparison sheet + all quotes in parallel
-    const [sheetRes, quotesRes] = await Promise.all([
+    if (!cpsPo?.comparison_sheet_id) {
+      return ok(res, { po: localPo, has_comparison: false, po_pdf_url: pdfUrl, po_pdf_is_revision: pdfIsRevision, reason: 'No comparison sheet in CPS' });
+    }
+
+    // Fetch comparison sheet + quotes + snapshots in parallel
+    const [sheetRes, quotesRes, lineSnapshotsRes, supplierSnapshotsRes, supplierTotalsRes] = await Promise.all([
       cpsSupabase
         .from('cps_comparison_sheets')
-        .select('id, rfq_id, status, manual_review_status, ai_recommendation, total_quotes_received, compliant_quotes_count, potential_savings, reviewer_recommendation, reviewer_recommendation_reason, manual_notes, approved_at')
+        .select('id, rfq_id, status, manual_review_status, ai_recommendation, ai_market_rates, total_quotes_received, compliant_quotes_count, potential_savings, reviewer_recommendation, reviewer_recommendation_reason, manual_notes, approved_at')
         .eq('id', cpsPo.comparison_sheet_id)
         .single(),
       cpsSupabase
@@ -542,22 +557,102 @@ router.get('/:id/comparison', authMiddleware, roleGuard([...FINANCE_ROLES, ...PR
           warranty_months, validity_days,
           cps_quote_line_items (
             id, original_description, brand, quantity, unit,
-            rate, gst_percent, freight, total_landed_rate, lead_time_days, hsn_code
+            rate, list_rate, discount_pct, special_discount_pct,
+            gst_percent, freight, total_landed_rate, lead_time_days, hsn_code
           ),
           cps_suppliers ( id, name, gstin, city, state )
         `)
         .eq('rfq_id', cpsPo.rfq_id)
         .not('parse_status', 'eq', 'failed')
         .neq('channel', 'po_revision'),
+      // Structured line-level snapshots with last purchase + market rates
+      cpsSupabase
+        .from('cps_comparison_line_snapshots')
+        .select('id, pr_line_item_id, sort_order, item_description, item_quantity, item_unit, last_purchase_rate, last_purchase_unit, last_purchase_supplier_name, last_purchase_po_number, last_purchase_po_date, market_lowest_rate, market_lowest_unit, market_verdict, market_suppliers')
+        .eq('sheet_id', cpsPo.comparison_sheet_id)
+        .order('sort_order'),
+      // Per-supplier per-line rates
+      cpsSupabase
+        .from('cps_comparison_supplier_snapshots')
+        .select('pr_line_item_id, supplier_name, brand, rate, gst_percent, freight, total_landed_rate, lead_time_days, is_lowest, is_recommended')
+        .eq('sheet_id', cpsPo.comparison_sheet_id),
+      // Supplier bid totals
+      cpsSupabase
+        .from('cps_comparison_supplier_totals')
+        .select('supplier_name, subtotal, gst_amount, freight_amount, landed_total, payment_terms, delivery_terms, warranty_months, compliance_status, rank, is_winner')
+        .eq('sheet_id', cpsPo.comparison_sheet_id)
+        .order('rank'),
     ]);
 
     const sheet = sheetRes.data;
     const quotes = quotesRes.data || [];
+    const lineSnapshots = lineSnapshotsRes.data || [];
+    const supplierSnapshots = supplierSnapshotsRes.data || [];
+    const supplierTotals = supplierTotalsRes.data || [];
+
+    // Build structured line comparison (snapshot-based, when available)
+    // Each row = one PR item; columns = each supplier's rate + last purchase + market rates
+    let lineComparison = null;
+    if (lineSnapshots.length > 0) {
+      // Group supplier snapshots by pr_line_item_id
+      const snapByItem = {};
+      for (const snap of supplierSnapshots) {
+        if (!snapByItem[snap.pr_line_item_id]) snapByItem[snap.pr_line_item_id] = [];
+        snapByItem[snap.pr_line_item_id].push(snap);
+      }
+
+      // Get sorted unique supplier names from totals (or from snapshots)
+      const supplierOrder = supplierTotals.length > 0
+        ? supplierTotals.map(t => t.supplier_name)
+        : [...new Set(supplierSnapshots.map(s => s.supplier_name))];
+
+      lineComparison = {
+        suppliers: supplierOrder,
+        supplier_totals: supplierTotals,
+        rows: lineSnapshots.map(ls => {
+          const itemSnaps = snapByItem[ls.pr_line_item_id] || [];
+          const supplierRates = {};
+          for (const s of itemSnaps) {
+            supplierRates[s.supplier_name] = {
+              rate: s.rate,
+              gst: s.gst_percent,
+              freight: s.freight,
+              landed_rate: s.total_landed_rate,
+              brand: s.brand,
+              lead_time_days: s.lead_time_days,
+              is_lowest: s.is_lowest,
+              is_recommended: s.is_recommended,
+            };
+          }
+          // Get market_suppliers sorted by rate for Market 1 and Market 2 columns
+          const mktSuppliers = Array.isArray(ls.market_suppliers)
+            ? [...ls.market_suppliers].sort((a, b) => (a.rate_numeric || 0) - (b.rate_numeric || 0))
+            : [];
+          return {
+            description: ls.item_description,
+            qty: ls.item_quantity,
+            unit: ls.item_unit,
+            last_purchase_rate: ls.last_purchase_rate,
+            last_purchase_unit: ls.last_purchase_unit,
+            last_purchase_supplier: ls.last_purchase_supplier_name,
+            last_purchase_po: ls.last_purchase_po_number,
+            last_purchase_date: ls.last_purchase_po_date,
+            market_lowest_rate: ls.market_lowest_rate,
+            market_lowest_unit: ls.market_lowest_unit,
+            market_verdict: ls.market_verdict,
+            market_1: mktSuppliers[0] || null,
+            market_2: mktSuppliers[1] || null,
+            supplier_rates: supplierRates,
+          };
+        }),
+      };
+    }
 
     return ok(res, {
       po: localPo,
       has_comparison: true,
-      po_pdf_url: cpsPo.po_pdf_url || null,
+      po_pdf_url: pdfUrl,
+      po_pdf_is_revision: pdfIsRevision,
       comparison: {
         id: sheet?.id,
         status: sheet?.status,
@@ -568,7 +663,9 @@ router.get('/:id/comparison', authMiddleware, roleGuard([...FINANCE_ROLES, ...PR
         manual_notes: sheet?.manual_notes,
         approved_at: sheet?.approved_at,
         ai: sheet?.ai_recommendation || null,
+        market_rates: sheet?.ai_market_rates || null,
       },
+      line_comparison: lineComparison,
       quotes: quotes.map(q => ({
         id: q.id,
         supplier: q.cps_suppliers,
@@ -585,6 +682,8 @@ router.get('/:id/comparison', authMiddleware, roleGuard([...FINANCE_ROLES, ...PR
           qty: li.quantity,
           unit: li.unit,
           rate: li.rate,
+          list_rate: li.list_rate,
+          discount_pct: li.discount_pct,
           gst: li.gst_percent,
           freight: li.freight,
           landed_rate: li.total_landed_rate,

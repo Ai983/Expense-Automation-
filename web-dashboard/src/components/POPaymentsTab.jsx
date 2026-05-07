@@ -93,6 +93,250 @@ export default function POPaymentsTab() {
     setAdjustModal(null);
   }
 
+  function downloadComparisonSheet(po, compData) {
+    const { comparison, quotes, line_comparison: lc } = compData;
+    const ai = comparison?.ai || null;
+    const sortedQuotes = [...(quotes || [])].sort((a, b) => Number(a.landed_total || 0) - Number(b.landed_total || 0));
+    const selectedQuote = quotes?.find(q => q.is_selected);
+    const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    const fmtN = n => n != null && n !== '' ? `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—';
+    const esc = s => (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    // ── SECTION 1: Supplier bid totals table ──────────────────────────────
+    const totalsSource = lc?.supplier_totals?.length > 0 ? lc.supplier_totals : null;
+    const bidRowsHtml = totalsSource
+      ? totalsSource.map((t, idx) => `
+          <tr style="${t.is_winner ? 'background:#e8f5e9;font-weight:600;' : idx === 0 ? 'background:#e3f2fd;' : ''}">
+            <td>${esc(t.supplier_name)}${t.is_winner ? ' <span style="color:#2e7d32">✓ PO Issued</span>' : t.rank === 1 ? ' <span style="color:#1565c0">L1</span>' : ''}</td>
+            <td style="text-align:right">${fmtN(t.subtotal)}</td>
+            <td style="text-align:right">${fmtN(t.gst_amount)}</td>
+            <td style="text-align:right">${fmtN(t.freight_amount)}</td>
+            <td style="text-align:right;font-weight:700">${fmtN(t.landed_total)}</td>
+            <td>${esc(t.payment_terms) || '—'}</td>
+            <td>${esc(t.delivery_terms) || '—'}</td>
+            <td style="text-align:center">${t.compliance_status === 'compliant' ? '<span style="color:#2e7d32">✓</span>' : '—'}</td>
+          </tr>`)
+          .join('')
+      : sortedQuotes.map((q, idx) => `
+          <tr style="${q.is_selected ? 'background:#e8f5e9;font-weight:600;' : idx === 0 && !q.is_selected ? 'background:#e3f2fd;' : ''}">
+            <td>${esc(q.supplier?.name || '—')}${q.is_selected ? ' <span style="color:#2e7d32">✓ PO Issued</span>' : !q.is_selected && idx === 0 ? ' <span style="color:#1565c0">L1</span>' : ''}</td>
+            <td style="text-align:right">—</td>
+            <td style="text-align:right">—</td>
+            <td style="text-align:right">—</td>
+            <td style="text-align:right;font-weight:700">${fmtN(q.landed_total)}</td>
+            <td>${esc(q.payment_terms) || '—'}</td>
+            <td>${esc(q.delivery_terms) || '—'}</td>
+            <td style="text-align:center">${q.compliance === 'compliant' ? '<span style="color:#2e7d32">✓</span>' : '—'}</td>
+          </tr>`)
+          .join('');
+
+    // ── SECTION 2: Cross-vendor line comparison table (snapshot-based) ───
+    let crossVendorHtml = '';
+    if (lc?.rows?.length > 0) {
+      const suppliers = lc.suppliers || [];
+      const supHeaders = suppliers.map(s => `<th style="text-align:right">${esc(s)}</th>`).join('');
+
+      const dataRows = lc.rows.map(row => {
+        const supCells = suppliers.map(s => {
+          const sr = row.supplier_rates?.[s];
+          if (!sr) return `<td style="text-align:right;color:#aaa">—</td>`;
+          const style = sr.is_winner ? 'background:#e8f5e9;font-weight:700;' : sr.is_lowest ? 'background:#e3f2fd;font-weight:700;' : '';
+          const badge = sr.is_winner ? ' ✓' : sr.is_lowest ? ' L1' : '';
+          return `<td style="text-align:right;${style}">${fmtN(sr.landed_rate)}${badge}${sr.brand ? `<br><span style="font-size:7pt;color:#666">${esc(sr.brand)}</span>` : ''}</td>`;
+        }).join('');
+
+        const lastPurchCell = row.last_purchase_rate
+          ? `${fmtN(row.last_purchase_rate)}/${esc(row.last_purchase_unit || '')}${row.last_purchase_supplier ? `<br><span style="font-size:7pt;color:#666">${esc(row.last_purchase_supplier)}</span>` : ''}${row.last_purchase_date ? `<br><span style="font-size:7pt;color:#888">${row.last_purchase_date}</span>` : ''}`
+          : '—';
+
+        const mkt1 = row.market_1;
+        const mkt2 = row.market_2;
+        const mkt1Cell = mkt1 ? `${fmtN(mkt1.rate_numeric)}/${esc(mkt1.unit || '')}<br><span style="font-size:7pt;color:#666">${esc(mkt1.name || '')}</span>` : '—';
+        const mkt2Cell = mkt2 ? `${fmtN(mkt2.rate_numeric)}/${esc(mkt2.unit || '')}<br><span style="font-size:7pt;color:#666">${esc(mkt2.name || '')}</span>` : '—';
+
+        return `
+          <tr>
+            <td>${esc(row.description)}</td>
+            <td style="text-align:center">${esc(row.unit)}</td>
+            <td style="text-align:right">${row.qty ?? '—'}</td>
+            <td style="text-align:right;color:#795548">${lastPurchCell}</td>
+            ${supCells}
+            <td style="text-align:right;background:#e3f2fd">${mkt1Cell}</td>
+            <td style="text-align:right;background:#e8f5e9">${mkt2Cell}</td>
+          </tr>`;
+      }).join('');
+
+      // Totals row
+      const totalCells = suppliers.map(s => {
+        const t = lc.supplier_totals?.find(st => st.supplier_name === s);
+        const style = t?.is_winner ? 'background:#e8f5e9;font-weight:700;' : t?.rank === 1 ? 'background:#e3f2fd;font-weight:700;' : 'font-weight:700;';
+        return `<td style="text-align:right;${style}">${t ? fmtN(t.landed_total) : '—'}</td>`;
+      }).join('');
+
+      crossVendorHtml = `
+        <div style="margin-top:16px">
+          <p style="font-size:11pt;font-weight:700;border-bottom:2px solid #1a237e;padding-bottom:4px;color:#1a237e">Item-Level Rate Comparison</p>
+          <p style="font-size:7.5pt;color:#666;margin:2px 0 6px">Rates shown are Landed/Unit (base rate + GST + freight). L1 = Lowest quote. ✓ = PO awarded.</p>
+          <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th style="text-align:center">Unit</th>
+                <th style="text-align:right">Qty</th>
+                <th style="text-align:right;background:#fff3e0">Last Purch Rate</th>
+                ${supHeaders}
+                <th style="text-align:right;background:#e3f2fd">Market 1 (Lowest)</th>
+                <th style="text-align:right;background:#e8f5e9">Market 2</th>
+              </tr>
+            </thead>
+            <tbody>${dataRows}</tbody>
+            <tfoot>
+              <tr style="background:#f5f5f5">
+                <td colspan="3" style="font-weight:700;text-align:right">Grand Total (Landed)</td>
+                <td>—</td>
+                ${totalCells}
+                <td>—</td><td>—</td>
+              </tr>
+            </tfoot>
+          </table>
+          </div>
+        </div>`;
+    }
+
+    // ── SECTION 3: Fallback line items per vendor (for older POs without snapshots) ──
+    let lineItemSections = '';
+    if (!lc && sortedQuotes.some(q => q.line_items?.length > 0)) {
+      lineItemSections = sortedQuotes.filter(q => q.line_items?.length > 0).map(q => {
+        const hasListRate = q.line_items.some(li => li.list_rate != null);
+        const hasDiscount = q.line_items.some(li => li.discount_pct != null);
+        const rows = q.line_items.map(li => `
+          <tr>
+            <td>${esc(li.description)}</td>
+            <td>${esc(li.brand) || '—'}</td>
+            <td style="text-align:right">${li.qty ?? '—'}</td>
+            <td style="text-align:center">${esc(li.unit) || '—'}</td>
+            <td style="text-align:right">${li.rate != null ? fmtN(li.rate) : '—'}</td>
+            ${hasListRate ? `<td style="text-align:right">${li.list_rate != null ? fmtN(li.list_rate) : '—'}</td>` : ''}
+            ${hasDiscount ? `<td style="text-align:right">${li.discount_pct != null ? `${li.discount_pct}%` : '—'}</td>` : ''}
+            <td style="text-align:right">${li.gst != null ? `${li.gst}%` : '—'}</td>
+            <td style="text-align:right">${fmtN(li.landed_rate)}</td>
+            <td style="text-align:right">${li.line_total != null ? fmtN(li.line_total) : '—'}</td>
+          </tr>`).join('');
+        return `
+          <div style="margin-top:12px">
+            <p style="font-size:10pt;font-weight:700;margin:0 0 4px;color:#1a237e">${esc(q.supplier?.name || 'Vendor')} ${q.is_selected ? '<span style="color:#2e7d32">(Selected ✓)</span>' : ''}</p>
+            <table>
+              <thead><tr>
+                <th>Description</th><th>Brand</th><th style="text-align:right">Qty</th><th>Unit</th>
+                <th style="text-align:right">Rate</th>
+                ${hasListRate ? '<th style="text-align:right">List Rate</th>' : ''}
+                ${hasDiscount ? '<th style="text-align:right">Disc%</th>' : ''}
+                <th style="text-align:right">GST%</th>
+                <th style="text-align:right">Landed/Unit</th>
+                <th style="text-align:right">Line Total</th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+              <tfoot><tr style="background:#f5f5f5;font-weight:700">
+                <td colspan="${5 + (hasListRate ? 1 : 0) + (hasDiscount ? 1 : 0) + 2}" style="text-align:right">Total Landed</td>
+                <td style="text-align:right">${fmtN(q.landed_total)}</td>
+              </tr></tfoot>
+            </table>
+          </div>`;
+      }).join('');
+      lineItemSections = `<div style="margin-top:16px"><p style="font-size:11pt;font-weight:700;border-bottom:2px solid #1a237e;padding-bottom:4px;color:#1a237e">Detailed Line Items by Vendor</p>${lineItemSections}</div>`;
+    }
+
+    // ── SECTION 4: AI warnings + next steps ──────────────────────────────
+    const warningsHtml = ai?.warnings?.length > 0 ? `
+      <div style="margin-top:14px;background:#fff8e1;border:1px solid #ffc107;border-radius:4px;padding:10px">
+        <p style="font-size:10pt;font-weight:700;color:#e65100;margin:0 0 6px">Warnings</p>
+        ${ai.warnings.map(w => `<p style="font-size:8pt;margin:2px 0;color:#bf360c">• ${esc(w)}</p>`).join('')}
+      </div>` : '';
+
+    const nextStepsHtml = ai?.next_steps_for_procurement?.length > 0 ? `
+      <div style="margin-top:14px;background:#e8eaf6;border:1px solid #9fa8da;border-radius:4px;padding:10px">
+        <p style="font-size:10pt;font-weight:700;color:#1a237e;margin:0 0 6px">Recommended Next Steps</p>
+        ${ai.next_steps_for_procurement.map(s => `<p style="font-size:8pt;margin:2px 0;color:#283593">• ${esc(s)}</p>`).join('')}
+      </div>` : '';
+
+    // ── Full document ─────────────────────────────────────────────────────
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+      <title>Comparison Sheet — ${esc(po.cps_po_ref)}</title>
+      <style>
+        body{font-family:Arial,sans-serif;font-size:9pt;margin:0;color:#212121}
+        .page{padding:12mm 10mm}
+        .hdr{background:#1a237e;color:#fff;padding:10px 14px}
+        .hdr h1{margin:0;font-size:13pt;letter-spacing:.5px}
+        .hdr p{margin:2px 0;font-size:8.5pt;opacity:.9}
+        table{width:100%;border-collapse:collapse;margin:4px 0;font-size:7.5pt}
+        th{background:#e8eaf6;padding:4px 5px;text-align:left;border:1px solid #c5cae9;font-weight:700}
+        td{padding:3px 5px;border:1px solid #e0e0e0;vertical-align:top}
+        .rec-box{background:#e8f5e9;border:1px solid #66bb6a;border-radius:4px;padding:8px;margin-top:12px}
+        .rec-box h3{margin:0 0 4px;color:#1b5e20;font-size:9.5pt}
+        .rec-box p{margin:3px 0;font-size:8pt;color:#2e7d32}
+        .footer{margin-top:16px;border-top:1px solid #e0e0e0;padding-top:6px;font-size:7pt;color:#9e9e9e;text-align:center}
+        @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}@page{margin:8mm;size:A4 landscape}}
+      </style>
+    </head><body><div class="page">
+      <div class="hdr">
+        <h1>VENDOR COMPARISON SHEET</h1>
+        <p><strong>PO:</strong> ${esc(po.cps_po_ref)} &nbsp;|&nbsp; <strong>Project:</strong> ${esc(po.project_name || po.site)} &nbsp;|&nbsp; <strong>Site:</strong> ${esc(po.site)} &nbsp;|&nbsp; <strong>Date:</strong> ${dateStr}</p>
+        <p><strong>Selected Supplier:</strong> ${esc(selectedQuote?.supplier?.name || po.supplier_name)} &nbsp;|&nbsp; <strong>PO Value:</strong> ${fmtN(po.total_amount)} &nbsp;|&nbsp; <strong>Quotes:</strong> ${comparison.total_quotes} received, ${comparison.compliant_quotes} compliant</p>
+      </div>
+
+      <div style="margin-top:12px">
+        <p style="font-size:10pt;font-weight:700;border-bottom:2px solid #1a237e;padding-bottom:3px;color:#1a237e;margin:0 0 5px">Supplier Bid Summary</p>
+        <table>
+          <thead><tr>
+            <th>Vendor</th>
+            <th style="text-align:right">Subtotal</th>
+            <th style="text-align:right">GST</th>
+            <th style="text-align:right">Freight</th>
+            <th style="text-align:right">Landed Total</th>
+            <th>Payment Terms</th>
+            <th>Delivery</th>
+            <th style="text-align:center">Compliant</th>
+          </tr></thead>
+          <tbody>${bidRowsHtml}</tbody>
+        </table>
+        ${comparison.potential_savings > 0 ? `<p style="font-size:7.5pt;color:#2e7d32;margin:3px 0">Savings vs next best: ${fmtN(comparison.potential_savings)}</p>` : ''}
+      </div>
+
+      ${ai?.recommended_supplier ? `
+      <div class="rec-box">
+        <h3>AI Recommendation: ${esc(ai.recommended_supplier)}</h3>
+        <p>${esc(ai.reason || '')}</p>
+        ${ai.executive_summary ? `<p style="margin-top:5px;color:#37474f;border-top:1px solid #a5d6a7;padding-top:5px;font-size:7.5pt">${esc(ai.executive_summary)}</p>` : ''}
+      </div>` : ''}
+
+      ${warningsHtml}
+
+      ${crossVendorHtml}
+
+      ${lineItemSections}
+
+      ${nextStepsHtml}
+
+      ${comparison.manual_notes ? `
+      <div style="margin-top:12px;background:#e3f2fd;border:1px solid #90caf9;border-radius:4px;padding:8px">
+        <p style="font-size:9.5pt;font-weight:700;color:#0d47a1;margin:0 0 3px">Procurement Head Notes</p>
+        <p style="font-size:8pt;color:#1565c0">${esc(comparison.manual_notes)}</p>
+      </div>` : ''}
+
+      <div class="footer">
+        Generated by Hagerstone Finance System &nbsp;|&nbsp; ${dateStr} &nbsp;|&nbsp; ${esc(po.cps_po_ref)}
+        ${ai?.disclaimer ? `<br>${esc(ai.disclaimer)}` : ''}
+      </div>
+    </div></body></html>`;
+
+    const win = window.open('', '_blank');
+    if (!win) { alert('Pop-up blocked — please allow pop-ups for this site.'); return; }
+    win.document.write(html);
+    win.document.close();
+    setTimeout(() => win.print(), 600);
+  }
+
   // Authoritative amount for a PO: finance_adjusted > procurement_approved > total
   function getAuthoritativeAmount(po) {
     return parseFloat(po.finance_adjusted_amount || po.procurement_approved_amount || po.total_amount || 0);
@@ -238,8 +482,8 @@ export default function POPaymentsTab() {
                       </div>
                     </div>
 
-                    {/* Expand toggle + PDF download */}
-                    <div className="mt-3 flex items-center gap-4">
+                    {/* Expand toggle + PDF downloads */}
+                    <div className="mt-3 flex items-center gap-3 flex-wrap">
                       <button
                         onClick={() => toggleExpand(po.id)}
                         className="text-xs text-blue-600 hover:underline flex items-center gap-1"
@@ -254,8 +498,16 @@ export default function POPaymentsTab() {
                           download
                           className="text-xs flex items-center gap-1 px-3 py-1 bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 rounded-lg font-medium"
                         >
-                          📄 Download PO PDF
+                          📄 {comp.po_pdf_is_revision === false ? 'Download Original PO PDF' : 'Download PO PDF'}
                         </a>
+                      )}
+                      {comp?.has_comparison && (
+                        <button
+                          onClick={() => downloadComparisonSheet(po, comp)}
+                          className="text-xs flex items-center gap-1 px-3 py-1 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 rounded-lg font-medium"
+                        >
+                          📊 Download Comparison Sheet
+                        </button>
                       )}
                     </div>
                   </div>
