@@ -7,10 +7,11 @@ const IMPREST_CATEGORIES = [
 ];
 
 const IMPREST_SITES = [
-  'MAX Hospital, Saket Delhi', 'Bhuj', 'Vaneet Infra',
-  'Dee Foundation Omaxe, Faridabad', 'Auma India Bengaluru',
-  'Minebea Mitsumi', 'Hero Homes Ludhiana', 'Bansal Tower',
-  'KOKO Town, Chandigarh', 'Head Office', 'Bangalore Office', 'Others',
+  'MAX Hospital, Saket Delhi',
+  'DEE Development Engineer - Canteen', 'DEE Development Engineer - Admin',
+  'Vaneet Infra', 'Dee Foundation Omaxe, Faridabad', 'Auma India Bengaluru',
+  'Minebea Mitsumi', 'Hero Homes Ludhiana', 'Hero Homes Greater Noida',
+  'Bansal Tower', 'KOKO Town, Chandigarh', 'Head Office', 'Bangalore Office', 'Others',
 ];
 
 const STATUS_OPTIONS = [

@@ -3,10 +3,11 @@ import api from '../services/api';
 import { showToast } from '../components/layout/Toast';
 
 const IMPREST_SITES = [
-  'MAX Hospital, Saket Delhi', 'Bhuj', 'Vaneet Infra',
-  'Dee Foundation Omaxe, Faridabad', 'Auma India Bengaluru',
-  'Minebea Mitsumi', 'Hero Homes Ludhiana', 'Bansal Tower',
-  'KOKO Town, Chandigarh', 'Head Office', 'Bangalore Office', 'Others',
+  'MAX Hospital, Saket Delhi',
+  'DEE Development Engineer - Canteen', 'DEE Development Engineer - Admin',
+  'Vaneet Infra', 'Dee Foundation Omaxe, Faridabad', 'Auma India Bengaluru',
+  'Minebea Mitsumi', 'Hero Homes Ludhiana', 'Hero Homes Greater Noida',
+  'Bansal Tower', 'KOKO Town, Chandigarh', 'Head Office', 'Bangalore Office', 'Others',
 ];
 
 function fmt(n) { return `₹${Number(n).toLocaleString('en-IN')}`; }

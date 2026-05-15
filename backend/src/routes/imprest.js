@@ -901,6 +901,96 @@ router.get('/s2/queue', authMiddleware, roleGuard([...S2_ROLES, 'head']), async 
   } catch (err) { next(err); }
 });
 
+// GET /api/imprest/board — Full pipeline view: every active request + recent terminal ones
+router.get('/board', authMiddleware, roleGuard([...S1_ROLES, ...S2_ROLES, ...FINANCE_ROLES, 'head', 'admin']), async (req, res, next) => {
+  try {
+    const daysWindow = parseInt(req.query.days) || 14;
+    const sinceIso = new Date(Date.now() - daysWindow * 86400000).toISOString();
+
+    // Active stages — all pending
+    const activeRes = await supabaseAdmin
+      .from('imprest_requests')
+      .select('*, employee:employee_id (id, name, email, site)')
+      .in('current_stage', ['s1_pending', 's2_pending', 's3_pending'])
+      .order('submitted_at', { ascending: false })
+      .limit(300);
+
+    // Recent terminal — paid + rejected in last N days
+    const terminalRes = await supabaseAdmin
+      .from('imprest_requests')
+      .select('*, employee:employee_id (id, name, email, site)')
+      .in('current_stage', ['paid', 's1_rejected', 's2_rejected', 's3_rejected', 'director_rejected'])
+      .gte('updated_at', sinceIso)
+      .order('updated_at', { ascending: false })
+      .limit(100);
+
+    if (activeRes.error) return fail(res, activeRes.error.message, 500);
+    if (terminalRes.error) return fail(res, terminalRes.error.message, 500);
+
+    const allRequests = [...(activeRes.data || []), ...(terminalRes.data || [])];
+
+    // Enrich with employee outstanding balance (active approved imprests minus expense settlements)
+    const empIds = [...new Set(allRequests.map(r => r.employee_id).filter(Boolean))];
+    let balMap = {};
+    if (empIds.length > 0) {
+      const { data: approvedImps } = await supabaseAdmin
+        .from('imprest_requests')
+        .select('id, employee_id, approved_amount, amount_requested')
+        .in('employee_id', empIds)
+        .in('status', ['approved', 'partially_approved']);
+      const impIds = (approvedImps || []).map(r => r.id);
+      let expSum = {};
+      if (impIds.length > 0) {
+        const { data: exps } = await supabaseAdmin
+          .from('expenses')
+          .select('imprest_id, amount, status')
+          .in('imprest_id', impIds)
+          .in('status', ['approved', 'verified', 'auto_verified']);
+        (exps || []).forEach(e => { expSum[e.imprest_id] = (expSum[e.imprest_id] || 0) + parseFloat(e.amount || 0); });
+      }
+      (approvedImps || []).forEach(imp => {
+        const granted = parseFloat(imp.approved_amount || imp.amount_requested || 0);
+        const used = expSum[imp.id] || 0;
+        balMap[imp.employee_id] = (balMap[imp.employee_id] || 0) + Math.max(0, granted - used);
+      });
+    }
+
+    const enriched = allRequests.map(r => ({
+      ...r,
+      employee_total_balance: balMap[r.employee_id] || 0,
+    }));
+
+    return ok(res, { requests: enriched, count: enriched.length, days_window: daysWindow });
+  } catch (err) { next(err); }
+});
+
+// GET /api/imprest/s2/history — Logged-in S2 reviewer's recent approvals + rejections
+router.get('/s2/history', authMiddleware, roleGuard([...S2_ROLES, 'head']), async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const { data, error } = await supabaseAdmin
+      .from('imprest_requests')
+      .select('id, ref_id, site, category, purpose, amount_requested, current_stage, status, s2_approved_at, s2_notes, rejection_reason, submitted_at, employee_id')
+      .eq('s2_approved_by', req.user.id)
+      .order('s2_approved_at', { ascending: false })
+      .limit(limit);
+    if (error) return fail(res, error.message, 500);
+
+    // Join employee names
+    const employeeIds = [...new Set((data || []).map(r => r.employee_id).filter(Boolean))];
+    let employeeMap = {};
+    if (employeeIds.length > 0) {
+      const { data: emps } = await supabaseAdmin
+        .from('employees')
+        .select('id, name')
+        .in('id', employeeIds);
+      employeeMap = Object.fromEntries((emps || []).map(e => [e.id, e.name]));
+    }
+    const enriched = (data || []).map(r => ({ ...r, employee_name: employeeMap[r.employee_id] || null }));
+    return ok(res, { history: enriched, count: enriched.length });
+  } catch (err) { next(err); }
+});
+
 // POST /api/imprest/:id/s2-approve — Ritu forwards to finance
 router.post('/:id/s2-approve', authMiddleware, roleGuard(S2_ROLES), async (req, res, next) => {
   try {

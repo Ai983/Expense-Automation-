@@ -73,12 +73,14 @@ export const EXPENSE_STATUSES = [
 
 export const IMPREST_SITES = [
   'MAX Hospital, Saket Delhi',
-  'Bhuj',
+  'DEE Development Engineer - Canteen',
+  'DEE Development Engineer - Admin',
   'Vaneet Infra',
   'Dee Foundation Omaxe, Faridabad',
   'Auma India Bengaluru',
   'Minebea Mitsumi',
   'Hero Homes Ludhiana',
+  'Hero Homes Greater Noida',
   'Bansal Tower',
   'KOKO Town, Chandigarh',
   'Head Office',

@@ -44,12 +44,14 @@ export const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://loca
 
 export const IMPREST_SITES = [
   'MAX Hospital, Saket Delhi',
-  'Bhuj',
+  'DEE Development Engineer - Canteen',
+  'DEE Development Engineer - Admin',
   'Vaneet Infra',
   'Dee Foundation Omaxe, Faridabad',
   'Auma India Bengaluru',
   'Minebea Mitsumi',
   'Hero Homes Ludhiana',
+  'Hero Homes Greater Noida',
   'Bansal Tower',
   'KOKO Town, Chandigarh',
   'Head Office',

@@ -38,6 +38,51 @@ function extractRefFromMessage(text) {
 }
 
 /**
+ * Approval synonyms — natural-language affirmations across English + Hinglish.
+ * Matched case-insensitively against the first word/phrase of the reply.
+ */
+const APPROVAL_WORDS = [
+  'YES', 'Y', 'YEP', 'YEAH', 'YA', 'YUP',
+  'OK', 'OKAY', 'OKEY', 'OKE', 'OKK', 'OKKK',
+  'APPROVED', 'APPROVE', 'APPROVAL',
+  'DONE', 'FINE', 'GOOD', 'GREAT', 'SURE', 'CORRECT', 'CONFIRM', 'CONFIRMED', 'PROCEED', 'ACCEPT', 'ACCEPTED',
+  'HAAN', 'HAA', 'HA', 'JI', 'BILKUL', 'THIK', 'THEEK', 'THIKHE', 'THEEKHE', 'SAHI',
+  '👍', '✓', '✅', '👌',
+];
+
+const REJECTION_WORDS = [
+  'NO', 'N', 'NOPE', 'NAH',
+  'REJECT', 'REJECTED', 'REJECTION', 'DECLINE', 'DECLINED', 'DENY', 'DENIED',
+  'CANCEL', 'CANCELLED', 'STOP',
+  'NAHI', 'NAHIN', 'MAT', 'GALAT', 'GALT',
+  '👎', '❌', '✗',
+];
+
+/**
+ * Classify an incoming WhatsApp reply as 'approved' | 'rejected' | null.
+ * Strips leading punctuation/emojis and matches against the first token.
+ */
+function classifyReplyDecision(text) {
+  if (!text || typeof text !== 'string') return null;
+  // Strip leading whitespace and common punctuation, then upper-case
+  const cleaned = text.trim().replace(/^[\s.,!?:;\-_*]+/, '').toUpperCase();
+  if (!cleaned) return null;
+  // Get first "word" — sequence of non-space chars at start
+  const firstWord = cleaned.split(/[\s.,!?:;]+/)[0] || '';
+  if (APPROVAL_WORDS.includes(firstWord)) return 'approved';
+  if (REJECTION_WORDS.includes(firstWord)) return 'rejected';
+  // Also check if any approval/rejection emoji appears anywhere in short messages (<= 30 chars)
+  if (cleaned.length <= 30) {
+    if (APPROVAL_WORDS.some(w => w.length <= 2 && cleaned.includes(w))) {
+      // Skip single-letter false positives — already handled by firstWord check
+    }
+    if (['👍', '✓', '✅', '👌'].some(e => cleaned.includes(e))) return 'approved';
+    if (['👎', '❌', '✗'].some(e => cleaned.includes(e))) return 'rejected';
+  }
+  return null;
+}
+
+/**
  * Extract ReplyID (uuid format) from quoted or inline message.
  */
 function extractReplyId(text) {
@@ -71,15 +116,18 @@ router.post('/incoming', async (req, res) => {
   const senderPhone = body?.user?.phone || '';
   const quotedMsg = body?.message?.quotedMsg?.body || body?.message?.quotedMsg?.text || '';
 
-  const upperMsg = (typeof msgText === 'string' ? msgText : '').trim().toUpperCase();
-  const isApprovalReply = upperMsg.startsWith('YES') || upperMsg.startsWith('NO');
-
   const cleanPhone = senderPhone.replace(/\D/g, '');
   const approverRole = identifyApprover(cleanPhone);
+  const decision = classifyReplyDecision(typeof msgText === 'string' ? msgText : '');
 
-  if (isApprovalReply && approverRole) {
-    const decision = upperMsg.startsWith('YES') ? 'approved' : 'rejected';
+  // Log every approver message — even unmatched ones — so we can spot new natural-language variants
+  if (approverRole) {
+    console.log(`[WhatsApp] Approver=${approverRole} phone=${cleanPhone} decision=${decision || 'NO_MATCH'} msg="${(msgText || '').toString().slice(0, 80)}"`);
+  }
+
+  if (decision && approverRole) {
     const comment = (typeof msgText === 'string' ? msgText : '').trim();
+    // Strip the decision keyword from start to leave just the explanatory comment
     const commentText = comment.indexOf(' ') > 0 ? comment.substring(comment.indexOf(' ') + 1) : '';
     // Remove ref_id from comment if present
     const refInComment = extractRefFromMessage(commentText);
@@ -87,7 +135,7 @@ router.post('/incoming', async (req, res) => {
 
     try {
       if (approverRole === 'founder' || approverRole === 'director') {
-        await handleFounderDirectorReply({ msgText, cleanPhone, quotedMsg, upperMsg, decision, comment: cleanComment });
+        await handleFounderDirectorReply({ msgText, cleanPhone, quotedMsg, decision, comment: cleanComment });
       } else {
         await handleStageApproverReply({ role: approverRole, msgText, cleanPhone, decision, comment: cleanComment });
       }
@@ -121,7 +169,7 @@ router.post('/incoming', async (req, res) => {
 });
 
 // ─── Founder / Director Reply Handler ──────────────────────────────────────────
-async function handleFounderDirectorReply({ msgText, cleanPhone, quotedMsg, upperMsg, decision, comment }) {
+async function handleFounderDirectorReply({ msgText, cleanPhone, quotedMsg, decision, comment }) {
   let replyTo = extractReplyId(msgText) || extractReplyId(quotedMsg);
   let imprestId = replyTo ? (replyTo.split('||')[1] || '') : '';
 
