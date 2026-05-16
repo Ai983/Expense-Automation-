@@ -106,9 +106,13 @@ function ImprestRemindersPanel() {
                     )}
                   </td>
                   <td className="px-4 py-2">
-                    {isExpired ? (
+                    {isExpired && r.employee?.imprest_blocked ? (
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-700">
                         Blocked
+                      </span>
+                    ) : isExpired ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-orange-100 text-orange-700">
+                        Overdue
                       </span>
                     ) : (
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-yellow-100 text-yellow-800">
