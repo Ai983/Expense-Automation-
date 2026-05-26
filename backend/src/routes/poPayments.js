@@ -115,6 +115,18 @@ router.post('/ingest', async (req, res, next) => {
       await supabaseAdmin.from('po_vendor_quotes').insert(quoteRows);
     }
 
+    // Auto-supersede previous versions when a revision (e.g. -R1, -R2) is ingested
+    const revisionMatch = cps_po_ref.match(/^(.+)-R\d+$/);
+    if (revisionMatch) {
+      const baseRef = revisionMatch[1];
+      await supabaseAdmin
+        .from('po_payments')
+        .update({ status: 'superseded', superseded_by: cps_po_ref })
+        .neq('id', data.id)
+        .or(`cps_po_ref.eq.${baseRef},cps_po_ref.like.${baseRef}-R%`)
+        .in('status', ['pending_procurement', 'pending_payment', 'partially_paid', 'payment_rejected', 'procurement_rejected']);
+    }
+
     return ok(res, { ...data, ingested: true });
   } catch (err) { next(err); }
 });
@@ -158,14 +170,14 @@ router.get('/finance-queue', authMiddleware, roleGuard([...FINANCE_ROLES, 'head'
         payment_terms_type, payment_terms_raw, payment_terms_json,
         payment_terms_source, payment_terms_confidence,
         payment_due_date, payment_terms_notes,
-        status,
+        status, superseded_by,
         procurement_approved_amount, procurement_notes, procurement_approved_at,
         finance_adjusted_amount, finance_adjusted_by, finance_adjusted_at,
         paid_amount, paid_by, paid_at, finance_notes,
         payment_receipt_path, payment_logs,
         created_at, ingested_at
       `)
-      .in('status', ['pending_payment', 'partially_paid', 'paid', 'payment_rejected'])
+      .in('status', ['pending_payment', 'partially_paid', 'paid', 'payment_rejected', 'superseded'])
       .order('created_at', { ascending: false });
 
     if (error) throw error;

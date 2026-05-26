@@ -348,6 +348,7 @@ export default function POPaymentsTab() {
 
   const pending = queue.filter(p => ['pending_payment', 'partially_paid'].includes(p.status));
   const paid = queue.filter(p => p.status === 'paid');
+  const superseded = queue.filter(p => p.status === 'superseded');
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000);
 
   if (loading) {
@@ -651,6 +652,34 @@ export default function POPaymentsTab() {
                     ))}
                   </div>
                 )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Superseded / Revised POs */}
+      {superseded.length > 0 && (
+        <div>
+          <h3 className="text-sm font-medium text-gray-400 mb-3">Revised / Archived ({superseded.length})</h3>
+          <div className="space-y-2">
+            {superseded.map(po => (
+              <div key={po.id} className="flex items-center justify-between py-3 px-4 bg-gray-50 rounded-lg border border-gray-200 opacity-70">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="w-2 h-2 rounded-full bg-gray-400 shrink-0" />
+                  <span className="font-mono text-sm text-gray-500 line-through">{po.cps_po_ref}</span>
+                  {po.superseded_by && (
+                    <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full font-medium">
+                      Revised → {po.superseded_by}
+                    </span>
+                  )}
+                  <span className="text-sm text-gray-500">{po.project_name}</span>
+                  <span className="text-xs text-gray-400">{po.supplier_name}</span>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-medium text-gray-400">{fmt(po.total_amount)}</p>
+                  <p className="text-xs text-gray-400">{fmtDate(po.created_at)}</p>
+                </div>
               </div>
             ))}
           </div>
