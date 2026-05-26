@@ -244,7 +244,7 @@ export default function S2QueuePage() {
   const openView = (req) => { setSelected(req); setModalMode('view'); };
   const openForward = (req) => {
     setSelected(req); setApproveAmount(String(req.amount_requested));
-    setNotes(''); setActionError(''); setModalMode('forward');
+    setNotes('Approved by S2 approval'); setActionError(''); setModalMode('forward');
   };
   const openReject = (req) => { setSelected(req); setRejectReason(''); setActionError(''); setModalMode('reject'); };
   const closeModal = () => { setSelected(null); setModalMode(null); };
@@ -467,9 +467,10 @@ export default function S2QueuePage() {
                     )}
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">Notes (optional)</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">S2 Approval Remark</label>
                     <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
-                      className="w-full border rounded-lg px-3 py-2 text-sm resize-none" rows={2} />
+                      className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-400" rows={2} />
+                    <p className="text-xs text-gray-400 mt-1">This remark will be saved on the approval trail and visible to Finance.</p>
                   </div>
                 </>
               )}
