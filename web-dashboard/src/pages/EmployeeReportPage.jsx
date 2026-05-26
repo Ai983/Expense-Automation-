@@ -13,7 +13,7 @@ const SITES = [
   'Bangalore Branch Office', 'Vinfast-Ghaziabad', 'AU Space Office Ludhiana',
   'Vinfast - Patparganj', 'Auma India Bengaluru', 'Vaneet Infra',
   'MAX Hospital, Saket Delhi', 'Dee Foundation Omaxe, Faridabad',
-  'Hero Homes Ludhiana', 'Delhi NCR',
+  'Hero Homes Ludhiana', 'Delhi NCR', 'Vinfast Jaipur',
 ];
 
 const STATUS_COLORS = {

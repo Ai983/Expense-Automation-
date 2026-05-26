@@ -889,6 +889,76 @@ router.post('/:id/s1-reject', authMiddleware, roleGuard(S1_ROLES), async (req, r
   } catch (err) { next(err); }
 });
 
+// POST /api/imprest/:id/s2-override — S2 fast-forwards an S1-pending item (does S1+S2 in one shot → s3_pending)
+router.post('/:id/s2-override', authMiddleware, roleGuard(S2_ROLES), async (req, res, next) => {
+  try {
+    const { notes, approvedAmount } = req.body;
+    const { data: imp, error: fetchErr } = await supabaseAdmin
+      .from('imprest_requests')
+      .select('id, ref_id, current_stage, approval_route, amount_requested, employee_id, site, category, purpose')
+      .eq('id', req.params.id).single();
+    if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
+    if (imp.current_stage !== 's1_pending') return fail(res, 'Request is not at Stage 1');
+
+    const now = new Date().toISOString();
+    const updateFields = {
+      current_stage: 's3_pending',
+      s1_approved_by: req.user.id,
+      s1_approved_at: now,
+      s1_notes: '(Forwarded by S2)',
+      s2_approved_by: req.user.id,
+      s2_approved_at: now,
+      s2_notes: notes || null,
+    };
+    if (approvedAmount && parseFloat(approvedAmount) < parseFloat(imp.amount_requested)) {
+      updateFields.amount_requested = parseFloat(approvedAmount);
+    }
+
+    await supabaseAdmin.from('imprest_requests').update(updateFields).eq('id', imp.id);
+
+    await logAudit({
+      userId: req.user.id, action: 's2_override_s1', entityType: 'expense', entityId: imp.id,
+      oldValue: { current_stage: 's1_pending' },
+      newValue: { current_stage: 's3_pending', s2_notes: notes },
+      ipAddress: req.ip,
+    });
+
+    try {
+      const empName = (await supabaseAdmin.from('employees').select('name').eq('id', imp.employee_id).single()).data?.name || '';
+      notifyFinance({ refId: imp.ref_id, employeeName: empName, site: imp.site, category: imp.category, amount: parseFloat(imp.amount_requested), purpose: imp.purpose || '', s2Notes: notes || '' });
+    } catch (e) { console.warn('Finance notify failed:', e.message); }
+
+    return ok(res, { refId: imp.ref_id, currentStage: 's3_pending', message: 'Fast-forwarded to Finance team' });
+  } catch (err) { next(err); }
+});
+
+// POST /api/imprest/:id/s2-reject-s1 — S2 rejects an S1-pending item
+router.post('/:id/s2-reject-s1', authMiddleware, roleGuard(S2_ROLES), async (req, res, next) => {
+  try {
+    const { reason } = req.body;
+    if (!reason?.trim()) return fail(res, 'Rejection reason is required');
+    const { data: imp, error: fetchErr } = await supabaseAdmin
+      .from('imprest_requests').select('id, ref_id, current_stage').eq('id', req.params.id).single();
+    if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
+    if (imp.current_stage !== 's1_pending') return fail(res, 'Request is not at Stage 1');
+
+    const now = new Date().toISOString();
+    await supabaseAdmin.from('imprest_requests').update({
+      status: 'rejected', rejection_reason: reason.trim(),
+      current_stage: 's2_rejected',
+      s1_approved_by: req.user.id, s1_approved_at: now,
+      s2_approved_by: req.user.id, s2_approved_at: now,
+    }).eq('id', req.params.id);
+
+    await logAudit({
+      userId: req.user.id, action: 's2_reject_s1', entityType: 'expense', entityId: imp.id,
+      newValue: { status: 'rejected', reason, current_stage: 's2_rejected' }, ipAddress: req.ip,
+    });
+
+    return ok(res, { refId: imp.ref_id, status: 'rejected' });
+  } catch (err) { next(err); }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // STAGE 2: Ritu Queue & Actions
 // ════════════════════════════════════════════════════════════════════════════

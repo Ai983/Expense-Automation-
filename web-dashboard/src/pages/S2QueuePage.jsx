@@ -7,7 +7,7 @@ const IMPREST_SITES = [
   'DEE Development Engineer - Canteen', 'DEE Development Engineer - Admin',
   'Vaneet Infra', 'Dee Foundation Omaxe, Faridabad', 'Auma India Bengaluru',
   'Minebea Mitsumi', 'Hero Homes Ludhiana', 'Hero Homes Greater Noida',
-  'Bansal Tower', 'KOKO Town, Chandigarh', 'Head Office', 'Bangalore Office', 'Others',
+  'Bansal Tower', 'KOKO Town, Chandigarh', 'Vinfast Jaipur', 'Head Office', 'Bangalore Office', 'Others',
 ];
 
 function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}`; }
@@ -89,7 +89,7 @@ function RouteIndicator({ route, stage }) {
 function KanbanCard({ req, onView, onForward, onReject, actionable }) {
   const isRejected = req.current_stage?.includes('rejected');
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-2.5 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+    <div className="bg-white border border-gray-200 rounded-lg p-2.5 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
       onClick={() => onView(req)}>
       <RouteIndicator route={req.approval_route} stage={req.current_stage} />
       <div className="flex items-start justify-between gap-2 mt-1.5 mb-1">
@@ -123,11 +123,15 @@ function KanbanCard({ req, onView, onForward, onReject, actionable }) {
       {actionable && (
         <div className="flex gap-1.5 mt-2">
           <button onClick={(e) => { e.stopPropagation(); onForward(req); }}
-            className="flex-1 text-[10px] bg-green-600 hover:bg-green-700 text-white py-1 rounded font-semibold">
-            ✓ Forward
+            className={`flex-1 text-[10px] active:scale-95 text-white py-1.5 rounded font-semibold transition-all duration-150 shadow-sm hover:shadow-md ${
+              req.current_stage === 's1_pending'
+                ? 'bg-blue-600 hover:bg-blue-700'
+                : 'bg-green-600 hover:bg-green-700'
+            }`}>
+            {req.current_stage === 's1_pending' ? '⚡ Fast-fwd' : '✓ Forward'}
           </button>
           <button onClick={(e) => { e.stopPropagation(); onReject(req); }}
-            className="flex-1 text-[10px] bg-red-600 hover:bg-red-700 text-white py-1 rounded font-semibold">
+            className="flex-1 text-[10px] bg-red-600 hover:bg-red-700 active:scale-95 text-white py-1.5 rounded font-semibold transition-all duration-150 shadow-sm hover:shadow-md">
             ✗ Reject
           </button>
         </div>
@@ -140,7 +144,7 @@ function HistoryItem({ entry, onClick }) {
   const isRejected = entry.current_stage === 's2_rejected' || entry.status === 'rejected';
   return (
     <div onClick={() => onClick(entry)}
-      className="bg-white border border-gray-100 rounded-md p-2 hover:bg-gray-50 cursor-pointer">
+      className="history-item bg-white border border-gray-100 rounded-md p-2 hover:bg-gray-50 hover:shadow-sm cursor-pointer transition-all duration-150">
       <div className="flex items-start justify-between gap-2">
         <span className="font-mono text-[10px] font-semibold text-amber-600">{entry.ref_id}</span>
         <span className="text-[10px] text-gray-400">{fmtTime(entry.s2_approved_at)}</span>
@@ -244,7 +248,8 @@ export default function S2QueuePage() {
   const openView = (req) => { setSelected(req); setModalMode('view'); };
   const openForward = (req) => {
     setSelected(req); setApproveAmount(String(req.amount_requested));
-    setNotes('Approved by S2 approval'); setActionError(''); setModalMode('forward');
+    setNotes(req.current_stage === 's1_pending' ? 'Approved and forwarded by S2 (Ritu)' : 'Approved by S2 approval');
+    setActionError(''); setModalMode('forward');
   };
   const openReject = (req) => { setSelected(req); setRejectReason(''); setActionError(''); setModalMode('reject'); };
   const closeModal = () => { setSelected(null); setModalMode(null); };
@@ -252,11 +257,14 @@ export default function S2QueuePage() {
   const handleForward = async () => {
     setActing(true); setActionError('');
     try {
-      await api.post(`/api/imprest/${selected.id}/s2-approve`, {
+      const endpoint = selected.current_stage === 's1_pending'
+        ? `/api/imprest/${selected.id}/s2-override`
+        : `/api/imprest/${selected.id}/s2-approve`;
+      await api.post(endpoint, {
         notes: notes.trim() || undefined,
         approvedAmount: parseFloat(approveAmount) || undefined,
       });
-      showToast('Forwarded to Finance team', 'success');
+      showToast(selected.current_stage === 's1_pending' ? 'Fast-forwarded to Finance team' : 'Forwarded to Finance team', 'success');
       closeModal(); fetchBoard(); fetchHistory();
     } catch (e) { setActionError(e.response?.data?.error || 'Failed'); }
     finally { setActing(false); }
@@ -266,7 +274,10 @@ export default function S2QueuePage() {
     if (!rejectReason.trim()) { setActionError('Reason is required'); return; }
     setActing(true); setActionError('');
     try {
-      await api.post(`/api/imprest/${selected.id}/s2-reject`, { reason: rejectReason.trim() });
+      const endpoint = selected.current_stage === 's1_pending'
+        ? `/api/imprest/${selected.id}/s2-reject-s1`
+        : `/api/imprest/${selected.id}/s2-reject`;
+      await api.post(endpoint, { reason: rejectReason.trim() });
       showToast('Request rejected', 'info');
       closeModal(); fetchBoard(); fetchHistory();
     } catch (e) { setActionError(e.response?.data?.error || 'Failed'); }
@@ -274,7 +285,7 @@ export default function S2QueuePage() {
   };
 
   const totalCount = filteredBoard.length;
-  const myActionable = buckets.s2.length;
+  const myActionable = buckets.s2.length + buckets.s1.length;
 
   return (
     <div className="flex gap-4 h-[calc(100vh-7rem)]">
@@ -305,7 +316,7 @@ export default function S2QueuePage() {
           <div className="grid grid-cols-5 gap-3 flex-1 overflow-hidden">
             {COLUMNS.map(col => {
               const items = buckets[col.key] || [];
-              const isActionable = col.key === 's2'; // only Ritu's S2 column is actionable for her
+              const isActionable = col.key === 's2' || col.key === 's1';
               return (
                 <div key={col.key} className={`${col.tint} border rounded-xl p-2.5 flex flex-col overflow-hidden`}>
                   <div className="flex items-center justify-between mb-2 px-1">
@@ -316,14 +327,15 @@ export default function S2QueuePage() {
                     {items.length === 0 ? (
                       <p className="text-[10px] text-gray-400 text-center mt-4">Empty</p>
                     ) : items.map(r => (
-                      <KanbanCard
-                        key={r.id}
-                        req={r}
-                        onView={openView}
-                        onForward={openForward}
-                        onReject={openReject}
-                        actionable={isActionable && r.current_stage === 's2_pending'}
-                      />
+                      <div key={r.id} className="card-stagger">
+                        <KanbanCard
+                          req={r}
+                          onView={openView}
+                          onForward={openForward}
+                          onReject={openReject}
+                          actionable={isActionable && (r.current_stage === 's2_pending' || r.current_stage === 's1_pending')}
+                        />
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -383,13 +395,15 @@ export default function S2QueuePage() {
 
       {/* Detail / Action Modal */}
       {selected && modalMode && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 modal-overlay">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto modal-content">
             <div className="p-6 border-b">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-bold text-gray-900">
-                    {modalMode === 'forward' ? 'Forward to Finance' : modalMode === 'reject' ? 'Reject Request' : 'Request Details'}
+                    {modalMode === 'forward'
+                      ? (selected.current_stage === 's1_pending' ? 'Fast-forward to Finance (Skip S1)' : 'Forward to Finance')
+                      : modalMode === 'reject' ? 'Reject Request' : 'Request Details'}
                   </h2>
                   <p className="text-sm text-gray-500 mt-1">{selected.ref_id} — {selected.employee?.name || selected.employee_name}</p>
                 </div>
@@ -489,8 +503,8 @@ export default function S2QueuePage() {
               <button onClick={closeModal} className="px-4 py-2 text-sm text-gray-600 border rounded-lg">Close</button>
               {modalMode === 'forward' && (
                 <button onClick={handleForward} disabled={acting}
-                  className="px-5 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-60">
-                  {acting ? 'Forwarding...' : 'Forward to Finance'}
+                  className="px-5 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-60 active:scale-95 transition-all duration-150">
+                  {acting ? 'Forwarding...' : selected?.current_stage === 's1_pending' ? 'Fast-forward to Finance' : 'Forward to Finance'}
                 </button>
               )}
               {modalMode === 'reject' && (
@@ -499,10 +513,12 @@ export default function S2QueuePage() {
                   {acting ? 'Rejecting...' : 'Reject'}
                 </button>
               )}
-              {modalMode === 'view' && selected.current_stage === 's2_pending' && selected.approval_route === 'avisha_ritu_finance' && (
+              {modalMode === 'view' && (selected.current_stage === 's2_pending' || selected.current_stage === 's1_pending') && (
                 <>
-                  <button onClick={() => openReject(selected)} className="px-4 py-2 text-sm text-red-700 border border-red-300 rounded-lg hover:bg-red-50">Reject</button>
-                  <button onClick={() => openForward(selected)} className="px-5 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700">Forward</button>
+                  <button onClick={() => openReject(selected)} className="px-4 py-2 text-sm text-red-700 border border-red-300 rounded-lg hover:bg-red-50 active:scale-95 transition-all duration-150">Reject</button>
+                  <button onClick={() => openForward(selected)} className="px-5 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 active:scale-95 transition-all duration-150">
+                    {selected.current_stage === 's1_pending' ? 'Fast-forward →' : 'Forward'}
+                  </button>
                 </>
               )}
             </div>

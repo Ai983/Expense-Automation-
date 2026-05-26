@@ -29,21 +29,46 @@ function getDefaultRoute(role) {
   return '/queue';
 }
 
+function HagerstoneLoader() {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-900" style={{ animation: 'fadeIn 0.3s ease' }}>
+      <div className="flex flex-col items-center gap-6">
+        <div className="flex flex-col items-center gap-1">
+          <span className="text-3xl font-black text-white tracking-tight">Hager<span className="text-amber-400">Stone</span></span>
+          <span className="text-xs text-gray-500 tracking-widest uppercase">Expense Management</span>
+        </div>
+        <div className="hs-loader-ring" />
+        <div className="flex gap-2">
+          <span className="hs-loader-dot" />
+          <span className="hs-loader-dot" />
+          <span className="hs-loader-dot" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PageWrapper({ children }) {
+  return <div className="page-enter">{children}</div>;
+}
+
 function ProtectedLayout({ children }) {
   const { user, loading } = useAuth();
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading...</div>;
+  if (loading) return <HagerstoneLoader />;
   if (!user) return <Navigate to="/login" replace />;
   return (
     <div className="flex h-screen">
       <Sidebar />
-      <main className="ml-64 flex-1 overflow-y-auto p-8 bg-gray-50">{children}</main>
+      <main className="ml-64 flex-1 overflow-y-auto p-8 bg-gray-50">
+        <PageWrapper>{children}</PageWrapper>
+      </main>
     </div>
   );
 }
 
 function AppRoutes() {
   const { user, loading } = useAuth();
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading...</div>;
+  if (loading) return <HagerstoneLoader />;
 
   const defaultRoute = user ? getDefaultRoute(user.role) : '/login';
 

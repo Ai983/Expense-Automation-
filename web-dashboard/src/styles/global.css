@@ -2,6 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Smooth scroll globally ───────────────────────────────────────────────── */
+html { scroll-behavior: smooth; }
+
 @layer base {
   body {
     @apply bg-gray-50 text-gray-900 font-sans;
@@ -10,34 +13,166 @@
 
 @layer components {
   .btn-primary {
-    @apply bg-brand-500 hover:bg-brand-600 text-white font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply bg-brand-500 hover:bg-brand-600 text-white font-semibold px-4 py-2 rounded-lg transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95;
   }
   .btn-secondary {
-    @apply bg-white hover:bg-gray-50 text-gray-700 font-medium px-4 py-2 rounded-lg border border-gray-300 transition-colors;
+    @apply bg-white hover:bg-gray-50 text-gray-700 font-medium px-4 py-2 rounded-lg border border-gray-300 transition-all duration-150 active:scale-95;
   }
   .btn-danger {
-    @apply bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-50;
+    @apply bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2 rounded-lg transition-all duration-150 disabled:opacity-50 active:scale-95;
   }
   .card {
-    @apply bg-white rounded-xl shadow-sm border border-gray-100 p-6;
+    @apply bg-white rounded-xl shadow-sm border border-gray-100 p-6 transition-shadow duration-200 hover:shadow-md;
   }
   .input {
-    @apply w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent;
+    @apply w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all duration-150;
   }
   .select {
-    @apply w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white;
+    @apply w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white transition-all duration-150;
   }
 }
 
-/* Status badge colours */
-.status-pending      { @apply bg-yellow-100 text-yellow-800; }
-.status-verified     { @apply bg-blue-100 text-blue-800; }
+/* ── Status badges ────────────────────────────────────────────────────────── */
+.status-pending       { @apply bg-yellow-100 text-yellow-800; }
+.status-verified      { @apply bg-blue-100 text-blue-800; }
 .status-manual_review { @apply bg-orange-100 text-orange-800; }
-.status-approved     { @apply bg-green-100 text-green-800; }
-.status-rejected     { @apply bg-red-100 text-red-800; }
-.status-blocked      { @apply bg-gray-100 text-gray-800; }
+.status-approved      { @apply bg-green-100 text-green-800; }
+.status-rejected      { @apply bg-red-100 text-red-800; }
+.status-blocked       { @apply bg-gray-100 text-gray-800; }
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { @apply bg-gray-100; }
-::-webkit-scrollbar-thumb { @apply bg-gray-300 rounded; }
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { @apply bg-transparent; }
+::-webkit-scrollbar-thumb { @apply bg-gray-300 rounded-full; transition: background 0.2s; }
+::-webkit-scrollbar-thumb:hover { @apply bg-gray-400; }
+
+/* ══════════════════════════════════════════════════════════════════════════ */
+/*  KEYFRAME ANIMATIONS                                                       */
+/* ══════════════════════════════════════════════════════════════════════════ */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.93); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse-ring {
+  0%   { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+@keyframes bounce-dot {
+  0%, 80%, 100% { transform: scale(0.7); opacity: 0.5; }
+  40%           { transform: scale(1.1); opacity: 1; }
+}
+
+/* ── Page-level enter ─────────────────────────────────────────────────────── */
+.page-enter {
+  animation: fadeInUp 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ── Kanban card stagger ─────────────────────────────────────────────────── */
+.card-stagger {
+  animation: fadeInUp 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.card-stagger:nth-child(1)  { animation-delay: 0.03s; }
+.card-stagger:nth-child(2)  { animation-delay: 0.06s; }
+.card-stagger:nth-child(3)  { animation-delay: 0.09s; }
+.card-stagger:nth-child(4)  { animation-delay: 0.12s; }
+.card-stagger:nth-child(5)  { animation-delay: 0.15s; }
+.card-stagger:nth-child(6)  { animation-delay: 0.18s; }
+.card-stagger:nth-child(7)  { animation-delay: 0.21s; }
+.card-stagger:nth-child(8)  { animation-delay: 0.24s; }
+.card-stagger:nth-child(9)  { animation-delay: 0.27s; }
+.card-stagger:nth-child(10) { animation-delay: 0.30s; }
+
+/* ── Modal overlay + content ─────────────────────────────────────────────── */
+.modal-overlay {
+  animation: fadeIn 0.2s ease both;
+}
+.modal-content {
+  animation: scaleIn 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ── Skeleton loader ─────────────────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s infinite linear;
+  border-radius: 6px;
+}
+
+/* ── Sidebar nav item ─────────────────────────────────────────────────────── */
+.nav-item {
+  @apply transition-all duration-150;
+}
+.nav-item:hover {
+  @apply translate-x-1;
+}
+
+/* ── Button press micro-animation ────────────────────────────────────────── */
+button:not(:disabled) { transition: transform 0.1s ease, box-shadow 0.1s ease; }
+button:not(:disabled):active { transform: scale(0.96); }
+
+/* ── HagerStone branded loader ───────────────────────────────────────────── */
+.hs-loader-ring {
+  width: 48px; height: 48px;
+  border: 3px solid #e8a24a33;
+  border-top-color: #e8a24a;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+
+.hs-loader-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #e8a24a;
+  display: inline-block;
+  animation: bounce-dot 1.2s ease-in-out infinite;
+}
+.hs-loader-dot:nth-child(2) { animation-delay: 0.15s; background: #f59e0b; }
+.hs-loader-dot:nth-child(3) { animation-delay: 0.30s; background: #fbbf24; }
+
+/* ── Sidebar active pulse ─────────────────────────────────────────────────── */
+.sidebar-active-pulse::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0.08;
+  animation: pulse-ring 1.5s ease-out;
+}
+
+/* ── History item slide-in ───────────────────────────────────────────────── */
+.history-item {
+  animation: slideInRight 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
+}

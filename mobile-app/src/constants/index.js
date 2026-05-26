@@ -24,6 +24,7 @@ export const SITES = [
   'Dee Foundation Omaxe, Faridabad',
   'Hero Homes Ludhiana',
   'Delhi NCR',
+  'Vinfast Jaipur',
 ];
 
 export const CATEGORIES = [
@@ -54,6 +55,7 @@ export const IMPREST_SITES = [
   'Hero Homes Greater Noida',
   'Bansal Tower',
   'KOKO Town, Chandigarh',
+  'Vinfast Jaipur',
   'Head Office',
   'Bangalore Office',
   'Others',
