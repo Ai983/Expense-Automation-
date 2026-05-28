@@ -504,165 +504,163 @@ export default function ImprestQueuePage() {
       {/* ── Full Details Modal ─────────────────────────────────────────────── */}
       {detailReq && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 modal-overlay">
-          <div ref={detailScrollRef} className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto modal-content">
+          <div ref={detailScrollRef} className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto modal-content">
 
             {/* Sticky header */}
-            <div className="sticky top-0 z-10 bg-white border-b border-gray-200 rounded-t-2xl">
-              <div className="p-5 flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <span className="font-mono text-sm text-amber-600 font-bold bg-amber-50 px-2 py-1 rounded-lg">{detailReq.ref_id}</span>
-                  <h2 className="text-lg font-bold text-gray-900">{detailReq.category}</h2>
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLES[detailReq.status] || 'bg-gray-100 text-gray-600'}`}>
-                    {STATUS_LABELS[detailReq.status] || detailReq.status}
-                  </span>
-                </div>
-                <button onClick={() => setDetailReq(null)}
-                  className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 w-8 h-8 rounded-full flex items-center justify-center transition-all shrink-0 text-lg">
-                  ✕
-                </button>
+            <div className="sticky top-0 z-10 bg-white border-b border-gray-200 rounded-t-2xl px-5 py-3 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="font-mono text-sm text-amber-600 font-bold bg-amber-50 px-2 py-1 rounded-lg">{detailReq.ref_id}</span>
+                <h2 className="text-base font-bold text-gray-900">{detailReq.category}</h2>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLES[detailReq.status] || 'bg-gray-100 text-gray-600'}`}>
+                  {STATUS_LABELS[detailReq.status] || detailReq.status}
+                </span>
               </div>
+              <button onClick={() => setDetailReq(null)}
+                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 w-8 h-8 rounded-full flex items-center justify-center transition-all shrink-0">
+                ✕
+              </button>
             </div>
 
-            <div className="p-6 space-y-5">
+            <div className="p-5 space-y-4">
 
-              {/* Employee Info */}
-              <Section title="Employee" accent="bg-blue-400">
-                <Row label="Name" value={detailReq.employee?.name || '—'} />
-                <Row label="Email" value={detailReq.employee?.email || '—'} />
-                <Row label="Phone" value={detailReq.employee?.phone || '—'} />
-                <Row label="Site" value={detailReq.site} />
-              </Section>
-
-              {/* Request Info */}
-              <Section title="Request Details" accent="bg-amber-400">
-                <Row label="Category" value={detailReq.category} />
-                {detailReq.requested_to_name && <Row label="Requested To" value={detailReq.requested_to_name} />}
-                <Row label="People Count" value={detailReq.people_count} />
-                <Row label="Amount Requested" value={fmt(detailReq.amount_requested)} bold />
-                {detailReq.per_person_rate && <Row label="Rate / Person / Day" value={`₹${detailReq.per_person_rate}`} />}
-                {detailReq.purpose && <Row label="Purpose / Notes" value={detailReq.purpose} />}
-                <Row label="Submitted On" value={`${fmtDate(detailReq.submitted_at)} ${fmtTime(detailReq.submitted_at)}`} />
-              </Section>
-
-              {/* Date Range */}
-              {(detailReq.date_from || detailReq.date_to) && (
-                <Section title="Duration" accent="bg-purple-400">
-                  <Row label="From Date" value={fmtDate(detailReq.date_from)} />
-                  <Row label="To Date" value={fmtDate(detailReq.date_to)} />
-                  {detailReq.date_from && detailReq.date_to && (
-                    <Row label="Total Days" value={
-                      Math.max(1, Math.round((new Date(detailReq.date_to) - new Date(detailReq.date_from)) / 86400000) + 1) + ' days'
-                    } />
-                  )}
-                </Section>
-              )}
-
-              {/* Travel Details */}
-              {detailReq.category === 'Travelling' && (
-                <Section title="Travel Details" accent="bg-indigo-400">
-                  {detailReq.travel_subtype && <Row label="Mode" value={detailReq.travel_subtype} />}
-                  {detailReq.travel_from && <Row label="From" value={detailReq.travel_from} />}
-                  {detailReq.travel_to && <Row label="To" value={detailReq.travel_to} />}
-                  {detailReq.travel_date && <Row label="Travel Date" value={fmtDate(detailReq.travel_date)} />}
-                  {detailReq.ai_estimated_amount && <Row label="AI Estimate" value={fmt(detailReq.ai_estimated_amount)} />}
-                  {detailReq.ai_estimated_distance_km && <Row label="Distance" value={`${detailReq.ai_estimated_distance_km} km`} />}
-                  {detailReq.amount_deviation != null && (
-                    <Row label="Deviation from AI"
-                      value={`${fmt(detailReq.amount_deviation)} (${Math.round(Math.abs(detailReq.amount_deviation / detailReq.amount_requested) * 100)}%)`}
-                      className={deviationClass(detailReq.amount_deviation, detailReq.amount_requested)} />
-                  )}
-                  {detailReq.user_edited_amount && <Row label="Amount Edited by User" value="Yes" className="text-orange-600" />}
-                </Section>
-              )}
-
-              {/* Conveyance Details */}
-              {detailReq.category === 'Conveyance' && (
-                <Section title="Conveyance Details" accent="bg-teal-400">
-                  {detailReq.conveyance_mode && <Row label="Mode" value={detailReq.conveyance_mode} />}
-                  {detailReq.vehicle_type && <Row label="Vehicle Type" value={detailReq.vehicle_type} />}
-                  {detailReq.travel_from && <Row label="From" value={detailReq.travel_from} />}
-                  {detailReq.travel_to && <Row label="To" value={detailReq.travel_to} />}
-                  {detailReq.ai_estimated_distance_km && <Row label="Distance" value={`${detailReq.ai_estimated_distance_km} km`} />}
-                </Section>
-              )}
-
-              {/* Labour Details */}
-              {detailReq.category === 'Labour Expense' && detailReq.labour_subcategory && (
-                <Section title="Labour Details" accent="bg-orange-400">
-                  <Row label="Sub-Category" value={detailReq.labour_subcategory} />
-                </Section>
-              )}
-
-              {/* Approval Journey — now a visual timeline */}
-              <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="w-1 h-4 rounded-full bg-green-400" />
-                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Approval Journey</span>
-                </div>
-                <div className="bg-gray-50 rounded-xl px-4 py-4">
-                  <ApprovalTimeline req={detailReq} />
-                  {detailReq.payment_receipt_url && (
-                    <div className="mt-2 pt-2 border-t border-gray-200">
-                      <a href={detailReq.payment_receipt_url} target="_blank" rel="noopener noreferrer"
-                        className="text-sm font-medium text-blue-600 hover:underline flex items-center gap-1">
-                        📎 View Payment Receipt
-                      </a>
+              {/* Top two-column grid: Employee + Request Details side by side */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5"><span className="w-1 h-3 rounded-full bg-blue-400 inline-block" />Employee</p>
+                  <CompactRow label="Name" value={detailReq.employee?.name || '—'} bold />
+                  <CompactRow label="Email" value={detailReq.employee?.email || '—'} />
+                  <CompactRow label="Phone" value={detailReq.employee?.phone || '—'} />
+                  <CompactRow label="Site" value={detailReq.site} />
+                  {detailReq.employee_total_balance > 0 && (
+                    <div className="mt-1 px-2 py-1 bg-red-50 border border-red-200 rounded-lg">
+                      <span className="text-xs font-bold text-red-600">⚠ Prev Balance: {fmt(detailReq.employee_total_balance)}</span>
                     </div>
                   )}
                 </div>
+
+                <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5"><span className="w-1 h-3 rounded-full bg-amber-400 inline-block" />Request Details</p>
+                  <CompactRow label="Amount" value={fmt(detailReq.amount_requested)} bold className="text-gray-900 text-base" />
+                  <CompactRow label="People" value={detailReq.people_count} />
+                  {detailReq.per_person_rate && <CompactRow label="Rate/Person/Day" value={`₹${detailReq.per_person_rate}`} />}
+                  {(detailReq.date_from || detailReq.date_to) && (
+                    <CompactRow label="Duration"
+                      value={`${fmtDate(detailReq.date_from)} – ${fmtDate(detailReq.date_to)}${detailReq.date_from && detailReq.date_to ? ` (${Math.max(1, Math.round((new Date(detailReq.date_to) - new Date(detailReq.date_from)) / 86400000) + 1)}d)` : ''}`} />
+                  )}
+                  {detailReq.purpose && <CompactRow label="Purpose" value={detailReq.purpose} />}
+                  <CompactRow label="Submitted" value={`${fmtDate(detailReq.submitted_at)} ${fmtTime(detailReq.submitted_at)}`} />
+                </div>
               </div>
 
-              {/* Balance Adjustment */}
-              {detailReq.old_balance_deducted > 0 && (
-                <Section title="Balance Adjustment" accent="bg-orange-400">
-                  <Row label="Approved Amount" value={fmt(detailReq.approved_amount || detailReq.amount_requested)} />
-                  <Row label="Old Balance Deducted" value={`−${fmt(detailReq.old_balance_deducted)}`} className="text-orange-600" />
-                  <Row label="Net Amount to Pay" value={fmt(detailReq.net_approved_amount || 0)} bold className="text-green-700" />
-                </Section>
+              {/* Category-specific details — compact single row if small */}
+              {detailReq.category === 'Travelling' && (
+                <div className="bg-indigo-50 rounded-xl p-3 text-sm">
+                  <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-2 flex items-center gap-1.5"><span className="w-1 h-3 rounded-full bg-indigo-400 inline-block" />Travel Details</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                    {detailReq.travel_subtype && <CompactRow label="Mode" value={detailReq.travel_subtype} />}
+                    {detailReq.travel_from && <CompactRow label="From" value={detailReq.travel_from} />}
+                    {detailReq.travel_to && <CompactRow label="To" value={detailReq.travel_to} />}
+                    {detailReq.travel_date && <CompactRow label="Date" value={fmtDate(detailReq.travel_date)} />}
+                    {detailReq.ai_estimated_amount && <CompactRow label="AI Estimate" value={fmt(detailReq.ai_estimated_amount)} />}
+                    {detailReq.ai_estimated_distance_km && <CompactRow label="Distance" value={`${detailReq.ai_estimated_distance_km} km`} />}
+                    {detailReq.amount_deviation != null && (
+                      <CompactRow label="Deviation"
+                        value={`${fmt(detailReq.amount_deviation)} (${Math.round(Math.abs(detailReq.amount_deviation / detailReq.amount_requested) * 100)}%)`}
+                        className={deviationClass(detailReq.amount_deviation, detailReq.amount_requested)} />
+                    )}
+                  </div>
+                </div>
               )}
 
-              {/* Approval Info */}
-              {(detailReq.approved_amount != null || detailReq.rejection_reason) && (
-                <Section title="Approval Info" accent="bg-green-400">
-                  {detailReq.approved_amount != null && (
-                    <Row label="Approved Amount" value={fmt(detailReq.approved_amount)} bold
-                      className={Number(detailReq.approved_amount) < Number(detailReq.amount_requested) ? 'text-blue-600' : 'text-green-600'} />
+              {detailReq.category === 'Conveyance' && (
+                <div className="bg-teal-50 rounded-xl p-3 text-sm">
+                  <p className="text-[10px] font-bold text-teal-500 uppercase tracking-wider mb-2 flex items-center gap-1.5"><span className="w-1 h-3 rounded-full bg-teal-400 inline-block" />Conveyance Details</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                    {detailReq.conveyance_mode && <CompactRow label="Mode" value={detailReq.conveyance_mode} />}
+                    {detailReq.vehicle_type && <CompactRow label="Vehicle" value={detailReq.vehicle_type} />}
+                    {detailReq.travel_from && <CompactRow label="From" value={detailReq.travel_from} />}
+                    {detailReq.travel_to && <CompactRow label="To" value={detailReq.travel_to} />}
+                    {detailReq.ai_estimated_distance_km && <CompactRow label="Distance" value={`${detailReq.ai_estimated_distance_km} km`} />}
+                  </div>
+                </div>
+              )}
+
+              {detailReq.category === 'Labour Expense' && detailReq.labour_subcategory && (
+                <div className="bg-orange-50 rounded-xl p-3 text-sm">
+                  <p className="text-[10px] font-bold text-orange-400 uppercase tracking-wider mb-1 flex items-center gap-1.5"><span className="w-1 h-3 rounded-full bg-orange-400 inline-block" />Labour Details</p>
+                  <CompactRow label="Sub-Category" value={detailReq.labour_subcategory} />
+                </div>
+              )}
+
+              {/* Approval Journey */}
+              <div className="bg-gray-50 rounded-xl p-4">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5"><span className="w-1 h-3 rounded-full bg-green-400 inline-block" />Approval Journey</p>
+                <ApprovalTimeline req={detailReq} />
+                {detailReq.payment_receipt_url && (
+                  <div className="mt-2 pt-2 border-t border-gray-200">
+                    <a href={detailReq.payment_receipt_url} target="_blank" rel="noopener noreferrer"
+                      className="text-sm font-medium text-blue-600 hover:underline">📎 View Payment Receipt</a>
+                  </div>
+                )}
+              </div>
+
+              {/* Balance Adjustment + Approval Info — side by side if both exist */}
+              {(detailReq.old_balance_deducted > 0 || detailReq.approved_amount != null || detailReq.rejection_reason) && (
+                <div className="grid grid-cols-2 gap-4">
+                  {detailReq.old_balance_deducted > 0 && (
+                    <div className="bg-orange-50 rounded-xl p-3 text-sm">
+                      <p className="text-[10px] font-bold text-orange-400 uppercase tracking-wider mb-2 flex items-center gap-1.5"><span className="w-1 h-3 rounded-full bg-orange-400 inline-block" />Balance Adjustment</p>
+                      <CompactRow label="Approved" value={fmt(detailReq.approved_amount || detailReq.amount_requested)} />
+                      <CompactRow label="Deducted" value={`−${fmt(detailReq.old_balance_deducted)}`} className="text-orange-600" />
+                      <CompactRow label="Net Pay" value={fmt(detailReq.net_approved_amount || 0)} bold className="text-green-700" />
+                    </div>
                   )}
-                  {detailReq.approver?.name && <Row label="Approved By" value={detailReq.approver.name} />}
-                  {detailReq.approved_at && <Row label="Approved On" value={fmtDate(detailReq.approved_at)} />}
-                  {detailReq.rejection_reason && <Row label="Rejection Reason" value={detailReq.rejection_reason} className="text-red-600" />}
-                </Section>
+                  {(detailReq.approved_amount != null || detailReq.rejection_reason) && (
+                    <div className="bg-green-50 rounded-xl p-3 text-sm">
+                      <p className="text-[10px] font-bold text-green-500 uppercase tracking-wider mb-2 flex items-center gap-1.5"><span className="w-1 h-3 rounded-full bg-green-400 inline-block" />Approval Info</p>
+                      {detailReq.approved_amount != null && (
+                        <CompactRow label="Approved Amount" value={fmt(detailReq.approved_amount)} bold
+                          className={Number(detailReq.approved_amount) < Number(detailReq.amount_requested) ? 'text-blue-600' : 'text-green-600'} />
+                      )}
+                      {detailReq.approver?.name && <CompactRow label="By" value={detailReq.approver.name} />}
+                      {detailReq.approved_at && <CompactRow label="On" value={fmtDate(detailReq.approved_at)} />}
+                      {detailReq.rejection_reason && <CompactRow label="Reason" value={detailReq.rejection_reason} className="text-red-600" />}
+                    </div>
+                  )}
+                </div>
               )}
 
-              {/* Balance Tracking */}
               {detailReq.old_balance != null && (
-                <Section title="Balance Tracking" accent="bg-red-400">
-                  <Row label="Expenses Submitted" value={fmt(detailReq.total_expenses_submitted || 0)} />
-                  <Row label="Old Balance"
-                    value={detailReq.old_balance > 0 ? fmt(detailReq.old_balance) : 'Fully Settled'}
-                    bold className={detailReq.old_balance > 0 ? 'text-red-600' : 'text-green-600'} />
-                </Section>
+                <div className="bg-red-50 rounded-xl p-3 text-sm">
+                  <p className="text-[10px] font-bold text-red-400 uppercase tracking-wider mb-2 flex items-center gap-1.5"><span className="w-1 h-3 rounded-full bg-red-400 inline-block" />Balance Tracking</p>
+                  <div className="grid grid-cols-2 gap-x-4">
+                    <CompactRow label="Expenses Submitted" value={fmt(detailReq.total_expenses_submitted || 0)} />
+                    <CompactRow label="Old Balance"
+                      value={detailReq.old_balance > 0 ? fmt(detailReq.old_balance) : 'Fully Settled'}
+                      bold className={detailReq.old_balance > 0 ? 'text-red-600' : 'text-green-600'} />
+                  </div>
+                </div>
               )}
             </div>
 
-            {/* Footer */}
-            <div className="sticky bottom-0 bg-white border-t border-gray-200 rounded-b-2xl p-4 flex justify-end gap-3">
+            {/* Sticky footer */}
+            <div className="sticky bottom-0 bg-white border-t border-gray-200 rounded-b-2xl px-5 py-3 flex justify-end gap-3">
               {detailReq.current_stage === 's3_pending' && (
                 <>
                   <button onClick={() => { setDetailReq(null); openApprove(detailReq); }}
                     className="px-5 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 active:scale-95 transition-all">
-                    Approve
+                    ✓ Approve
                   </button>
                   <button onClick={() => { setDetailReq(null); openReject(detailReq); }}
                     className="px-5 py-2 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 active:scale-95 transition-all">
-                    Reject
+                    ✗ Reject
                   </button>
                 </>
               )}
               {detailReq.current_stage === 's3_approved' && !detailReq.paid && (
                 <button onClick={() => { setDetailReq(null); setPayReq(detailReq); setPayReceipt(null); setActionError(''); }}
                   className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 active:scale-95 transition-all">
-                  Pay Now
+                  💸 Pay Now
                 </button>
               )}
               <button onClick={() => setDetailReq(null)}
@@ -808,6 +806,17 @@ function Row({ label, value, bold, className }) {
     <div className="flex justify-between gap-4">
       <span className="text-gray-500 shrink-0">{label}</span>
       <span className={`font-medium text-gray-900 text-right ${bold ? 'font-bold' : ''} ${className || ''}`}>
+        {value ?? '—'}
+      </span>
+    </div>
+  );
+}
+
+function CompactRow({ label, value, bold, className }) {
+  return (
+    <div className="flex justify-between gap-2 text-xs">
+      <span className="text-gray-400 shrink-0">{label}</span>
+      <span className={`font-medium text-gray-800 text-right break-words max-w-[60%] ${bold ? 'font-bold' : ''} ${className || ''}`}>
         {value ?? '—'}
       </span>
     </div>
