@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../services/api';
 
 const IMPREST_CATEGORIES = [
@@ -502,8 +503,8 @@ export default function ImprestQueuePage() {
       </div>
 
       {/* ── Full Details Modal ─────────────────────────────────────────────── */}
-      {detailReq && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 modal-overlay">
+      <Modal open={!!detailReq}>
+        {detailReq && (
           <div ref={detailScrollRef} className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto modal-content">
 
             {/* Sticky header */}
@@ -669,12 +670,12 @@ export default function ImprestQueuePage() {
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
 
       {/* ── Approve / Reject Modal ─────────────────────────────────────────── */}
-      {selected && modalMode && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 modal-overlay">
+      <Modal open={!!(selected && modalMode)}>
+        {selected && modalMode && (
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg modal-content">
             <div className="p-5 border-b border-gray-200">
               <h2 className="text-lg font-bold text-gray-900">
@@ -748,12 +749,12 @@ export default function ImprestQueuePage() {
               )}
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
 
       {/* ── Pay Modal ─────────────────────────────────────────────────────── */}
-      {payReq && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 modal-overlay">
+      <Modal open={!!payReq}>
+        {payReq && (
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md modal-content">
             <div className="p-5 border-b">
               <h2 className="text-lg font-bold text-gray-900">💸 Mark as Paid</h2>
@@ -783,9 +784,29 @@ export default function ImprestQueuePage() {
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
     </div>
+  );
+}
+
+// Portal wrapper — renders outside the scrolled page tree so fixed positioning
+// is always relative to the viewport, never to a scrolled ancestor.
+function Modal({ open, children }) {
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
+
+  if (!open) return null;
+  return createPortal(
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', backgroundColor: 'rgba(0,0,0,0.5)' }}
+      className="modal-overlay">
+      {children}
+    </div>,
+    document.body
   );
 }
 
