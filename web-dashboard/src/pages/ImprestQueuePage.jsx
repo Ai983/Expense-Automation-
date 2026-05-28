@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../services/api';
 
 const IMPREST_CATEGORIES = [
   'Food Expense', 'Site Room Rent', 'Travelling', 'Conveyance',
-  'Labour Expense', 'Porter', 'Hotel Expense', 'Site Expense', 'Other',
+  'Labour Expense', 'Porter', 'Hotel Expense', 'Site Expense',
+  'Material Expense', 'Office Expense', 'Other',
 ];
 
 const IMPREST_SITES = [
@@ -23,10 +24,10 @@ const STATUS_OPTIONS = [
 ];
 
 const STATUS_STYLES = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  approved: 'bg-green-100 text-green-800',
-  partially_approved: 'bg-blue-100 text-blue-800',
-  rejected: 'bg-red-100 text-red-800',
+  pending: 'bg-yellow-100 text-yellow-800 border border-yellow-200',
+  approved: 'bg-green-100 text-green-800 border border-green-200',
+  partially_approved: 'bg-blue-100 text-blue-800 border border-blue-200',
+  rejected: 'bg-red-100 text-red-800 border border-red-200',
 };
 
 const STATUS_LABELS = {
@@ -45,6 +46,11 @@ function fmtDate(d) {
   return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+function fmtTime(d) {
+  if (!d) return '';
+  return new Date(d).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+}
+
 function deviationClass(deviation, requested) {
   if (!deviation || !requested) return 'text-gray-500';
   const pct = Math.abs(deviation / requested) * 100;
@@ -53,7 +59,6 @@ function deviationClass(deviation, requested) {
   return 'text-green-600';
 }
 
-// Returns a one-line summary of category-specific details
 function categoryDetail(req) {
   const parts = [];
   if (req.category === 'Travelling' && req.travel_subtype) parts.push(req.travel_subtype);
@@ -70,27 +75,96 @@ function categoryDetail(req) {
 function downloadImprestCSV(requests) {
   const headers = ['Ref ID', 'Employee', 'Site', 'Category', 'Purpose', 'People', 'Amount Requested', 'Approved Amount', 'Old Balance', 'Status', 'Founder Review', 'Submitted'];
   const rows = requests.map((r) => [
-    r.ref_id,
-    r.employee?.name || '',
-    r.site,
-    r.category,
-    (r.purpose || '').replace(/"/g, '""'),
-    r.people_count,
-    r.amount_requested,
-    r.approved_amount ?? '',
-    r.old_balance ?? '',
-    r.status,
-    r.founder_review_status || '',
+    r.ref_id, r.employee?.name || '', r.site, r.category,
+    (r.purpose || '').replace(/"/g, '""'), r.people_count,
+    r.amount_requested, r.approved_amount ?? '', r.old_balance ?? '',
+    r.status, r.founder_review_status || '',
     new Date(r.submitted_at).toLocaleDateString('en-IN'),
   ]);
   const csv = [headers, ...rows].map((r) => r.map((v) => `"${v}"`).join(',')).join('\n');
-  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url;
-  a.download = `imprest_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  a.href = url; a.download = `imprest_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+// ── Approval Timeline ──────────────────────────────────────────────────────
+function ApprovalTimeline({ req }) {
+  const isDirector = req.approval_route === 'avisha_director_finance';
+  const steps = [
+    {
+      label: 'S1 — Review',
+      sub: 'Avisha',
+      done: !!req.s1_approved_at,
+      rejected: false,
+      date: req.s1_approved_at,
+      note: req.s1_notes,
+    },
+    {
+      label: isDirector ? 'Director / Founder' : 'S2 — Ritu',
+      sub: 'Approval',
+      done: !!(req.s2_approved_at || req.founder_review_status === 'approved'),
+      rejected: req.current_stage === 'director_rejected' || req.founder_review_status === 'rejected',
+      date: req.s2_approved_at || req.founder_review_at,
+      note: req.s2_notes || req.founder_review_comment,
+      extra: req.director_approved_amount ? `Ceiling: ${fmt(req.director_approved_amount)}` : null,
+    },
+    {
+      label: 'Finance',
+      sub: 'Stage 3',
+      done: req.current_stage === 's3_approved' || !!req.paid,
+      rejected: req.current_stage === 's3_rejected',
+      date: req.approved_at,
+      note: req.rejection_reason && req.current_stage === 's3_rejected' ? req.rejection_reason : null,
+    },
+    {
+      label: 'Payment',
+      sub: req.paid ? fmt(req.paid_amount) : 'Not yet paid',
+      done: !!req.paid,
+      rejected: false,
+      date: req.paid_at,
+      note: null,
+    },
+  ];
+
+  return (
+    <div>
+      {steps.map((step, i) => (
+        <div key={i} className="flex gap-3">
+          <div className="flex flex-col items-center">
+            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 border-2 ${
+              step.rejected ? 'bg-red-500 border-red-500 text-white' :
+              step.done ? 'bg-green-500 border-green-500 text-white' :
+              'bg-white border-gray-300 text-gray-400'
+            }`}>
+              {step.rejected ? '✗' : step.done ? '✓' : i + 1}
+            </div>
+            {i < steps.length - 1 && (
+              <div className={`w-0.5 my-1 ${step.done ? 'bg-green-300' : 'bg-gray-200'}`} style={{ minHeight: 20 }} />
+            )}
+          </div>
+          <div className="pb-4 flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <span className="text-sm font-semibold text-gray-900">{step.label}</span>
+                {step.sub && <span className="text-xs text-gray-500 ml-1.5">{step.sub}</span>}
+              </div>
+              {step.date ? (
+                <span className="text-xs text-gray-400 shrink-0">{fmtDate(step.date)}</span>
+              ) : step.rejected ? (
+                <span className="text-xs text-red-600 font-semibold">Rejected</span>
+              ) : !step.done ? (
+                <span className="text-xs text-yellow-600 font-medium">Pending</span>
+              ) : null}
+            </div>
+            {step.note && <p className="text-xs italic text-gray-600 mt-0.5 break-words">"{step.note}"</p>}
+            {step.extra && <p className="text-xs text-purple-600 font-semibold mt-0.5">{step.extra}</p>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function ImprestQueuePage() {
@@ -100,7 +174,6 @@ export default function ImprestQueuePage() {
   const [page, setPage] = useState(1);
   const limit = 50;
 
-  // Filters
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterSite, setFilterSite] = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
@@ -108,16 +181,24 @@ export default function ImprestQueuePage() {
   const [filterDateTo, setFilterDateTo] = useState('');
   const [filterEmployeeName, setFilterEmployeeName] = useState('');
 
-  // Modals
-  const [detailReq, setDetailReq] = useState(null);           // full details modal
-  const [selected, setSelected] = useState(null);             // approve/reject modal
+  const [detailReq, setDetailReq] = useState(null);
+  const [selected, setSelected] = useState(null);
   const [modalMode, setModalMode] = useState(null);
   const [approveAmount, setApproveAmount] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState('');
-  const [payReq, setPayReq] = useState(null);                 // pay modal
+  const [payReq, setPayReq] = useState(null);
   const [payReceipt, setPayReceipt] = useState(null);
+
+  const detailScrollRef = useRef(null);
+
+  // Scroll detail modal to top every time a new one opens
+  useEffect(() => {
+    if (detailReq && detailScrollRef.current) {
+      detailScrollRef.current.scrollTop = 0;
+    }
+  }, [detailReq]);
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
@@ -146,8 +227,7 @@ export default function ImprestQueuePage() {
     setRejectReason(''); setActionError(''); setModalMode('approve');
   };
   const openReject = (req) => {
-    setSelected(req); setRejectReason('');
-    setActionError(''); setModalMode('reject');
+    setSelected(req); setRejectReason(''); setActionError(''); setModalMode('reject');
   };
   const closeModal = () => {
     setSelected(null); setModalMode(null);
@@ -189,94 +269,106 @@ export default function ImprestQueuePage() {
   };
 
   const totalPages = Math.ceil(total / limit);
+  const clearFilters = () => {
+    setFilterStatus('all'); setFilterCategory('all'); setFilterSite('all');
+    setFilterDateFrom(''); setFilterDateTo(''); setFilterEmployeeName(''); setPage(1);
+  };
+  const hasFilters = filterStatus !== 'all' || filterSite !== 'all' || filterCategory !== 'all' || filterDateFrom || filterDateTo || filterEmployeeName;
 
   return (
     <div>
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Imprest Queue</h1>
-        <p className="text-sm text-gray-500 mt-1">Review and approve advance requests from site engineers</p>
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6 flex flex-wrap gap-3">
-        <input
-          type="text" placeholder="Search employee name..."
-          value={filterEmployeeName}
-          onChange={(e) => { setFilterEmployeeName(e.target.value); setPage(1); }}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400 w-48"
-        />
-        <select value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400">
-          {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-        <select value={filterSite} onChange={(e) => { setFilterSite(e.target.value); setPage(1); }}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400">
-          <option value="all">All Sites</option>
-          {IMPREST_SITES.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <select value={filterCategory} onChange={(e) => { setFilterCategory(e.target.value); setPage(1); }}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400">
-          <option value="all">All Categories</option>
-          {IMPREST_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <input type="date" value={filterDateFrom}
-          onChange={(e) => { setFilterDateFrom(e.target.value); setPage(1); }}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400"
-        />
-        <input type="date" value={filterDateTo}
-          onChange={(e) => { setFilterDateTo(e.target.value); setPage(1); }}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400"
-        />
-        <button
-          onClick={() => { setFilterStatus('all'); setFilterCategory('all'); setFilterSite('all'); setFilterDateFrom(''); setFilterDateTo(''); setFilterEmployeeName(''); setPage(1); }}
-          className="text-sm text-gray-500 hover:text-gray-700 px-2"
-        >Clear</button>
-        <span className="ml-auto text-sm text-gray-500 self-center">{total} request{total !== 1 ? 's' : ''}</span>
-        <button
-          onClick={() => downloadImprestCSV(requests)}
-          className="btn-secondary text-sm whitespace-nowrap"
-          title="Download filtered data as CSV"
-        >
-          Download CSV
+      <div className="mb-5 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Imprest Queue</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Review and approve advance requests from site engineers
+            {total > 0 && <span className="ml-2 text-amber-600 font-semibold">{total} requests</span>}
+          </p>
+        </div>
+        <button onClick={() => downloadImprestCSV(requests)} className="btn-secondary text-sm whitespace-nowrap">
+          ↓ Download CSV
         </button>
       </div>
 
+      {/* Filters */}
+      <div className="bg-white rounded-xl border border-gray-200 p-3 mb-5">
+        <div className="flex flex-wrap gap-2 items-center">
+          <input
+            type="text" placeholder="Search employee…"
+            value={filterEmployeeName}
+            onChange={(e) => { setFilterEmployeeName(e.target.value); setPage(1); }}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400 w-44"
+          />
+          <select value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400">
+            {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <select value={filterSite} onChange={(e) => { setFilterSite(e.target.value); setPage(1); }}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400">
+            <option value="all">All Sites</option>
+            {IMPREST_SITES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select value={filterCategory} onChange={(e) => { setFilterCategory(e.target.value); setPage(1); }}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400">
+            <option value="all">All Categories</option>
+            {IMPREST_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <input type="date" value={filterDateFrom}
+            onChange={(e) => { setFilterDateFrom(e.target.value); setPage(1); }}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400"
+          />
+          <input type="date" value={filterDateTo}
+            onChange={(e) => { setFilterDateTo(e.target.value); setPage(1); }}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-400"
+          />
+          {hasFilters && (
+            <button onClick={clearFilters}
+              className="text-sm text-red-500 hover:text-red-700 font-medium px-2 transition-colors">
+              ✕ Clear
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
         {loading ? (
-          <div className="flex items-center justify-center h-48 text-gray-400 text-sm">Loading...</div>
+          <div className="divide-y divide-gray-100">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="px-4 py-4 flex gap-4 items-center">
+                <div className="skeleton h-3.5 w-28 rounded" />
+                <div className="skeleton h-3.5 w-36 rounded" />
+                <div className="skeleton h-3.5 w-24 rounded" />
+                <div className="skeleton h-3.5 w-44 rounded" />
+                <div className="ml-auto skeleton h-3.5 w-16 rounded" />
+                <div className="skeleton h-7 w-16 rounded-lg" />
+              </div>
+            ))}
+          </div>
         ) : requests.length === 0 ? (
-          <div className="flex items-center justify-center h-48 text-gray-400 text-sm">No requests found.</div>
+          <div className="flex flex-col items-center justify-center h-48 text-gray-400 gap-2">
+            <span className="text-3xl">📭</span>
+            <span className="text-sm">No requests found</span>
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Ref ID</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Employee</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Category & Details</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Purpose</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">People</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Requested</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Approved</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Old Balance</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Founder Review</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Submitted</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions</th>
+                  {['Ref ID', 'Employee', 'Category & Details', 'Purpose', 'People', 'Requested', 'Approved', 'Old Balance', 'Status', 'Founder Review', 'Submitted', 'Actions'].map((h, i) => (
+                    <th key={h} className={`px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide ${i >= 4 && i <= 7 ? 'text-right' : 'text-left'}`}>{h}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {requests.map((req) => {
                   const detail = categoryDetail(req);
                   return (
-                    <tr key={req.id} className="hover:bg-amber-50/40 transition-colors">
+                    <tr key={req.id} className="hover:bg-amber-50/30 transition-colors group">
                       <td className="px-4 py-3">
-                        <button
-                          onClick={() => setDetailReq(req)}
-                          className="font-mono text-xs text-amber-600 font-semibold hover:underline text-left"
-                        >
+                        <button onClick={() => setDetailReq(req)}
+                          className="font-mono text-xs text-amber-600 font-semibold hover:underline text-left group-hover:text-amber-700">
                           {req.ref_id}
                         </button>
                       </td>
@@ -286,12 +378,12 @@ export default function ImprestQueuePage() {
                         {req.employee?.phone && <div className="text-xs text-gray-400">{req.employee.phone}</div>}
                         {req.employee_total_balance > 0 && (
                           <div className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded bg-red-50 border border-red-200">
-                            <span className="text-xs font-semibold text-red-600">Prev Balance: {fmt(req.employee_total_balance)}</span>
+                            <span className="text-xs font-semibold text-red-600">⚠ {fmt(req.employee_total_balance)}</span>
                           </div>
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="font-medium text-gray-800">{req.category}</div>
+                        <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-100">{req.category}</span>
                         {detail && <div className="text-xs text-gray-500 mt-0.5 max-w-xs">{detail}</div>}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-600 max-w-[160px]">
@@ -322,13 +414,11 @@ export default function ImprestQueuePage() {
                           )
                         ) : <span className="text-gray-300 text-xs">—</span>}
                         {req.total_expenses_submitted > 0 && (
-                          <div className="text-xs text-gray-400 mt-0.5">
-                            Spent: {fmt(req.total_expenses_submitted)}
-                          </div>
+                          <div className="text-xs text-gray-400 mt-0.5">Spent: {fmt(req.total_expenses_submitted)}</div>
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${STATUS_STYLES[req.status] || 'bg-gray-100 text-gray-600'}`}>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[req.status] || 'bg-gray-100 text-gray-600'}`}>
                           {STATUS_LABELS[req.status] || req.status}
                         </span>
                         {req.rejection_reason && (
@@ -337,76 +427,38 @@ export default function ImprestQueuePage() {
                           </div>
                         )}
                       </td>
-                      {/* Founder Review */}
                       <td className="px-4 py-3">
                         {req.requires_founder_approval ? (
                           <div>
-                            <div className="flex items-center gap-1">
-                              <span className="text-xs text-gray-500">{req.requested_to_user?.name || (req.approval_route === 'avisha_director_finance' ? 'Bhaskar Sir' : 'Ritu Ma\'am')}</span>
-                            </div>
-                            {req.founder_review_status === 'approved' && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-700 mt-1">
-                                Approved
-                              </span>
-                            )}
-                            {req.founder_review_status === 'rejected' && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-700 mt-1">
-                                Rejected
-                              </span>
-                            )}
-                            {req.founder_review_status === 'pending' && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-yellow-100 text-yellow-800 mt-1">
-                                Awaiting
-                              </span>
-                            )}
-                            {req.founder_review_comment && (
-                              <div className="text-xs text-gray-500 mt-1 max-w-[140px] line-clamp-2" title={req.founder_review_comment}>
-                                "{req.founder_review_comment}"
-                              </div>
-                            )}
+                            <div className="text-xs text-gray-500">{req.approval_route === 'avisha_director_finance' ? 'Bhaskar Sir' : "Ritu Ma'am"}</div>
+                            {req.founder_review_status === 'approved' && <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-green-100 text-green-700 border border-green-200">Approved</span>}
+                            {req.founder_review_status === 'rejected' && <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-red-100 text-red-700 border border-red-200">Rejected</span>}
+                            {req.founder_review_status === 'pending' && <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-yellow-100 text-yellow-800 border border-yellow-200">Awaiting</span>}
                           </div>
-                        ) : (
-                          <span className="text-xs text-gray-300">N/A</span>
-                        )}
+                        ) : <span className="text-xs text-gray-300">N/A</span>}
                       </td>
-                      <td className="px-4 py-3 text-xs text-gray-500">
-                        {fmtDate(req.submitted_at)}
-                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{fmtDate(req.submitted_at)}</td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1">
-                          <button
-                            onClick={() => setDetailReq(req)}
-                            className="text-xs bg-gray-100 text-gray-700 px-3 py-1 rounded-lg hover:bg-gray-200 transition-colors text-left"
-                          >
+                          <button onClick={() => setDetailReq(req)}
+                            className="text-xs bg-gray-100 text-gray-700 px-3 py-1 rounded-lg hover:bg-gray-200 transition-colors font-medium">
                             Details
                           </button>
                           {req.current_stage === 'director_rejected' && (
-                            <div className="text-xs bg-red-50 text-red-700 px-2 py-1 rounded">
-                              Rejected by Director
-                            </div>
+                            <span className="text-xs bg-red-50 text-red-700 px-2 py-1 rounded text-center">Dir. Rejected</span>
                           )}
                           {req.current_stage === 's3_pending' && (
                             <>
-                              <button onClick={() => openApprove(req)}
-                                className="text-xs bg-green-600 text-white px-3 py-1 rounded-lg hover:bg-green-700 transition-colors">
-                                Approve
-                              </button>
-                              <button onClick={() => openReject(req)}
-                                className="text-xs bg-red-600 text-white px-3 py-1 rounded-lg hover:bg-red-700 transition-colors">
-                                Reject
-                              </button>
+                              <button onClick={() => openApprove(req)} className="text-xs bg-green-600 text-white px-3 py-1 rounded-lg hover:bg-green-700 transition-colors font-medium">Approve</button>
+                              <button onClick={() => openReject(req)} className="text-xs bg-red-600 text-white px-3 py-1 rounded-lg hover:bg-red-700 transition-colors font-medium">Reject</button>
                             </>
                           )}
                           {req.current_stage === 's3_approved' && !req.paid && (
                             <button onClick={() => { setPayReq(req); setPayReceipt(null); setActionError(''); }}
-                              className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 transition-colors">
-                              Pay
-                            </button>
+                              className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 transition-colors font-medium">Pay</button>
                           )}
                           {req.paid && (
-                            <span className="text-xs text-green-600 font-semibold">
-                              Paid {fmtDate(req.paid_at)}
-                            </span>
+                            <span className="text-xs text-green-600 font-semibold">✓ Paid {fmtDate(req.paid_at)}</span>
                           )}
                         </div>
                       </td>
@@ -418,37 +470,63 @@ export default function ImprestQueuePage() {
           </div>
         )}
 
+        {/* Pagination */}
         {totalPages > 1 && (
-          <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between">
+          <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between bg-gray-50/50">
             <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}
-              className="text-sm text-gray-600 disabled:text-gray-300 hover:text-gray-900">← Previous</button>
-            <span className="text-sm text-gray-500">Page {page} of {totalPages}</span>
+              className="flex items-center gap-1 text-sm text-gray-600 disabled:text-gray-300 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg hover:bg-white hover:shadow-sm disabled:hover:bg-transparent disabled:hover:shadow-none transition-all border border-transparent hover:border-gray-200 disabled:border-transparent">
+              ← Previous
+            </button>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+                .reduce((acc, p, i, arr) => {
+                  if (i > 0 && p - arr[i - 1] > 1) acc.push('…');
+                  acc.push(p); return acc;
+                }, [])
+                .map((p, i) => p === '…' ? (
+                  <span key={`ellipsis-${i}`} className="text-gray-400 px-1 text-sm">…</span>
+                ) : (
+                  <button key={p} onClick={() => setPage(p)}
+                    className={`w-8 h-8 rounded-lg text-sm font-medium transition-all ${p === page ? 'bg-amber-500 text-white shadow-sm' : 'text-gray-600 hover:bg-white hover:shadow-sm border border-transparent hover:border-gray-200'}`}>
+                    {p}
+                  </button>
+                ))}
+            </div>
             <button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}
-              className="text-sm text-gray-600 disabled:text-gray-300 hover:text-gray-900">Next →</button>
+              className="flex items-center gap-1 text-sm text-gray-600 disabled:text-gray-300 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg hover:bg-white hover:shadow-sm disabled:hover:bg-transparent disabled:hover:shadow-none transition-all border border-transparent hover:border-gray-200 disabled:border-transparent">
+              Next →
+            </button>
           </div>
         )}
       </div>
 
       {/* ── Full Details Modal ─────────────────────────────────────────────── */}
       {detailReq && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            {/* Header */}
-            <div className="p-6 border-b border-gray-200 flex items-start justify-between">
-              <div>
-                <div className="font-mono text-sm text-amber-600 font-semibold">{detailReq.ref_id}</div>
-                <h2 className="text-lg font-bold text-gray-900 mt-1">{detailReq.category}</h2>
-                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium mt-1 ${STATUS_STYLES[detailReq.status] || 'bg-gray-100 text-gray-600'}`}>
-                  {STATUS_LABELS[detailReq.status] || detailReq.status}
-                </span>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 modal-overlay">
+          <div ref={detailScrollRef} className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto modal-content">
+
+            {/* Sticky header */}
+            <div className="sticky top-0 z-10 bg-white border-b border-gray-200 rounded-t-2xl">
+              <div className="p-5 flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="font-mono text-sm text-amber-600 font-bold bg-amber-50 px-2 py-1 rounded-lg">{detailReq.ref_id}</span>
+                  <h2 className="text-lg font-bold text-gray-900">{detailReq.category}</h2>
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLES[detailReq.status] || 'bg-gray-100 text-gray-600'}`}>
+                    {STATUS_LABELS[detailReq.status] || detailReq.status}
+                  </span>
+                </div>
+                <button onClick={() => setDetailReq(null)}
+                  className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 w-8 h-8 rounded-full flex items-center justify-center transition-all shrink-0 text-lg">
+                  ✕
+                </button>
               </div>
-              <button onClick={() => setDetailReq(null)} className="text-gray-400 hover:text-gray-600 text-xl font-bold ml-4">✕</button>
             </div>
 
             <div className="p-6 space-y-5">
 
               {/* Employee Info */}
-              <Section title="Employee">
+              <Section title="Employee" accent="bg-blue-400">
                 <Row label="Name" value={detailReq.employee?.name || '—'} />
                 <Row label="Email" value={detailReq.employee?.email || '—'} />
                 <Row label="Phone" value={detailReq.employee?.phone || '—'} />
@@ -456,21 +534,19 @@ export default function ImprestQueuePage() {
               </Section>
 
               {/* Request Info */}
-              <Section title="Request Details">
+              <Section title="Request Details" accent="bg-amber-400">
                 <Row label="Category" value={detailReq.category} />
                 {detailReq.requested_to_name && <Row label="Requested To" value={detailReq.requested_to_name} />}
                 <Row label="People Count" value={detailReq.people_count} />
                 <Row label="Amount Requested" value={fmt(detailReq.amount_requested)} bold />
-                {detailReq.per_person_rate && (
-                  <Row label="Rate / Person / Day" value={`₹${detailReq.per_person_rate}`} />
-                )}
+                {detailReq.per_person_rate && <Row label="Rate / Person / Day" value={`₹${detailReq.per_person_rate}`} />}
                 {detailReq.purpose && <Row label="Purpose / Notes" value={detailReq.purpose} />}
-                <Row label="Submitted On" value={fmtDate(detailReq.submitted_at)} />
+                <Row label="Submitted On" value={`${fmtDate(detailReq.submitted_at)} ${fmtTime(detailReq.submitted_at)}`} />
               </Section>
 
-              {/* Date Range (Food / Site Room / Hotel) */}
+              {/* Date Range */}
               {(detailReq.date_from || detailReq.date_to) && (
-                <Section title="Duration">
+                <Section title="Duration" accent="bg-purple-400">
                   <Row label="From Date" value={fmtDate(detailReq.date_from)} />
                   <Row label="To Date" value={fmtDate(detailReq.date_to)} />
                   {detailReq.date_from && detailReq.date_to && (
@@ -483,109 +559,74 @@ export default function ImprestQueuePage() {
 
               {/* Travel Details */}
               {detailReq.category === 'Travelling' && (
-                <Section title="Travel Details">
+                <Section title="Travel Details" accent="bg-indigo-400">
                   {detailReq.travel_subtype && <Row label="Mode" value={detailReq.travel_subtype} />}
                   {detailReq.travel_from && <Row label="From" value={detailReq.travel_from} />}
                   {detailReq.travel_to && <Row label="To" value={detailReq.travel_to} />}
                   {detailReq.travel_date && <Row label="Travel Date" value={fmtDate(detailReq.travel_date)} />}
-                  {detailReq.ai_estimated_amount && (
-                    <Row label="AI Estimate" value={fmt(detailReq.ai_estimated_amount)} />
-                  )}
-                  {detailReq.ai_estimated_distance_km && (
-                    <Row label="Distance" value={`${detailReq.ai_estimated_distance_km} km`} />
-                  )}
+                  {detailReq.ai_estimated_amount && <Row label="AI Estimate" value={fmt(detailReq.ai_estimated_amount)} />}
+                  {detailReq.ai_estimated_distance_km && <Row label="Distance" value={`${detailReq.ai_estimated_distance_km} km`} />}
                   {detailReq.amount_deviation != null && (
-                    <Row
-                      label="Deviation from AI"
+                    <Row label="Deviation from AI"
                       value={`${fmt(detailReq.amount_deviation)} (${Math.round(Math.abs(detailReq.amount_deviation / detailReq.amount_requested) * 100)}%)`}
-                      className={deviationClass(detailReq.amount_deviation, detailReq.amount_requested)}
-                    />
+                      className={deviationClass(detailReq.amount_deviation, detailReq.amount_requested)} />
                   )}
-                  {detailReq.user_edited_amount && (
-                    <Row label="Amount Edited by User" value="Yes" className="text-orange-600" />
-                  )}
+                  {detailReq.user_edited_amount && <Row label="Amount Edited by User" value="Yes" className="text-orange-600" />}
                 </Section>
               )}
 
               {/* Conveyance Details */}
               {detailReq.category === 'Conveyance' && (
-                <Section title="Conveyance Details">
+                <Section title="Conveyance Details" accent="bg-teal-400">
                   {detailReq.conveyance_mode && <Row label="Mode" value={detailReq.conveyance_mode} />}
                   {detailReq.vehicle_type && <Row label="Vehicle Type" value={detailReq.vehicle_type} />}
                   {detailReq.travel_from && <Row label="From" value={detailReq.travel_from} />}
                   {detailReq.travel_to && <Row label="To" value={detailReq.travel_to} />}
-                  {detailReq.ai_estimated_distance_km && (
-                    <Row label="Distance" value={`${detailReq.ai_estimated_distance_km} km`} />
-                  )}
+                  {detailReq.ai_estimated_distance_km && <Row label="Distance" value={`${detailReq.ai_estimated_distance_km} km`} />}
                 </Section>
               )}
 
               {/* Labour Details */}
               {detailReq.category === 'Labour Expense' && detailReq.labour_subcategory && (
-                <Section title="Labour Details">
+                <Section title="Labour Details" accent="bg-orange-400">
                   <Row label="Sub-Category" value={detailReq.labour_subcategory} />
                 </Section>
               )}
 
-              {/* Approval Journey */}
-              <Section title="Approval Journey">
-                <Row label="Stage 1 (Review)" value={
-                  detailReq.s1_approved_at ? `Approved on ${fmtDate(detailReq.s1_approved_at)}` : 'Pending'
-                } className={detailReq.s1_approved_at ? 'text-green-600' : 'text-yellow-600'} />
-                {detailReq.s1_notes && <Row label="S1 Notes" value={detailReq.s1_notes} />}
+              {/* Approval Journey — now a visual timeline */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-1 h-4 rounded-full bg-green-400" />
+                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Approval Journey</span>
+                </div>
+                <div className="bg-gray-50 rounded-xl px-4 py-4">
+                  <ApprovalTimeline req={detailReq} />
+                  {detailReq.payment_receipt_url && (
+                    <div className="mt-2 pt-2 border-t border-gray-200">
+                      <a href={detailReq.payment_receipt_url} target="_blank" rel="noopener noreferrer"
+                        className="text-sm font-medium text-blue-600 hover:underline flex items-center gap-1">
+                        📎 View Payment Receipt
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </div>
 
-                <Row label="Stage 2 (Approval)" value={
-                  detailReq.approval_route === 'avisha_director_finance'
-                    ? (detailReq.founder_review_status === 'approved' ? `Director Approved ${fmtDate(detailReq.founder_review_at) || ''}`
-                      : detailReq.founder_review_status === 'rejected' ? 'Director Rejected'
-                      : detailReq.current_stage === 's2_pending' ? 'Awaiting Director (WhatsApp)' : 'Pending')
-                    : (detailReq.s2_approved_at ? `Approved on ${fmtDate(detailReq.s2_approved_at)}` : 'Pending')
-                } className={
-                  (detailReq.founder_review_status === 'rejected' || detailReq.current_stage === 'director_rejected') ? 'text-red-600'
-                  : (detailReq.s2_approved_at || detailReq.founder_review_status === 'approved') ? 'text-green-600' : 'text-yellow-600'
-                } />
-                {detailReq.founder_review_comment && <Row label="Director Comment" value={detailReq.founder_review_comment} />}
-                {detailReq.s2_notes && <Row label="S2 Notes" value={detailReq.s2_notes} />}
-                {detailReq.director_approved_amount && (
-                  <Row label="Director Ceiling" value={fmt(detailReq.director_approved_amount)} className="text-purple-600" bold />
-                )}
-
-                <Row label="Stage 3 (Finance)" value={
-                  detailReq.current_stage === 's3_approved' || detailReq.paid ? `Approved ${fmtDate(detailReq.approved_at) || ''}` : 'Pending'
-                } className={(detailReq.current_stage === 's3_approved' || detailReq.paid) ? 'text-green-600' : 'text-yellow-600'} />
-
-                <Row label="Payment" value={
-                  detailReq.paid ? `Paid ${fmt(detailReq.paid_amount)} on ${fmtDate(detailReq.paid_at)}` : 'Not yet paid'
-                } className={detailReq.paid ? 'text-green-600' : 'text-gray-400'} bold />
-
-                {detailReq.payment_receipt_url && (
-                  <div className="flex justify-between gap-4">
-                    <span className="text-gray-500 shrink-0">Payment Receipt</span>
-                    <a href={detailReq.payment_receipt_url} target="_blank" rel="noopener noreferrer"
-                      className="text-sm font-medium text-blue-600 hover:underline">View Receipt</a>
-                  </div>
-                )}
-              </Section>
-
-              {/* Balance Deduction */}
+              {/* Balance Adjustment */}
               {detailReq.old_balance_deducted > 0 && (
-                <Section title="Balance Adjustment">
+                <Section title="Balance Adjustment" accent="bg-orange-400">
                   <Row label="Approved Amount" value={fmt(detailReq.approved_amount || detailReq.amount_requested)} />
-                  <Row label="Old Balance Deducted" value={`-${fmt(detailReq.old_balance_deducted)}`} className="text-orange-600" />
+                  <Row label="Old Balance Deducted" value={`−${fmt(detailReq.old_balance_deducted)}`} className="text-orange-600" />
                   <Row label="Net Amount to Pay" value={fmt(detailReq.net_approved_amount || 0)} bold className="text-green-700" />
                 </Section>
               )}
 
               {/* Approval Info */}
               {(detailReq.approved_amount != null || detailReq.rejection_reason) && (
-                <Section title="Approval Info">
+                <Section title="Approval Info" accent="bg-green-400">
                   {detailReq.approved_amount != null && (
-                    <Row
-                      label="Approved Amount"
-                      value={fmt(detailReq.approved_amount)}
-                      bold
-                      className={Number(detailReq.approved_amount) < Number(detailReq.amount_requested) ? 'text-blue-600' : 'text-green-600'}
-                    />
+                    <Row label="Approved Amount" value={fmt(detailReq.approved_amount)} bold
+                      className={Number(detailReq.approved_amount) < Number(detailReq.amount_requested) ? 'text-blue-600' : 'text-green-600'} />
                   )}
                   {detailReq.approver?.name && <Row label="Approved By" value={detailReq.approver.name} />}
                   {detailReq.approved_at && <Row label="Approved On" value={fmtDate(detailReq.approved_at)} />}
@@ -593,36 +634,39 @@ export default function ImprestQueuePage() {
                 </Section>
               )}
 
-              {/* Old Balance */}
+              {/* Balance Tracking */}
               {detailReq.old_balance != null && (
-                <Section title="Balance Tracking">
+                <Section title="Balance Tracking" accent="bg-red-400">
                   <Row label="Expenses Submitted" value={fmt(detailReq.total_expenses_submitted || 0)} />
-                  <Row
-                    label="Old Balance"
+                  <Row label="Old Balance"
                     value={detailReq.old_balance > 0 ? fmt(detailReq.old_balance) : 'Fully Settled'}
-                    bold
-                    className={detailReq.old_balance > 0 ? 'text-red-600' : 'text-green-600'}
-                  />
+                    bold className={detailReq.old_balance > 0 ? 'text-red-600' : 'text-green-600'} />
                 </Section>
               )}
             </div>
 
-            {/* Footer actions */}
-            <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
-              {detailReq.status === 'pending' && (
+            {/* Footer */}
+            <div className="sticky bottom-0 bg-white border-t border-gray-200 rounded-b-2xl p-4 flex justify-end gap-3">
+              {detailReq.current_stage === 's3_pending' && (
                 <>
-                  <button
-                    onClick={() => { setDetailReq(null); openApprove(detailReq); }}
-                    className="px-5 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700"
-                  >Approve</button>
-                  <button
-                    onClick={() => { setDetailReq(null); openReject(detailReq); }}
-                    className="px-5 py-2 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700"
-                  >Reject</button>
+                  <button onClick={() => { setDetailReq(null); openApprove(detailReq); }}
+                    className="px-5 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 active:scale-95 transition-all">
+                    Approve
+                  </button>
+                  <button onClick={() => { setDetailReq(null); openReject(detailReq); }}
+                    className="px-5 py-2 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 active:scale-95 transition-all">
+                    Reject
+                  </button>
                 </>
               )}
+              {detailReq.current_stage === 's3_approved' && !detailReq.paid && (
+                <button onClick={() => { setDetailReq(null); setPayReq(detailReq); setPayReceipt(null); setActionError(''); }}
+                  className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 active:scale-95 transition-all">
+                  Pay Now
+                </button>
+              )}
               <button onClick={() => setDetailReq(null)}
-                className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:text-gray-900">
+                className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 active:scale-95 transition-all">
                 Close
               </button>
             </div>
@@ -632,17 +676,16 @@ export default function ImprestQueuePage() {
 
       {/* ── Approve / Reject Modal ─────────────────────────────────────────── */}
       {selected && modalMode && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg">
-            <div className="p-6 border-b border-gray-200">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 modal-overlay">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg modal-content">
+            <div className="p-5 border-b border-gray-200">
               <h2 className="text-lg font-bold text-gray-900">
-                {modalMode === 'approve' ? 'Approve Request' : 'Reject Request'}
+                {modalMode === 'approve' ? '✓ Approve Request' : '✗ Reject Request'}
               </h2>
-              <p className="text-sm text-gray-500 mt-1">{selected.ref_id} — {selected.employee?.name}</p>
+              <p className="text-sm text-gray-500 mt-0.5">{selected.ref_id} — {selected.employee?.name}</p>
             </div>
 
-            <div className="p-6 space-y-4">
-              {/* Summary */}
+            <div className="p-5 space-y-4">
               <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
                 <Row label="Employee" value={selected.employee?.name || '—'} />
                 <Row label="Site" value={selected.site} />
@@ -664,59 +707,44 @@ export default function ImprestQueuePage() {
               {modalMode === 'approve' && (
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Approved Amount (₹)</label>
-                  <input
-                    type="number" value={approveAmount}
+                  <input type="number" value={approveAmount}
                     onChange={(e) => setApproveAmount(e.target.value)}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                    placeholder="Enter approved amount"
-                  />
+                    placeholder="Enter approved amount" />
                   {parseFloat(approveAmount) < parseFloat(selected.amount_requested) && approveAmount && (
                     <p className="text-xs text-blue-600 mt-1">This will be recorded as a partial approval.</p>
                   )}
                   {selected?.director_approved_amount && (
-                    <p className="text-xs text-orange-600 mt-1">
-                      Director approved {fmt(selected.director_approved_amount)} — you cannot exceed this amount.
-                    </p>
+                    <p className="text-xs text-orange-600 mt-1">Director approved {fmt(selected.director_approved_amount)} — you cannot exceed this amount.</p>
                   )}
                   {selected?.old_balance_deducted > 0 && (
-                    <p className="text-xs text-amber-600 mt-1">
-                      Old balance deduction: {fmt(selected.old_balance_deducted)} will be subtracted from the approved amount.
-                    </p>
+                    <p className="text-xs text-amber-600 mt-1">Old balance deduction: {fmt(selected.old_balance_deducted)} will be subtracted.</p>
                   )}
                 </div>
               )}
 
               {modalMode === 'reject' && (
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">
-                    Rejection Reason <span className="text-red-500">*</span>
-                  </label>
-                  <textarea
-                    value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Rejection Reason <span className="text-red-500">*</span></label>
+                  <textarea value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 resize-none"
-                    rows={3} placeholder="Explain why this request is being rejected..."
-                  />
+                    rows={3} placeholder="Explain why this request is being rejected…" />
                 </div>
               )}
 
-              {actionError && (
-                <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{actionError}</p>
-              )}
+              {actionError && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{actionError}</p>}
             </div>
 
-            <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
-              <button onClick={closeModal}
-                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg">
-                Cancel
-              </button>
+            <div className="p-5 border-t border-gray-200 flex justify-end gap-3">
+              <button onClick={closeModal} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg hover:bg-gray-50 active:scale-95 transition-all">Cancel</button>
               {modalMode === 'approve' ? (
                 <button onClick={handleApprove} disabled={actionLoading}
-                  className="px-5 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-60">
+                  className="px-5 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-60 active:scale-95 transition-all">
                   {actionLoading ? 'Approving…' : 'Approve'}
                 </button>
               ) : (
                 <button onClick={handleReject} disabled={actionLoading}
-                  className="px-5 py-2 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-60">
+                  className="px-5 py-2 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-60 active:scale-95 transition-all">
                   {actionLoading ? 'Rejecting…' : 'Reject'}
                 </button>
               )}
@@ -725,34 +753,34 @@ export default function ImprestQueuePage() {
         </div>
       )}
 
-      {/* Pay Modal */}
+      {/* ── Pay Modal ─────────────────────────────────────────────────────── */}
       {payReq && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
-            <div className="p-6 border-b">
-              <h2 className="text-lg font-bold text-gray-900">Mark as Paid</h2>
-              <p className="text-sm text-gray-500 mt-1">{payReq.ref_id} — {payReq.employee?.name}</p>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 modal-overlay">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md modal-content">
+            <div className="p-5 border-b">
+              <h2 className="text-lg font-bold text-gray-900">💸 Mark as Paid</h2>
+              <p className="text-sm text-gray-500 mt-0.5">{payReq.ref_id} — {payReq.employee?.name}</p>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-5 space-y-4">
               <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-gray-500">Amount</span><span className="font-bold">{fmt(payReq.net_approved_amount || payReq.approved_amount)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Amount</span><span className="font-bold text-green-700 text-base">{fmt(payReq.net_approved_amount || payReq.approved_amount)}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Category</span><span>{payReq.category}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Site</span><span>{payReq.site}</span></div>
               </div>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Payment Receipt (optional)</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Payment Receipt <span className="text-gray-400 font-normal">(optional)</span></label>
                 <input type="file" accept="image/*,application/pdf"
                   onChange={(e) => setPayReceipt(e.target.files[0] || null)}
                   className="w-full text-sm text-gray-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
-                <p className="text-xs text-gray-400 mt-1">Upload a payment slip or receipt as proof. This will only be visible to finance team.</p>
+                <p className="text-xs text-gray-400 mt-1">Upload a payment slip or receipt as proof.</p>
               </div>
               {actionError && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{actionError}</p>}
             </div>
-            <div className="p-6 border-t flex justify-end gap-3">
+            <div className="p-5 border-t flex justify-end gap-3">
               <button onClick={() => { setPayReq(null); setPayReceipt(null); setActionError(''); }}
-                className="px-4 py-2 text-sm text-gray-600 border rounded-lg">Cancel</button>
+                className="px-4 py-2 text-sm text-gray-600 border rounded-lg hover:bg-gray-50 active:scale-95 transition-all">Cancel</button>
               <button onClick={handlePay} disabled={actionLoading}
-                className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60">
+                className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60 active:scale-95 transition-all">
                 {actionLoading ? 'Processing…' : 'Confirm Payment'}
               </button>
             </div>
@@ -763,10 +791,13 @@ export default function ImprestQueuePage() {
   );
 }
 
-function Section({ title, children }) {
+function Section({ title, children, accent }) {
   return (
     <div>
-      <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">{title}</div>
+      <div className="flex items-center gap-2 mb-2">
+        <div className={`w-1 h-4 rounded-full ${accent || 'bg-amber-400'}`} />
+        <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{title}</span>
+      </div>
       <div className="bg-gray-50 rounded-xl px-4 py-3 space-y-2 text-sm">{children}</div>
     </div>
   );
