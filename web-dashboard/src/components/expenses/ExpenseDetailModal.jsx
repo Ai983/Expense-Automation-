@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { getExpenseDetails, approveExpense, rejectExpense } from '../../services/expenseService';
 import { showToast } from '../layout/Toast';
 import StatusBadge from './StatusBadge';
@@ -48,13 +49,21 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
     }
   }
 
+  // Lock body scroll while open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   const meta = expense?.screenshot_metadata || {};
   const canAct = expense && ['pending', 'verified', 'manual_review', 'blocked'].includes(expense.status);
 
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+  return createPortal(
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', backgroundColor: 'rgba(0,0,0,0.6)' }}
+      className="modal-overlay" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto modal-content"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -276,7 +285,8 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
