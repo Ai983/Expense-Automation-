@@ -397,7 +397,7 @@ router.patch('/:id/adjust-amount', authMiddleware, roleGuard(FINANCE_ROLES), asy
     syncPaymentToCPS(
       current.cps_po_id,
       paidSoFar,
-      paidSoFar > 0 ? 'partially_paid' : 'paid',
+      paidSoFar > 0 ? 'partially_paid' : 'awaiting',
       newBalance,
       notes || null,
       new Date().toISOString(),
