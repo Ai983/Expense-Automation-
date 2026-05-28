@@ -16,6 +16,24 @@ const PROCUREMENT_ROLES = ['procurement_finance', 'admin'];
 const FINANCE_ROLES = ['finance', 'manager', 'admin'];
 const ALL_VIEWER_ROLES = ['procurement_finance', 'finance', 'manager', 'admin', 'head'];
 
+// ── CPS payment sync helper ───────────────────────────────────────────────
+// Calls cps_sync_payment_from_finance RPC — updates payment status, amount,
+// balance, history and audit log in the CPS procurement database.
+async function syncPaymentToCPS(cpsPoId, paidAmount, financeStatus, balanceDue, notes, paidAt) {
+  if (!cpsSupabase || !cpsPoId) return;
+  const statusMap = { paid: 'paid', partially_paid: 'partial' };
+  const { error } = await cpsSupabase.rpc('cps_sync_payment_from_finance', {
+    p_po_id: cpsPoId,
+    p_paid_amount: paidAmount,
+    p_payment_status: statusMap[financeStatus] ?? 'partial',
+    p_balance_due: Math.max(0, balanceDue),
+    p_reference: null,
+    p_note: notes || null,
+    p_paid_at: paidAt || new Date().toISOString(),
+  });
+  if (error) console.error('[CPS sync] cps_sync_payment_from_finance failed:', error.message);
+}
+
 // ── Receipt upload helper ──────────────────────────────────────────────────
 async function uploadPaymentReceipt(file, storagePath) {
   const ext = file.mimetype.split('/')[1].replace('jpeg', 'jpg');
@@ -334,7 +352,7 @@ router.patch('/:id/adjust-amount', authMiddleware, roleGuard(FINANCE_ROLES), asy
 
     const { data: current } = await supabaseAdmin
       .from('po_payments')
-      .select('id, status, total_amount, cps_po_ref, paid_amount')
+      .select('id, cps_po_id, status, total_amount, cps_po_ref, paid_amount')
       .eq('id', id)
       .single();
 
@@ -373,6 +391,18 @@ router.patch('/:id/adjust-amount', authMiddleware, roleGuard(FINANCE_ROLES), asy
       newValue: { adjusted_amount: parsedAdjusted, notes, po_ref: current.cps_po_ref },
     });
 
+    // Sync updated balance to CPS — paid amount unchanged, balance reflects new cycle limit
+    const paidSoFar = parseFloat(current.paid_amount || 0);
+    const newBalance = Math.max(0, parsedAdjusted - paidSoFar);
+    syncPaymentToCPS(
+      current.cps_po_id,
+      paidSoFar,
+      paidSoFar > 0 ? 'partially_paid' : 'paid',
+      newBalance,
+      notes || null,
+      new Date().toISOString(),
+    ).catch(err => console.error('[CPS sync] adjust error:', err.message));
+
     return ok(res, data);
   } catch (err) { next(err); }
 });
@@ -393,7 +423,7 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
 
     const { data: current } = await supabaseAdmin
       .from('po_payments')
-      .select('id, status, procurement_approved_amount, finance_adjusted_amount, total_amount, paid_amount, cps_po_ref, payment_logs, finance_notes, payment_receipt_path')
+      .select('id, cps_po_id, status, procurement_approved_amount, finance_adjusted_amount, total_amount, paid_amount, cps_po_ref, payment_logs, finance_notes, payment_receipt_path')
       .eq('id', id)
       .single();
 
@@ -482,15 +512,15 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
       },
     });
 
-    // Fire-and-forget: sync to CPS when fully settled
-    if (isFullySettled && cpsSupabase && current.cps_po_ref) {
-      cpsSupabase
-        .from('cps_purchase_orders')
-        .update({ finance_paid_at: data.paid_at, finance_paid_amount: newTotalPaid })
-        .eq('po_number', current.cps_po_ref)
-        .then(({ error }) => { if (error) console.error('[CPS sync] finance_paid update failed:', error.message); })
-        .catch(err => console.error('[CPS sync] error:', err.message));
-    }
+    // Fire-and-forget: always sync payment status to CPS (partial and full)
+    syncPaymentToCPS(
+      current.cps_po_id,
+      newTotalPaid,
+      isFullySettled ? 'paid' : 'partially_paid',
+      Math.max(0, realTotal - newTotalPaid),
+      notes || null,
+      nowIso,
+    ).catch(err => console.error('[CPS sync] error:', err.message));
 
     return ok(res, {
       ...data,
