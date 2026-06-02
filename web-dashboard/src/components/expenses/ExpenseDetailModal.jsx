@@ -165,25 +165,39 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
                 )}
                 <div className={`${(expense.allScreenshotUrls?.length || 0) > 1 ? 'grid grid-cols-2 gap-3' : ''}`}>
                   {(expense.allScreenshotUrls || [expense.screenshotSignedUrl]).map((url, i) => (
-                    url && (
-                      <div key={i} className="relative">
-                        {meta.attachmentType === 'pdf' ? (
-                          <a href={url} target="_blank" rel="noopener noreferrer"
-                            className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 hover:bg-blue-100 transition text-blue-700 font-medium text-sm">
-                            <span className="text-2xl">📄</span>
-                            <span>Open PDF {(expense.allScreenshotUrls?.length || 0) > 1 ? `#${i + 1}` : ''}</span>
-                          </a>
-                        ) : (
-                          <a href={url} target="_blank" rel="noopener noreferrer">
-                            <img src={url} alt={`Screenshot ${i + 1}`}
-                              className="rounded-lg border max-h-60 w-full object-contain cursor-pointer hover:opacity-90 transition" />
-                          </a>
-                        )}
-                      </div>
-                    )
+                    <div key={i} className="relative">
+                      {!url ? (
+                        <div className="flex items-center justify-center gap-2 bg-gray-100 border border-gray-200 rounded-lg px-4 py-6 text-gray-400 text-xs">
+                          <span>🖼️</span>
+                          <span>Screenshot {(expense.allScreenshotUrls?.length || 0) > 1 ? `#${i + 1} ` : ''}not available — may be stored in legacy system</span>
+                        </div>
+                      ) : meta.attachmentType === 'pdf' ? (
+                        <a href={url} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 hover:bg-blue-100 transition text-blue-700 font-medium text-sm">
+                          <span className="text-2xl">📄</span>
+                          <span>Open PDF {(expense.allScreenshotUrls?.length || 0) > 1 ? `#${i + 1}` : ''}</span>
+                        </a>
+                      ) : (
+                        <a href={url} target="_blank" rel="noopener noreferrer" title="Click to open full size">
+                          <img src={url} alt={`Screenshot ${i + 1}`}
+                            className="rounded-lg border max-h-60 w-full object-contain cursor-pointer hover:opacity-90 transition"
+                            onError={(e) => {
+                              e.target.style.display = 'none';
+                              e.target.nextSibling.style.display = 'flex';
+                            }}
+                          />
+                          <div style={{ display: 'none' }}
+                            className="flex items-center justify-center gap-2 bg-gray-100 border border-gray-200 rounded-lg px-4 py-6 text-gray-400 text-xs">
+                            <span>🖼️</span><span>Screenshot {i + 1} could not load</span>
+                          </div>
+                        </a>
+                      )}
+                    </div>
                   ))}
                 </div>
-                <p className="text-xs text-gray-400 mt-1">Click to open full size</p>
+                {(expense.allScreenshotUrls || []).some(Boolean) && (
+                  <p className="text-xs text-gray-400 mt-1">Click image to open full size</p>
+                )}
               </div>
             )}
 

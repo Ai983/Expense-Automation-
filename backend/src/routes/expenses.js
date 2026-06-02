@@ -559,15 +559,16 @@ router.get('/:expenseId/details', authMiddleware, async (req, res, next) => {
       return fail(res, 'Access denied', 403);
     }
 
-    // Generate signed URL for primary screenshot
-    const screenshotSignedUrl = await getSignedUrl(expense.screenshot_url);
+    // Generate signed URL for primary screenshot — pass submitted_at so legacy
+    // storage is used for pre-migration expenses (before STORAGE_CUTOVER_DATE).
+    const screenshotSignedUrl = await getSignedUrl(expense.screenshot_url, expense.submitted_at);
 
     // Generate signed URLs for all screenshots if multiple were uploaded
     let allScreenshotUrls = [];
     const meta = expense.screenshot_metadata || {};
     if (meta.screenshots?.length > 1) {
       allScreenshotUrls = await Promise.all(
-        meta.screenshots.map((path) => getSignedUrl(path))
+        meta.screenshots.map((path) => getSignedUrl(path, expense.submitted_at))
       );
     } else if (screenshotSignedUrl) {
       allScreenshotUrls = [screenshotSignedUrl];
