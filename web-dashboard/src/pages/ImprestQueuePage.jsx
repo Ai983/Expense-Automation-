@@ -103,7 +103,9 @@ function ApprovalTimeline({ req }) {
       note: req.s1_notes,
     },
     {
-      label: isDirector ? 'Director / Founder' : 'S2 — Ritu',
+      label: req.approval_route === 'avisha_director_finance' ? 'Director / Bhaskar Sir'
+           : req.approval_route === 'avisha_dhruv_finance' ? 'Dhruv Sir'
+           : 'S2 — Ritu',
       sub: 'Approval',
       done: !!(req.s2_approved_at || req.founder_review_status === 'approved'),
       rejected: req.current_stage === 'director_rejected' || req.founder_review_status === 'rejected',

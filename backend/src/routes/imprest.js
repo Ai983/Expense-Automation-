@@ -203,9 +203,14 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
     // Determine approval route automatically
     const amount = parseFloat(amountRequested);
     const isHOorBangalore = RITU_ALWAYS_SITES.includes(site);
-    const approvalRoute = (!isHOorBangalore && amount > DIRECTOR_APPROVAL_THRESHOLD)
-      ? 'avisha_director_finance'
-      : 'avisha_ritu_finance';
+    let approvalRoute;
+    if (isHOorBangalore) {
+      approvalRoute = 'avisha_ritu_finance';          // HO & Bangalore → Ritu S2
+    } else if (amount > DIRECTOR_APPROVAL_THRESHOLD) {
+      approvalRoute = 'avisha_director_finance';      // ≥ ₹10,000 → Director WhatsApp
+    } else {
+      approvalRoute = 'avisha_dhruv_finance';         // < ₹10,000, other sites → Dhruv WhatsApp
+    }
 
     // Calculate old balance deduction if employee has expired reminders
     let oldBalanceDeduction = 0;
@@ -252,7 +257,7 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       extraFields.current_stage = isHOorBangalore ? 's2_pending' : 's1_pending';
       extraFields.approval_route = approvalRoute;
       extraFields.old_balance_deducted = Math.round(oldBalanceDeduction * 100) / 100;
-      if (approvalRoute === 'avisha_director_finance') {
+      if (approvalRoute === 'avisha_director_finance' || approvalRoute === 'avisha_dhruv_finance') {
         extraFields.requires_founder_approval = true;
       }
       await supabaseAdmin.from('imprest_requests').update(extraFields).eq('id', imprest.id);
@@ -797,46 +802,63 @@ router.post('/:id/s1-approve', authMiddleware, roleGuard(S1_ROLES), async (req, 
       s1_approved_at: now,
       s1_notes: notes || null,
     };
-    // Director route: mark as waiting for WhatsApp reply
-    if (imp.approval_route === 'avisha_director_finance') {
+    // WhatsApp routes: mark as waiting for reply
+    if (imp.approval_route === 'avisha_director_finance' || imp.approval_route === 'avisha_dhruv_finance') {
       updateFields.founder_review_status = 'pending';
     }
     await supabaseAdmin.from('imprest_requests').update(updateFields).eq('id', req.params.id);
 
-    // If director route, trigger WhatsApp to Bhaskar Sir
+    // Helper: calculate employee outstanding balance
+    const calcOutstanding = async () => {
+      let out = 0;
+      const { data: empImps } = await supabaseAdmin
+        .from('imprest_requests').select('id, approved_amount, amount_requested')
+        .eq('employee_id', imp.employee_id)
+        .in('status', ['approved', 'partially_approved'])
+        .neq('id', imp.id);
+      if (empImps?.length > 0) {
+        const aIds = empImps.map(r => r.id);
+        const { data: exps } = await supabaseAdmin.from('expenses').select('imprest_id, amount, status')
+          .in('imprest_id', aIds).not('status', 'in', '("rejected","blocked")');
+        const expMap = {};
+        for (const e of (exps || [])) { expMap[e.imprest_id] = (expMap[e.imprest_id] || 0) + parseFloat(e.amount); }
+        for (const r of empImps) {
+          out += Math.max(0, parseFloat(r.approved_amount || r.amount_requested) - (expMap[r.id] || 0));
+        }
+      }
+      return Math.round(out * 100) / 100;
+    };
+
+    // Director route (≥ ₹10,000) → WhatsApp to Bhaskar Sir
     if (imp.approval_route === 'avisha_director_finance') {
       try {
-        // Calculate real employee outstanding balance (not just old_balance_deducted)
-        let employeeOutstanding = 0;
-        const { data: empImps } = await supabaseAdmin
-          .from('imprest_requests').select('id, approved_amount, amount_requested')
-          .eq('employee_id', imp.employee_id)
-          .in('status', ['approved', 'partially_approved'])
-          .neq('id', imp.id);
-        if (empImps?.length > 0) {
-          const aIds = empImps.map(r => r.id);
-          const { data: exps } = await supabaseAdmin.from('expenses').select('imprest_id, amount, status')
-            .in('imprest_id', aIds).not('status', 'in', '("rejected","blocked")');
-          const expMap = {};
-          for (const e of (exps || [])) { expMap[e.imprest_id] = (expMap[e.imprest_id] || 0) + parseFloat(e.amount); }
-          for (const r of empImps) {
-            employeeOutstanding += Math.max(0, parseFloat(r.approved_amount || r.amount_requested) - (expMap[r.id] || 0));
-          }
-        }
-        const empName = (await supabaseAdmin.from('employees').select('name').eq('id', imp.employee_id).single()).data?.name || '';
+        const [empName, oldBalance] = await Promise.all([
+          supabaseAdmin.from('employees').select('name').eq('id', imp.employee_id).single().then(r => r.data?.name || ''),
+          calcOutstanding(),
+        ]);
         triggerFounderApproval({
-          imprestId: imp.id,
-          refId: imp.ref_id,
-          requestedTo: 'Bhaskar Sir',
-          employeeName: empName,
-          employeeSite: imp.site,
-          amount: parseFloat(imp.amount_requested),
-          category: imp.category,
-          purpose: imp.purpose || '',
-          oldBalance: Math.round(employeeOutstanding * 100) / 100,
-          submittedAt: now,
-        }).catch((e) => console.warn('WF2 trigger failed:', e.message));
+          imprestId: imp.id, refId: imp.ref_id, requestedTo: 'Bhaskar Sir',
+          employeeName: empName, employeeSite: imp.site,
+          amount: parseFloat(imp.amount_requested), category: imp.category,
+          purpose: imp.purpose || '', oldBalance, submittedAt: now,
+        }).catch((e) => console.warn('WF2 Director trigger failed:', e.message));
       } catch (e) { console.warn('Director WhatsApp trigger failed:', e.message); }
+    }
+
+    // Dhruv route (< ₹10,000, non-HO/Bangalore) → WhatsApp to Dhruv Sir
+    if (imp.approval_route === 'avisha_dhruv_finance') {
+      try {
+        const [empName, oldBalance] = await Promise.all([
+          supabaseAdmin.from('employees').select('name').eq('id', imp.employee_id).single().then(r => r.data?.name || ''),
+          calcOutstanding(),
+        ]);
+        triggerFounderApproval({
+          imprestId: imp.id, refId: imp.ref_id, requestedTo: 'Dhruv Sir',
+          employeeName: empName, employeeSite: imp.site,
+          amount: parseFloat(imp.amount_requested), category: imp.category,
+          purpose: imp.purpose || '', oldBalance, submittedAt: now,
+        }).catch((e) => console.warn('WF2 Dhruv trigger failed:', e.message));
+      } catch (e) { console.warn('Dhruv WhatsApp trigger failed:', e.message); }
     }
 
     // Notify S2 (Ritu) when forwarded via ritu route

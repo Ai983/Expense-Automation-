@@ -31,7 +31,8 @@ function timeAgo(d) {
 function columnOf(req) {
   if (req.current_stage === 's1_pending') return 's1';
   if (req.current_stage === 's2_pending') {
-    return req.approval_route === 'avisha_director_finance' ? 'director' : 's2';
+    if (req.approval_route === 'avisha_ritu_finance') return 's2';
+    return 'director'; // avisha_director_finance AND avisha_dhruv_finance both wait here
   }
   if (req.current_stage === 's3_pending') return 'finance';
   if (req.current_stage === 'paid' || req.status === 'approved') return 'done';
@@ -39,10 +40,17 @@ function columnOf(req) {
   return 'done';
 }
 
+function routeLabel(route) {
+  if (route === 'avisha_director_finance') return 'Director';
+  if (route === 'avisha_dhruv_finance') return 'Dhruv Sir';
+  return 'S2 · Ritu';
+}
+
 function StageBadge({ stage, route }) {
+  const pendingLabel = stage === 's2_pending' ? routeLabel(route) : null;
   const map = {
     s1_pending: { label: 'S1 · Avisha', bg: 'bg-blue-100', text: 'text-blue-700' },
-    s2_pending: { label: route === 'avisha_director_finance' ? 'Director' : 'S2 · Ritu', bg: 'bg-purple-100', text: 'text-purple-700' },
+    s2_pending: { label: pendingLabel, bg: 'bg-purple-100', text: 'text-purple-700' },
     s3_pending: { label: 'Finance', bg: 'bg-amber-100', text: 'text-amber-700' },
     paid: { label: '✓ Paid', bg: 'bg-green-100', text: 'text-green-700' },
     s1_rejected: { label: '✗ S1 Rejected', bg: 'bg-red-100', text: 'text-red-700' },
@@ -55,11 +63,12 @@ function StageBadge({ stage, route }) {
 }
 
 function RouteIndicator({ route, stage }) {
-  // Tiny pipeline visualization at top of card
-  const isDirector = route === 'avisha_director_finance';
-  const steps = isDirector
-    ? [{ k: 's1', label: 'Avisha' }, { k: 's2-dir', label: 'Director' }, { k: 's3', label: 'Finance' }]
-    : [{ k: 's1', label: 'Avisha' }, { k: 's2', label: 'Ritu' }, { k: 's3', label: 'Finance' }];
+  const steps =
+    route === 'avisha_director_finance'
+      ? [{ k: 's1', label: 'Avisha' }, { k: 'dir', label: 'Director' }, { k: 's3', label: 'Finance' }]
+    : route === 'avisha_dhruv_finance'
+      ? [{ k: 's1', label: 'Avisha' }, { k: 'dhruv', label: 'Dhruv Sir' }, { k: 's3', label: 'Finance' }]
+      : [{ k: 's1', label: 'Avisha' }, { k: 's2', label: 'Ritu' }, { k: 's3', label: 'Finance' }];
 
   const stagePosition = (() => {
     if (stage === 's1_pending') return 0;
@@ -165,7 +174,7 @@ function HistoryItem({ entry, onClick }) {
 const COLUMNS = [
   { key: 's1', title: 'S1 — Avisha', tint: 'bg-blue-50 border-blue-200', heading: 'text-blue-700', dot: '🔵' },
   { key: 's2', title: 'S2 — Ritu', tint: 'bg-purple-50 border-purple-200', heading: 'text-purple-700', dot: '🟣' },
-  { key: 'director', title: 'Director / Founder', tint: 'bg-indigo-50 border-indigo-200', heading: 'text-indigo-700', dot: '🟦' },
+  { key: 'director', title: 'Dhruv / Director', tint: 'bg-indigo-50 border-indigo-200', heading: 'text-indigo-700', dot: '🟦' },
   { key: 'finance', title: 'Finance', tint: 'bg-amber-50 border-amber-200', heading: 'text-amber-700', dot: '🟡' },
   { key: 'done', title: 'Recently Done', tint: 'bg-gray-50 border-gray-200', heading: 'text-gray-700', dot: '⚫' },
 ];
