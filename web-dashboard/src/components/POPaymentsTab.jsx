@@ -1,7 +1,29 @@
 // web-dashboard/src/components/POPaymentsTab.jsx
 // Finance Dashboard: PO Payments tab — full PO detail, partial payments, balance tracking, comparison sheet
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../services/api';
+
+// Portal-render modals to document.body so `position: fixed` is always relative
+// to the viewport — never to a transformed/scrolled ancestor (which would push
+// the modal down the page and force the user to scroll to see it).
+function Modal({ open, children }) {
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
+
+  if (!open) return null;
+  return createPortal(
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', backgroundColor: 'rgba(0,0,0,0.5)' }}
+      className="modal-overlay">
+      {children}
+    </div>,
+    document.body
+  );
+}
 
 function fmt(n) {
   return `₹${Number(n || 0).toLocaleString('en-IN')}`;
@@ -816,7 +838,7 @@ function PayModal({ po, authoritativeAmount, alreadyPaid, remaining, onConfirm, 
   const isFullSettlement = enteredAmt >= remaining - 0.01;
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+    <Modal open>
       <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl">
         <h2 className="text-lg font-semibold mb-1">Record Payment</h2>
         <p className="text-sm text-gray-500 mb-4">{po.cps_po_ref} — {po.supplier_name}</p>
@@ -901,7 +923,7 @@ function PayModal({ po, authoritativeAmount, alreadyPaid, remaining, onConfirm, 
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -921,7 +943,7 @@ function AdjustAmountModal({ po, onConfirm, onClose, fmt }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+    <Modal open>
       <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl">
         <h2 className="text-lg font-semibold mb-1">Adjust Payable Amount</h2>
         <p className="text-sm text-gray-500 mb-2">{po.cps_po_ref} — {po.supplier_name}</p>
@@ -973,7 +995,7 @@ function AdjustAmountModal({ po, onConfirm, onClose, fmt }) {
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
