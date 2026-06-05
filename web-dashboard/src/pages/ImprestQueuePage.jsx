@@ -433,7 +433,11 @@ export default function ImprestQueuePage() {
                       <td className="px-4 py-3">
                         {req.requires_founder_approval ? (
                           <div>
-                            <div className="text-xs text-gray-500">{req.approval_route === 'avisha_director_finance' ? 'Bhaskar Sir' : "Ritu Ma'am"}</div>
+                            <div className="text-xs text-gray-500">
+                              {req.approval_route === 'avisha_director_finance' ? 'Bhaskar Sir'
+                               : req.approval_route === 'avisha_dhruv_finance' ? 'Dhruv Sir'
+                               : "Ritu Ma'am"}
+                            </div>
                             {req.founder_review_status === 'approved' && <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-green-100 text-green-700 border border-green-200">Approved</span>}
                             {req.founder_review_status === 'rejected' && <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-red-100 text-red-700 border border-red-200">Rejected</span>}
                             {req.founder_review_status === 'pending' && <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-yellow-100 text-yellow-800 border border-yellow-200">Awaiting</span>}
