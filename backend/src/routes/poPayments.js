@@ -352,11 +352,16 @@ router.patch('/:id/adjust-amount', authMiddleware, roleGuard(FINANCE_ROLES), asy
 
     const { data: current } = await supabaseAdmin
       .from('po_payments')
-      .select('id, cps_po_id, status, total_amount, cps_po_ref, paid_amount')
+      .select('id, cps_po_id, status, total_amount, cps_po_ref, paid_amount, payment_model')
       .eq('id', id)
       .single();
 
     if (!current) return fail(res, 'PO not found', 404);
+    // SPEC-PAY-01: tranche payments are bound to an immutable CPS authorization —
+    // finance cannot unilaterally adjust them. Any change must be re-authorized in CPS.
+    if (current.payment_model === 'tranche') {
+      return fail(res, 'This is an authorized installment — finance cannot adjust the amount. Request a re-authorization in CPS (a fresh Gate-2 release).', 409);
+    }
     if (!['pending_payment', 'partially_paid'].includes(current.status)) {
       return fail(res, `Cannot adjust amount — current status is ${current.status}`, 400);
     }
@@ -530,6 +535,176 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
       remaining_balance: Math.max(0, realTotal - newTotalPaid),
       fully_settled: isFullySettled,
     });
+  } catch (err) { next(err); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// SPEC-PAY-01 Gate-2 — Authorized payables (CPS-owned, read via cpsSupabase).
+// Lists approved 'release' authorizations that finance hasn't fully paid yet.
+// GET /api/po-payments/authorized-payables
+router.get('/authorized-payables', authMiddleware, roleGuard(ALL_VIEWER_ROLES), async (req, res, next) => {
+  try {
+    if (!cpsSupabase) return fail(res, 'CPS connection not configured', 500);
+
+    const { data: auths, error: aErr } = await cpsSupabase
+      .from('cps_payment_authorizations')
+      .select('id,auth_number,amount,tranche_id,po_id,auth_type,status,approved_at')
+      .eq('auth_type', 'release').eq('status', 'approved')
+      .order('approved_at', { ascending: true });
+    if (aErr) throw aErr;
+    if (!auths?.length) return ok(res, []);
+
+    // finance payments already recorded against these authorizations
+    const refs = auths.map(a => a.auth_number);
+    const { data: payments } = await supabaseAdmin
+      .from('po_payments')
+      .select('cps_authorization_ref,status,paid_amount')
+      .in('cps_authorization_ref', refs);
+    const payByRef = {};
+    (payments ?? []).forEach(p => { payByRef[p.cps_authorization_ref] = p; });
+
+    // hydrate PO / tranche / supplier
+    const poIds = [...new Set(auths.map(a => a.po_id).filter(Boolean))];
+    const trancheIds = auths.map(a => a.tranche_id).filter(Boolean);
+    const { data: pos } = await cpsSupabase.from('cps_purchase_orders')
+      .select('id,po_number,supplier_id,grand_total,po_pdf_url,project_code,bank_account_holder_name,bank_name,bank_ifsc,bank_account_number')
+      .in('id', poIds);
+    const { data: tranches } = trancheIds.length
+      ? await cpsSupabase.from('cps_po_payment_schedules')
+          .select('id,milestone_name,trigger_type,trigger_offset_days').in('id', trancheIds)
+      : { data: [] };
+    const supIds = [...new Set((pos ?? []).map(p => p.supplier_id).filter(Boolean))];
+    const { data: sups } = supIds.length
+      ? await cpsSupabase.from('cps_suppliers').select('id,name').in('id', supIds)
+      : { data: [] };
+    const poById = {}; (pos ?? []).forEach(p => { poById[p.id] = p; });
+    const trById = {}; (tranches ?? []).forEach(t => { trById[t.id] = t; });
+    const supById = {}; (sups ?? []).forEach(s => { supById[s.id] = s; });
+
+    const payables = auths
+      .filter(a => (payByRef[a.auth_number]?.status ?? null) !== 'paid')
+      .map(a => {
+        const po = poById[a.po_id] || {};
+        const tr = trById[a.tranche_id] || {};
+        const sup = supById[po.supplier_id] || {};
+        const pay = payByRef[a.auth_number];
+        return {
+          auth_number: a.auth_number,
+          authorization_id: a.id,
+          cps_tranche_id: a.tranche_id,
+          po_id: a.po_id,
+          po_number: po.po_number ?? null,
+          project_name: po.project_code ?? null,
+          supplier_name: sup.name ?? null,
+          installment_name: tr.milestone_name ?? null,
+          trigger_type: tr.trigger_type ?? null,
+          trigger_offset_days: tr.trigger_offset_days ?? null,
+          authorized_amount: Number(a.amount),
+          already_paid: pay ? Number(pay.paid_amount || 0) : 0,
+          po_grand_total: po.grand_total != null ? Number(po.grand_total) : null,
+          po_pdf_url: po.po_pdf_url ?? null,
+          bank_account_holder_name: po.bank_account_holder_name ?? null,
+          bank_name: po.bank_name ?? null,
+          bank_ifsc: po.bank_ifsc ?? null,
+          bank_account_number: po.bank_account_number ?? null,
+        };
+      });
+    return ok(res, payables);
+  } catch (err) { next(err); }
+});
+
+// SPEC-PAY-01 Gate-2 — Pay a tranche against its CPS authorization.
+// Anti-corruption: finance can ONLY pay what CPS authorized (approved + amount).
+// On full settlement closes the lifecycle in CPS (tranche → paid, auth → consumed).
+// Reconciliation stays view-based; the deprecated cps_sync RPC is NOT used here.
+// POST /api/po-payments/pay-authorization  { auth_number, paid_amount, notes, receipt? }
+router.post('/pay-authorization', authMiddleware, roleGuard(FINANCE_ROLES), upload.single('receipt'), async (req, res, next) => {
+  try {
+    if (!cpsSupabase) return fail(res, 'CPS connection not configured', 500);
+    const { auth_number, paid_amount, notes } = req.body;
+    if (!auth_number || paid_amount == null) return fail(res, 'auth_number and paid_amount are required', 400);
+    const thisPayment = parseFloat(paid_amount);
+    if (!(thisPayment > 0)) return fail(res, 'paid_amount must be positive', 400);
+
+    // 1) validate the authorization in CPS
+    const { data: auth, error: aErr } = await cpsSupabase
+      .from('cps_payment_authorizations')
+      .select('id,auth_number,amount,tranche_id,po_id,auth_type,status')
+      .eq('auth_number', auth_number).maybeSingle();
+    if (aErr) throw aErr;
+    if (!auth) return fail(res, 'Authorization not found', 404);
+    if (auth.status !== 'approved') return fail(res, `Authorization is "${auth.status}", not approved — cannot pay`, 409);
+    const authorized = Number(auth.amount);
+
+    // PO + supplier for the finance row
+    const { data: po } = await cpsSupabase.from('cps_purchase_orders')
+      .select('id,po_number,supplier_id,project_code,ship_to_address').eq('id', auth.po_id).maybeSingle();
+    let supplierName = null, supplierGstin = null;
+    if (po?.supplier_id) {
+      const { data: s } = await cpsSupabase.from('cps_suppliers').select('name,gstin').eq('id', po.supplier_id).maybeSingle();
+      supplierName = s?.name ?? null; supplierGstin = s?.gstin ?? null;
+    }
+
+    // 2) existing finance row for this authorization (partial earlier)?
+    const { data: existing } = await supabaseAdmin.from('po_payments')
+      .select('id,paid_amount,payment_logs,payment_receipt_path').eq('cps_authorization_ref', auth_number).maybeSingle();
+    const alreadyPaid = existing ? Number(existing.paid_amount || 0) : 0;
+    if (thisPayment > authorized - alreadyPaid + 0.01)
+      return fail(res, `Payment exceeds authorized amount (auth ₹${authorized}, already paid ₹${alreadyPaid})`, 400);
+
+    const newTotalPaid = alreadyPaid + thisPayment;
+    const fully = newTotalPaid >= authorized - 0.01;
+    const nowIso = new Date().toISOString();
+
+    let receiptPath = existing?.payment_receipt_path ?? null;
+    if (req.file) receiptPath = await uploadPaymentReceipt(req.file, `po-receipts/auth-${auth_number}-${Date.now()}`);
+
+    const logEntry = { amount: thisPayment, paid_at: nowIso, paid_by: req.user.id, paid_by_name: req.user.name || req.user.email || 'Finance', notes: notes || null, receipt_path: receiptPath || null };
+    const logs = [...(existing?.payment_logs ?? []), logEntry];
+
+    let financeRow;
+    if (existing) {
+      const { data, error } = await supabaseAdmin.from('po_payments').update({
+        paid_amount: newTotalPaid, status: fully ? 'paid' : 'partially_paid',
+        paid_by: req.user.id, paid_at: fully ? nowIso : null,
+        payment_receipt_path: receiptPath, finance_notes: notes || null, payment_logs: logs,
+      }).eq('id', existing.id).select().single();
+      if (error) throw error; financeRow = data;
+    } else {
+      const { data, error } = await supabaseAdmin.from('po_payments').insert([{
+        cps_po_id: auth.po_id, cps_po_ref: po?.po_number ?? null,
+        payment_model: 'tranche', cps_authorization_ref: auth_number, cps_tranche_id: auth.tranche_id,
+        project_name: po?.project_code ?? null, site: po?.ship_to_address ?? null,
+        supplier_name: supplierName, supplier_gstin: supplierGstin,
+        total_amount: authorized, paid_amount: newTotalPaid,
+        status: fully ? 'paid' : 'partially_paid',
+        paid_by: req.user.id, paid_at: fully ? nowIso : null,
+        payment_receipt_path: receiptPath, finance_notes: notes || null, payment_logs: logs,
+      }]).select().single();
+      if (error) throw error; financeRow = data;
+    }
+
+    // 3) close the lifecycle in CPS (not the deprecated mirror RPC)
+    if (auth.tranche_id) {
+      await cpsSupabase.from('cps_po_payment_schedules').update({
+        status: fully ? 'paid' : 'partially_paid', paid_amount: newTotalPaid,
+        paid_at: fully ? nowIso : null, payment_reference: auth_number, updated_at: nowIso,
+      }).eq('id', auth.tranche_id);
+    }
+    if (fully) {
+      await cpsSupabase.from('cps_payment_authorizations').update({ status: 'consumed' })
+        .eq('id', auth.id).eq('status', 'approved');
+    }
+
+    await logAudit({
+      userId: req.user.id,
+      action: fully ? 'PO_TRANCHE_PAID' : 'PO_TRANCHE_PARTIAL',
+      entityType: 'po_payment',
+      entityId: financeRow.id,
+      newValue: { auth_number, this_payment: thisPayment, total_paid: newTotalPaid, authorized, fully_settled: fully, po_ref: po?.po_number },
+    });
+
+    return ok(res, { ...financeRow, authorized_amount: authorized, total_paid: newTotalPaid, fully_settled: fully });
   } catch (err) { next(err); }
 });
 
