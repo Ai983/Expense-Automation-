@@ -30,3 +30,16 @@ Thumbs.db
 .idea/
 .claude/
 .mcp.json
+
+# Claude Code project guidance (AI context files — not for source control)
+CLAUDE.md
+PROJECT_CONTEXT.md
+
+# PII reports / exports & local diagnostics — NEVER commit (contain employee data)
+*_report.html
+*_analysis.html
+employees_list.csv
+database/check_*.sql
+
+# Stray root lockfile (real lockfiles live in each app subdir)
+/package-lock.json

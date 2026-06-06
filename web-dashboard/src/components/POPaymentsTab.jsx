@@ -1,7 +1,29 @@
 // web-dashboard/src/components/POPaymentsTab.jsx
 // Finance Dashboard: PO Payments tab — full PO detail, partial payments, balance tracking, comparison sheet
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../services/api';
+
+// Portal-render modals to document.body so `position: fixed` is always relative
+// to the viewport — never to a transformed/scrolled ancestor (which would push
+// the modal down the page and force the user to scroll to see it).
+function Modal({ open, children }) {
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
+
+  if (!open) return null;
+  return createPortal(
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', backgroundColor: 'rgba(0,0,0,0.5)' }}
+      className="modal-overlay">
+      {children}
+    </div>,
+    document.body
+  );
+}
 
 function fmt(n) {
   return `₹${Number(n || 0).toLocaleString('en-IN')}`;
@@ -39,8 +61,33 @@ export default function POPaymentsTab() {
   const [payModal, setPayModal] = useState(null);
   const [adjustModal, setAdjustModal] = useState(null);
   const [comparisonData, setComparisonData] = useState({});
+  // SPEC-PAY-01 Gate-2: authorized installment payables (paid against a CPS authorization)
+  const [payables, setPayables] = useState([]);
+  const [payAuthModal, setPayAuthModal] = useState(null);
 
-  useEffect(() => { loadQueue(); }, []);
+  useEffect(() => { loadQueue(); loadPayables(); }, []);
+
+  async function loadPayables() {
+    try {
+      const { data } = await api.get('/api/po-payments/authorized-payables');
+      setPayables(data?.data || []);
+    } catch {
+      setPayables([]);
+    }
+  }
+
+  async function handlePayAuth(payable, paidAmount, notes, receiptFile) {
+    const form = new FormData();
+    form.append('auth_number', payable.auth_number);
+    form.append('paid_amount', paidAmount);
+    if (notes) form.append('notes', notes);
+    if (receiptFile) form.append('receipt', receiptFile);
+    await api.post('/api/po-payments/pay-authorization', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    await Promise.all([loadPayables(), loadQueue()]);
+    setPayAuthModal(null);
+  }
 
   async function loadQueue() {
     setLoading(true);
@@ -384,6 +431,51 @@ export default function POPaymentsTab() {
         </div>
       </div>
 
+      {/* SPEC-PAY-01 — Authorized Payables (Gate-2 approved installments) */}
+      {payables.length > 0 && (
+        <div>
+          <h3 className="text-sm font-medium text-gray-700 mb-3">
+            🔓 Authorized Payables ({payables.length}) <span className="font-normal text-gray-400">— founder ne release approve kiya</span>
+          </h3>
+          <div className="space-y-3">
+            {payables.map(p => {
+              const remaining = Number(p.authorized_amount) - Number(p.already_paid || 0);
+              return (
+                <div key={p.auth_number} className="bg-white rounded-xl border border-green-200 p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-sm font-medium">{p.po_number}</span>
+                        <span className="text-xs px-2 py-0.5 bg-green-100 text-green-800 rounded-full">{p.auth_number}</span>
+                      </div>
+                      <p className="text-sm font-medium text-gray-800 mt-1">{p.installment_name}{p.project_name ? ` · ${p.project_name}` : ''}</p>
+                      <p className="text-sm text-gray-500">{p.supplier_name}</p>
+                      {(p.bank_name || p.bank_account_number) && (
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {p.bank_name} {p.bank_account_number ? `••${String(p.bank_account_number).slice(-4)}` : ''} {p.bank_account_holder_name ? `(${p.bank_account_holder_name})` : ''}
+                        </p>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-xs text-gray-400">Authorized</p>
+                      <p className="text-lg font-semibold">{fmt(p.authorized_amount)}</p>
+                      {Number(p.already_paid) > 0 && <p className="text-xs text-gray-500">Paid {fmt(p.already_paid)} · Bal {fmt(remaining)}</p>}
+                      <div className="flex gap-2 mt-2 justify-end items-center">
+                        {p.po_pdf_url && <a href={p.po_pdf_url} target="_blank" rel="noreferrer" className="text-xs text-gray-500 underline">PO PDF</a>}
+                        <button onClick={() => setPayAuthModal({ payable: p, remaining })}
+                          className="px-3 py-1.5 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700">
+                          Pay
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Pending / Partial section */}
       {pending.length > 0 && (
         <div>
@@ -706,6 +798,19 @@ export default function POPaymentsTab() {
           fmt={fmt}
         />
       )}
+
+      {/* SPEC-PAY-01 Gate-2: pay an authorized installment (reuses PayModal) */}
+      {payAuthModal && (
+        <PayModal
+          po={{ cps_po_ref: `${payAuthModal.payable.po_number} · ${payAuthModal.payable.installment_name}`, supplier_name: payAuthModal.payable.supplier_name }}
+          authoritativeAmount={Number(payAuthModal.payable.authorized_amount)}
+          alreadyPaid={Number(payAuthModal.payable.already_paid || 0)}
+          remaining={payAuthModal.remaining}
+          onConfirm={(_po, amount, notes, file) => handlePayAuth(payAuthModal.payable, amount, notes, file)}
+          onClose={() => setPayAuthModal(null)}
+          fmt={fmt}
+        />
+      )}
     </div>
   );
 }
@@ -715,11 +820,15 @@ function PayModal({ po, authoritativeAmount, alreadyPaid, remaining, onConfirm, 
   const [notes, setNotes] = useState('');
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   async function submit() {
     setLoading(true);
+    setError('');
     try {
       await onConfirm(po, amount, notes, file);
+    } catch (e) {
+      setError(e?.response?.data?.error || e?.response?.data?.message || e?.message || 'Payment failed');
     } finally {
       setLoading(false);
     }
@@ -729,7 +838,7 @@ function PayModal({ po, authoritativeAmount, alreadyPaid, remaining, onConfirm, 
   const isFullSettlement = enteredAmt >= remaining - 0.01;
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+    <Modal open>
       <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl">
         <h2 className="text-lg font-semibold mb-1">Record Payment</h2>
         <p className="text-sm text-gray-500 mb-4">{po.cps_po_ref} — {po.supplier_name}</p>
@@ -795,6 +904,12 @@ function PayModal({ po, authoritativeAmount, alreadyPaid, remaining, onConfirm, 
           </div>
         </div>
 
+        {error && (
+          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
         <div className="flex gap-3 mt-6">
           <button onClick={onClose} className="flex-1 py-2 border rounded-lg text-sm hover:bg-gray-50">
             Cancel
@@ -808,7 +923,7 @@ function PayModal({ po, authoritativeAmount, alreadyPaid, remaining, onConfirm, 
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -828,7 +943,7 @@ function AdjustAmountModal({ po, onConfirm, onClose, fmt }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+    <Modal open>
       <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl">
         <h2 className="text-lg font-semibold mb-1">Adjust Payable Amount</h2>
         <p className="text-sm text-gray-500 mb-2">{po.cps_po_ref} — {po.supplier_name}</p>
@@ -880,7 +995,7 @@ function AdjustAmountModal({ po, onConfirm, onClose, fmt }) {
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
