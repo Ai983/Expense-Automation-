@@ -41,7 +41,7 @@ export const CATEGORIES = [
   'Porter Expenses',
 ];
 
-export const ROLES = ['employee', 'finance', 'manager', 'admin', 'approver_s1', 'approver_s2', 'procurement_finance', 'head'];
+export const ROLES = ['employee', 'finance', 'manager', 'admin', 'approver_s1', 'approver_s2', 'procurement_finance', 'head', 'founder'];
 
 export const FINANCE_ROLES = ['finance', 'manager', 'admin'];
 
@@ -49,6 +49,7 @@ export const FINANCE_ROLES = ['finance', 'manager', 'admin'];
 export const S1_ROLES = ['approver_s1', 'admin'];
 export const S2_ROLES = ['approver_s2', 'admin'];
 export const S3_ROLES = ['finance', 'manager', 'admin'];
+export const FOUNDER_ROLES = ['founder', 'admin'];
 export const ALL_DASHBOARD_ROLES = ['approver_s1', 'approver_s2', 'finance', 'manager', 'admin', 'head'];
 
 // Head role — read-only across all modules

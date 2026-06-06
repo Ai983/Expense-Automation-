@@ -11,6 +11,7 @@
 
 const SUBMISSION_URL = process.env.N8N_WEBHOOK_SUBMISSION;
 const FOUNDER_URL = process.env.N8N_WEBHOOK_FOUNDER;
+const FOUNDER_GATE_URL = process.env.N8N_WEBHOOK_FOUNDER_GATE;
 const FOUNDER_PHONE = process.env.FOUNDER_PHONE || '';
 const DIRECTOR_PHONE = process.env.DIRECTOR_PHONE || '';
 
@@ -66,5 +67,23 @@ export async function triggerFounderApproval({
     purpose: purpose || '',
     oldBalance: oldBalance || 0,
     submittedAt,
+  });
+}
+
+/**
+ * WF5 — Send founder gate notification to Dhruv Sir via WhatsApp (after Finance approves).
+ */
+export async function triggerFounderGate({
+  imprestId, refId, employeeName, site, amountApproved, category, purpose, allNotes,
+}) {
+  return postJSON(FOUNDER_GATE_URL, {
+    imprestId,
+    refId,
+    employeeName,
+    site,
+    amountApproved,
+    category,
+    purpose: purpose || '',
+    allNotes: allNotes || {},
   });
 }
