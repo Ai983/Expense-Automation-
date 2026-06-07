@@ -299,26 +299,20 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
     } catch (e) { console.warn('WF1 employee lookup failed:', e.message); }
 
     // ── Stage arrival WhatsApp notifications (non-blocking) ──────────────
-    const startStage = isHOorBangalore ? 's2_pending' : 's1_pending';
+    const startStage = 's1_pending';
     try {
       const { data: emp } = await supabaseAdmin
         .from('employees').select('name').eq('id', req.user.id).single();
       const empName = emp?.name || 'Employee';
-      console.log(`[Imprest] Sending ${startStage} notification for ${refId} to ${startStage === 's1_pending' ? 'S1' : 'S2'}`);
-      if (startStage === 's1_pending') {
-        await notifyS1({ refId, employeeName: empName, site, category, amount: parseFloat(amountRequested), purpose: purpose || '' });
-      } else {
-        await notifyS2({ refId, employeeName: empName, site, category, amount: parseFloat(amountRequested), purpose: purpose || '', s1Notes: '' });
-      }
+      console.log(`[Imprest] Sending ${startStage} notification for ${refId} to S1`);
+      await notifyS1({ refId, employeeName: empName, site, category, amount: parseFloat(amountRequested), purpose: purpose || '' });
     } catch (e) { console.warn('Stage notify failed:', e.message); }
 
     return ok(res, {
       refId, status: 'pending',
       currentStage: startStage,
       approvalRoute,
-      message: isHOorBangalore
-        ? 'Imprest request submitted. Sent to Ritu Ma\'am for review.'
-        : 'Imprest request submitted. Under review.',
+      message: 'Imprest request submitted. Under review.',
     }, 201);
   } catch (err) { next(err); }
 });
