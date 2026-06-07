@@ -483,24 +483,23 @@ router.get('/finance/queue', authMiddleware, roleGuard(FINANCE_HEAD_ROLES), asyn
       }
     }
 
-    // Calculate per-employee total outstanding balance across ALL their imprests
+    // Calculate per-employee outstanding balance: cash paid out minus settled expenses
     const uniqueEmpIds = [...new Set((data || []).map((r) => r.employee_id))];
     let employeeBalanceMap = {};
     if (uniqueEmpIds.length > 0) {
-      // Get all approved imprests for these employees
-      const { data: allEmpImprests } = await supabaseAdmin
+      const { data: paidImps } = await supabaseAdmin
         .from('imprest_requests')
-        .select('id, employee_id, approved_amount, amount_requested')
+        .select('id, employee_id, paid_amount')
         .in('employee_id', uniqueEmpIds)
-        .in('status', ['approved', 'partially_approved']);
+        .eq('paid', true);
 
-      const allApprovedIds = (allEmpImprests || []).map((r) => r.id);
+      const paidImpIds = (paidImps || []).map((r) => r.id);
       let allExpByImprest = {};
-      if (allApprovedIds.length > 0) {
+      if (paidImpIds.length > 0) {
         const { data: allLinkedExp } = await supabaseAdmin
           .from('expenses')
           .select('imprest_id, amount, status')
-          .in('imprest_id', allApprovedIds)
+          .in('imprest_id', paidImpIds)
           .in('status', ['approved', 'verified', 'auto_verified']);
         for (const exp of (allLinkedExp || [])) {
           if (!allExpByImprest[exp.imprest_id]) allExpByImprest[exp.imprest_id] = 0;
@@ -508,10 +507,10 @@ router.get('/finance/queue', authMiddleware, roleGuard(FINANCE_HEAD_ROLES), asyn
         }
       }
 
-      for (const imp of (allEmpImprests || [])) {
-        const approved = parseFloat(imp.approved_amount || imp.amount_requested);
+      for (const imp of (paidImps || [])) {
+        const given = parseFloat(imp.paid_amount || 0);
         const expTotal = allExpByImprest[imp.id] || 0;
-        const bal = Math.max(0, approved - expTotal);
+        const bal = Math.max(0, given - expTotal);
         if (!employeeBalanceMap[imp.employee_id]) employeeBalanceMap[imp.employee_id] = 0;
         employeeBalanceMap[imp.employee_id] += bal;
       }
@@ -770,13 +769,15 @@ async function buildStageQueue(req, stageFilter, routeFilter) {
   const { data, error, count } = await query;
   if (error) throw error;
 
-  // Enrich with employee balance
+  // Enrich with employee outstanding balance:
+  // Cash actually paid out (paid_amount) minus approved expenses settled.
   const empIds = [...new Set((data || []).map((r) => r.employee_id))];
   let empBalMap = {};
   if (empIds.length > 0) {
+    // Only count imprests that were physically paid to the employee
     const { data: empImps } = await supabaseAdmin
-      .from('imprest_requests').select('id, employee_id, approved_amount, amount_requested')
-      .in('employee_id', empIds).in('status', ['approved', 'partially_approved']);
+      .from('imprest_requests').select('id, employee_id, paid_amount')
+      .in('employee_id', empIds).eq('paid', true);
     const aIds = (empImps || []).map((r) => r.id);
     let expMap = {};
     if (aIds.length > 0) {
@@ -785,7 +786,7 @@ async function buildStageQueue(req, stageFilter, routeFilter) {
       for (const e of (exps || [])) { expMap[e.imprest_id] = (expMap[e.imprest_id] || 0) + parseFloat(e.amount); }
     }
     for (const imp of (empImps || [])) {
-      const bal = Math.max(0, parseFloat(imp.approved_amount || imp.amount_requested) - (expMap[imp.id] || 0));
+      const bal = Math.max(0, parseFloat(imp.paid_amount || 0) - (expMap[imp.id] || 0));
       empBalMap[imp.employee_id] = (empBalMap[imp.employee_id] || 0) + bal;
     }
   }
@@ -1029,16 +1030,16 @@ router.get('/board', authMiddleware, roleGuard([...S1_ROLES, ...S2_ROLES, ...FIN
 
     const allRequests = [...(activeRes.data || []), ...(terminalRes.data || [])];
 
-    // Enrich with employee outstanding balance (active approved imprests minus expense settlements)
+    // Enrich with employee outstanding balance: cash actually paid out minus settled expenses
     const empIds = [...new Set(allRequests.map(r => r.employee_id).filter(Boolean))];
     let balMap = {};
     if (empIds.length > 0) {
-      const { data: approvedImps } = await supabaseAdmin
+      const { data: paidImps } = await supabaseAdmin
         .from('imprest_requests')
-        .select('id, employee_id, approved_amount, amount_requested')
+        .select('id, employee_id, paid_amount')
         .in('employee_id', empIds)
-        .in('status', ['approved', 'partially_approved']);
-      const impIds = (approvedImps || []).map(r => r.id);
+        .eq('paid', true);
+      const impIds = (paidImps || []).map(r => r.id);
       let expSum = {};
       if (impIds.length > 0) {
         const { data: exps } = await supabaseAdmin
@@ -1048,10 +1049,10 @@ router.get('/board', authMiddleware, roleGuard([...S1_ROLES, ...S2_ROLES, ...FIN
           .in('status', ['approved', 'verified', 'auto_verified']);
         (exps || []).forEach(e => { expSum[e.imprest_id] = (expSum[e.imprest_id] || 0) + parseFloat(e.amount || 0); });
       }
-      (approvedImps || []).forEach(imp => {
-        const granted = parseFloat(imp.approved_amount || imp.amount_requested || 0);
+      (paidImps || []).forEach(imp => {
+        const given = parseFloat(imp.paid_amount || 0);
         const used = expSum[imp.id] || 0;
-        balMap[imp.employee_id] = (balMap[imp.employee_id] || 0) + Math.max(0, granted - used);
+        balMap[imp.employee_id] = (balMap[imp.employee_id] || 0) + Math.max(0, given - used);
       });
     }
 

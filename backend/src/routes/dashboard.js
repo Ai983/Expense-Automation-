@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { roleGuard } from '../middleware/roleGuard.js';
 import { ok } from '../utils/responseHelper.js';
+import { fetchAllRows } from '../utils/fetchAll.js';
 import { FINANCE_HEAD_ROLES, ALL_DASHBOARD_ROLES } from '../config/constants.js';
 
 const router = Router();
@@ -141,50 +142,112 @@ router.get('/recent-activity', roleGuard(FINANCE_HEAD_ROLES), async (req, res, n
   }
 });
 
-// GET /api/dashboard/by-employee — per-employee expense breakdown
+// GET /api/dashboard/sites — distinct project/site names present in expenses + imprests
+router.get('/sites', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
+  try {
+    const [expSites, impSites] = await Promise.all([
+      fetchAllRows((f, t) => supabaseAdmin.from('expenses').select('site').range(f, t)),
+      fetchAllRows((f, t) => supabaseAdmin.from('imprest_requests').select('site').range(f, t)),
+    ]);
+    const set = new Set();
+    [...expSites, ...impSites].forEach((r) => { if (r.site) set.add(r.site); });
+    return ok(res, [...set].sort((a, b) => a.localeCompare(b)));
+  } catch (err) { next(err); }
+});
+
+// GET /api/dashboard/by-employee — per-employee expense + imprest breakdown with balance
 router.get('/by-employee', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
     const { site, from, to } = req.query;
 
-    let query = supabaseAdmin
-      .from('expenses')
-      .select('id, amount, status, site, category, submitted_at, employee:employee_id (id, name, email, site, role)');
+    // Fetch ALL expenses (paginated past the 1000-row cap) so no employee's data is truncated
+    const expenses = await fetchAllRows((rFrom, rTo) => {
+      let q = supabaseAdmin
+        .from('expenses')
+        .select('id, amount, status, site, category, submitted_at, imprest_id, employee:employee_id (id, name, email, site, role, phone)')
+        .order('submitted_at', { ascending: false })
+        .range(rFrom, rTo);
+      if (site) q = q.eq('site', site);
+      if (from) q = q.gte('submitted_at', from);
+      if (to) q = q.lte('submitted_at', to + 'T23:59:59');
+      return q;
+    });
 
-    if (site) query = query.eq('site', site);
-    if (from) query = query.gte('submitted_at', from);
-    if (to) query = query.lte('submitted_at', to + 'T23:59:59');
-
-    const { data, error } = await query;
-    if (error) throw error;
+    // Fetch ALL imprests (paginated)
+    const imprests = await fetchAllRows((rFrom, rTo) => {
+      let q = supabaseAdmin
+        .from('imprest_requests')
+        .select('id, employee_id, amount_requested, approved_amount, net_approved_amount, status, current_stage, approval_route, category, site, submitted_at, approved_at, paid, paid_amount')
+        .order('submitted_at', { ascending: false })
+        .range(rFrom, rTo);
+      if (site) q = q.eq('site', site);
+      if (from) q = q.gte('submitted_at', from);
+      if (to) q = q.lte('submitted_at', to + 'T23:59:59');
+      return q;
+    });
 
     const empMap = {};
-    for (const exp of data) {
+
+    // Process expenses
+    for (const exp of (expenses || [])) {
       const emp = exp.employee;
       if (!emp) continue;
       if (!empMap[emp.id]) {
         empMap[emp.id] = {
-          id: emp.id,
-          name: emp.name,
-          email: emp.email,
-          site: emp.site,
-          role: emp.role,
-          total: 0,
-          totalAmount: 0,
-          verified: 0,
-          approved: 0,
-          pending: 0,
-          manual_review: 0,
-          rejected: 0,
-          blocked: 0,
+          id: emp.id, name: emp.name, email: emp.email,
+          site: emp.site, phone: emp.phone || '',
+          total: 0, totalAmount: 0,
+          verified: 0, approved: 0, pending: 0,
+          manual_review: 0, rejected: 0, blocked: 0,
           lastSubmitted: null,
+          // Imprest aggregates
+          imprestTotal: 0, imprestApproved: 0, imprestPending: 0,
+          imprestRejected: 0, imprestPaid: 0,
+          totalAdvanced: 0, totalSettled: 0, balanceDue: 0,
         };
       }
       const e = empMap[emp.id];
       e.total++;
-      e.totalAmount += parseFloat(exp.amount);
+      e.totalAmount += parseFloat(exp.amount || 0);
       e[exp.status] = (e[exp.status] || 0) + 1;
-      if (!e.lastSubmitted || exp.submitted_at > e.lastSubmitted) {
-        e.lastSubmitted = exp.submitted_at;
+      if (!e.lastSubmitted || exp.submitted_at > e.lastSubmitted) e.lastSubmitted = exp.submitted_at;
+    }
+
+    // Build settled expense map per imprest
+    const settledMap = {};
+    for (const exp of (expenses || [])) {
+      if (['approved', 'verified', 'auto_verified'].includes(exp.status) && exp.imprest_id) {
+        settledMap[exp.imprest_id] = (settledMap[exp.imprest_id] || 0) + parseFloat(exp.amount || 0);
+      }
+    }
+
+    // Process imprests — use paid_amount (actual cash given) not approved_amount
+    for (const imp of (imprests || [])) {
+      const eId = imp.employee_id;
+      if (!empMap[eId]) continue;
+      const e = empMap[eId];
+      e.imprestTotal++;
+      if (imp.paid && imp.paid_amount) {
+        e.imprestApproved++;
+        e.imprestPaid++;
+        // Use paid_amount = actual cash physically given to employee
+        e.totalAdvanced += parseFloat(imp.paid_amount || 0);
+      } else if (['approved', 'partially_approved'].includes(imp.status) && !imp.paid) {
+        e.imprestApproved++;
+        // Approved but not yet disbursed — don't count toward advanced
+      } else if (imp.status === 'pending') {
+        e.imprestPending++;
+      } else if (imp.status === 'rejected') {
+        e.imprestRejected++;
+      }
+    }
+
+    // totalSettled = ALL approved/verified expenses for employee (not just imprest-linked)
+    for (const exp of (expenses || [])) {
+      const emp = exp.employee;
+      if (!emp || !empMap[emp.id]) continue;
+      if (['approved', 'verified', 'auto_verified'].includes(exp.status)) {
+        empMap[emp.id].totalSettled += parseFloat(exp.amount || 0);
       }
     }
 
@@ -192,6 +255,10 @@ router.get('/by-employee', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next)
       .map((e) => ({
         ...e,
         totalAmount: Math.round(e.totalAmount * 100) / 100,
+        totalAdvanced: Math.round(e.totalAdvanced * 100) / 100,
+        totalSettled: Math.round(e.totalSettled * 100) / 100,
+        // Balance due = cash given - expenses submitted. Negative means employee over-spent (no debt to company)
+        balanceDue: Math.round(Math.max(0, e.totalAdvanced - e.totalSettled) * 100) / 100,
         autoVerifyRate: e.total > 0 ? Math.round(((e.verified + e.approved) / e.total) * 100) : 0,
       }))
       .sort((a, b) => b.total - a.total);
@@ -200,6 +267,63 @@ router.get('/by-employee', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next)
   } catch (err) {
     next(err);
   }
+});
+
+// GET /api/dashboard/employee/:id/detail — full detail for one employee
+router.get('/employee/:id/detail', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
+  try {
+    const empId = req.params.id;
+    const { site } = req.query; // optional — scope detail to a single project
+
+    let impQ = supabaseAdmin.from('imprest_requests')
+      .select('id, ref_id, amount_requested, approved_amount, net_approved_amount, status, current_stage, approval_route, category, site, purpose, submitted_at, approved_at, paid, paid_amount, rejection_reason, old_balance_deducted')
+      .eq('employee_id', empId).order('submitted_at', { ascending: false });
+    let expQ = supabaseAdmin.from('expenses')
+      .select('id, ref_id, amount, status, category, site, submitted_at, screenshot_url, screenshot_metadata, imprest_id, rejection_reason, description, duplicate_flag, duplicate_ref, overspend_amount, original_amount, settlement_for_expense_id')
+      .eq('employee_id', empId).order('submitted_at', { ascending: false });
+    if (site) { impQ = impQ.eq('site', site); expQ = expQ.eq('site', site); }
+
+    const [{ data: emp }, { data: imprests }, { data: expenses }] = await Promise.all([
+      supabaseAdmin.from('employees').select('id, name, email, site, phone, role, created_at').eq('id', empId).single(),
+      impQ, expQ,
+    ]);
+
+    // Build balance per imprest
+    const settledMap = {};
+    for (const exp of (expenses || [])) {
+      if (['approved', 'verified', 'auto_verified'].includes(exp.status) && exp.imprest_id) {
+        settledMap[exp.imprest_id] = (settledMap[exp.imprest_id] || 0) + parseFloat(exp.amount || 0);
+      }
+    }
+    const imprestsWithBalance = (imprests || []).map((imp) => ({
+      ...imp,
+      settledAmount: Math.round((settledMap[imp.id] || 0) * 100) / 100,
+      // remainingBalance: cash actually paid out minus expenses settled against this imprest
+      remainingBalance: imp.paid && imp.paid_amount
+        ? Math.round(Math.max(0, parseFloat(imp.paid_amount) - (settledMap[imp.id] || 0)) * 100) / 100
+        : 0,
+    }));
+
+    // Use paid_amount — actual cash physically given to employee
+    const totalAdvanced = imprestsWithBalance
+      .filter((i) => i.paid && i.paid_amount)
+      .reduce((s, i) => s + parseFloat(i.paid_amount || 0), 0);
+    // Total settled = ALL approved/verified expenses by this employee
+    const totalSettled = (expenses || [])
+      .filter((e) => ['approved', 'verified', 'auto_verified'].includes(e.status))
+      .reduce((s, e) => s + parseFloat(e.amount || 0), 0);
+
+    return ok(res, {
+      employee: emp,
+      imprests: imprestsWithBalance,
+      expenses: expenses || [],
+      summary: {
+        totalAdvanced: Math.round(totalAdvanced * 100) / 100,
+        totalSettled: Math.round(totalSettled * 100) / 100,
+        balanceDue: Math.round(Math.max(0, totalAdvanced - totalSettled) * 100) / 100,
+      },
+    });
+  } catch (err) { next(err); }
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -307,42 +431,39 @@ router.get('/imprest/by-status', roleGuard(ALL_DASHBOARD_ROLES), async (req, res
   } catch (err) { next(err); }
 });
 
-// GET /api/dashboard/imprest/balance — old balance for all approved imprests
+// GET /api/dashboard/imprest/balance — outstanding balance per paid imprest
+// Balance = cash actually paid out (paid_amount) − approved/verified expenses settled
 router.get('/imprest/balance', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
   try {
-    // Get all approved/partially_approved imprests
-    const { data: imprests, error: impErr } = await supabaseAdmin
+    // Only imprests physically disbursed to the employee (paginated past 1000-row cap)
+    const imprests = await fetchAllRows((rFrom, rTo) => supabaseAdmin
       .from('imprest_requests')
-      .select(`
-        id, ref_id, employee_id, site, category, amount_requested, approved_amount, status, submitted_at,
-        employee:employee_id (id, name, email, site)
-      `)
-      .in('status', ['approved', 'partially_approved'])
-      .order('submitted_at', { ascending: false });
-    if (impErr) throw impErr;
+      .select(`id, ref_id, employee_id, site, category, amount_requested, approved_amount, paid_amount, status, submitted_at,
+        employee:employee_id (id, name, email, site)`)
+      .eq('paid', true)
+      .order('submitted_at', { ascending: false })
+      .range(rFrom, rTo));
 
-    // Get all expenses linked to imprests
-    const { data: linkedExpenses, error: expErr } = await supabaseAdmin
+    // Settled = approved/verified/auto_verified expenses linked to imprests (paginated)
+    const linkedExpenses = await fetchAllRows((rFrom, rTo) => supabaseAdmin
       .from('expenses')
       .select('imprest_id, amount, status')
       .not('imprest_id', 'is', null)
-      .not('status', 'in', '("rejected","blocked")');
-    if (expErr) throw expErr;
+      .in('status', ['approved', 'verified', 'auto_verified'])
+      .range(rFrom, rTo));
 
-    // Build expense totals by imprest_id
     const expenseByImprest = {};
-    for (const exp of (linkedExpenses || [])) {
-      if (!expenseByImprest[exp.imprest_id]) expenseByImprest[exp.imprest_id] = 0;
-      expenseByImprest[exp.imprest_id] += parseFloat(exp.amount);
+    for (const exp of linkedExpenses) {
+      expenseByImprest[exp.imprest_id] = (expenseByImprest[exp.imprest_id] || 0) + parseFloat(exp.amount);
     }
 
     const result = imprests.map((imp) => {
-      const approvedAmt = parseFloat(imp.approved_amount || imp.amount_requested);
+      const given = parseFloat(imp.paid_amount || 0);
       const expenseTotal = expenseByImprest[imp.id] || 0;
       return {
         ...imp,
         total_expenses_submitted: Math.round(expenseTotal * 100) / 100,
-        old_balance: Math.round(Math.max(0, approvedAmt - expenseTotal) * 100) / 100,
+        old_balance: Math.round(Math.max(0, given - expenseTotal) * 100) / 100,
       };
     });
 
@@ -353,33 +474,32 @@ router.get('/imprest/balance', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, 
 // GET /api/dashboard/imprest/employee-balance — per-employee total outstanding balance
 router.get('/imprest/employee-balance', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
   try {
-    // Get all approved imprests
-    const { data: imprests, error: impErr } = await supabaseAdmin
+    // Only imprests physically disbursed (paginated past 1000-row cap)
+    const imprests = await fetchAllRows((rFrom, rTo) => supabaseAdmin
       .from('imprest_requests')
-      .select('id, employee_id, approved_amount, amount_requested')
-      .in('status', ['approved', 'partially_approved']);
-    if (impErr) throw impErr;
+      .select('id, employee_id, paid_amount')
+      .eq('paid', true)
+      .range(rFrom, rTo));
 
-    // Get all expenses linked to imprests
-    const { data: linkedExpenses, error: expErr } = await supabaseAdmin
+    // Settled = approved/verified/auto_verified expenses linked to imprests (paginated)
+    const linkedExpenses = await fetchAllRows((rFrom, rTo) => supabaseAdmin
       .from('expenses')
       .select('imprest_id, amount, status')
       .not('imprest_id', 'is', null)
-      .not('status', 'in', '("rejected","blocked")');
-    if (expErr) throw expErr;
+      .in('status', ['approved', 'verified', 'auto_verified'])
+      .range(rFrom, rTo));
 
     const expenseByImprest = {};
-    for (const exp of (linkedExpenses || [])) {
-      if (!expenseByImprest[exp.imprest_id]) expenseByImprest[exp.imprest_id] = 0;
-      expenseByImprest[exp.imprest_id] += parseFloat(exp.amount);
+    for (const exp of linkedExpenses) {
+      expenseByImprest[exp.imprest_id] = (expenseByImprest[exp.imprest_id] || 0) + parseFloat(exp.amount);
     }
 
-    // Calculate per-employee balance
+    // Calculate per-employee balance: cash paid out − settled expenses
     const empBalance = {};
     for (const imp of imprests) {
-      const approved = parseFloat(imp.approved_amount || imp.amount_requested);
+      const given = parseFloat(imp.paid_amount || 0);
       const expenseTotal = expenseByImprest[imp.id] || 0;
-      const balance = Math.max(0, approved - expenseTotal);
+      const balance = Math.max(0, given - expenseTotal);
       if (!empBalance[imp.employee_id]) empBalance[imp.employee_id] = { total_old_balance: 0, imprests_with_balance: 0 };
       empBalance[imp.employee_id].total_old_balance += balance;
       if (balance > 0) empBalance[imp.employee_id].imprests_with_balance++;

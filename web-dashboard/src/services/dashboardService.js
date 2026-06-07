@@ -82,3 +82,8 @@ export async function getByEmployee({ site, from, to } = {}) {
   const { data } = await api.get(`/api/dashboard/by-employee?${params.toString()}`);
   return data.data;
 }
+
+export async function getProjectSites() {
+  const { data } = await api.get('/api/dashboard/sites');
+  return data.data;
+}
