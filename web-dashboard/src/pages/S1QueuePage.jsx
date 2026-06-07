@@ -15,19 +15,19 @@ function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-IN', { day: 
 
 // Visual pipeline component — shows the approval stages this request will pass through
 function PipelineStepper({ route }) {
-  const isDirector = route === 'avisha_director_finance';
+  // ≥₹10K routes through the Director gate (new: avisha_director_finance_founder, legacy: avisha_director_finance)
+  const isDirector = route === 'avisha_director_finance_founder' || route === 'avisha_director_finance';
   const stages = isDirector
     ? [
         { label: 'You', sub: 'S1', done: true },
         { label: 'Director', sub: 'WhatsApp', done: false },
         { label: 'Finance', sub: 'Portal', done: false },
-        { label: 'Paid', sub: '', done: false },
+        { label: 'Founder', sub: 'WhatsApp', done: false },
       ]
     : [
         { label: 'You', sub: 'S1', done: true },
-        { label: "Ritu Ma'am", sub: 'S2', done: false },
         { label: 'Finance', sub: 'Portal', done: false },
-        { label: 'Paid', sub: '', done: false },
+        { label: 'Founder', sub: 'WhatsApp', done: false },
       ];
 
   return (
@@ -133,8 +133,9 @@ export default function S1QueuePage() {
   const handleForward = async () => {
     setActing(true); setActionError('');
     const requestId = selected.id;
-    const destination = selected.approval_route === 'avisha_director_finance'
-      ? 'Director (WhatsApp)' : "Ritu Ma'am";
+    const isDirectorRoute = selected.approval_route === 'avisha_director_finance_founder'
+      || selected.approval_route === 'avisha_director_finance';
+    const destination = isDirectorRoute ? 'Director (WhatsApp)' : 'Finance';
     try {
       await api.post(`/api/imprest/${requestId}/s1-approve`, { notes: notes.trim() || undefined });
       showToast(`✓ Forwarded to ${destination}`, 'success');
@@ -308,7 +309,7 @@ export default function S1QueuePage() {
                 <div className="flex justify-between"><span className="text-gray-500">Category</span><span>{selected.category}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Site</span><span>{selected.site}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Next stage</span>
-                  <span className="font-medium">{selected.approval_route === 'avisha_director_finance' ? 'Director (WhatsApp)' : "Ritu Ma'am"}</span>
+                  <span className="font-medium">{(selected.approval_route === 'avisha_director_finance_founder' || selected.approval_route === 'avisha_director_finance') ? 'Director (WhatsApp)' : 'Finance'}</span>
                 </div>
                 {selected.purpose && <div className="flex justify-between"><span className="text-gray-500">Purpose</span><span className="text-right max-w-[200px]">{selected.purpose}</span></div>}
                 {selected.employee_total_balance > 0 && (
@@ -322,9 +323,9 @@ export default function S1QueuePage() {
                   <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
                     className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-400" rows={2} placeholder="Any notes for the next reviewer..." />
                   <p className="text-xs text-gray-400 mt-1">
-                    {selected.approval_route === 'avisha_director_finance'
-                      ? '⚡ A WhatsApp approval request will be sent to Bhaskar Sir'
-                      : "⚡ This will appear in Ritu Ma'am's review queue"}
+                    {(selected.approval_route === 'avisha_director_finance_founder' || selected.approval_route === 'avisha_director_finance')
+                      ? '⚡ A WhatsApp approval request will be sent to Bhaskar Sir (Director)'
+                      : '⚡ This will move to the Finance review queue'}
                   </p>
                 </div>
               )}

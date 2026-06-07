@@ -29,18 +29,23 @@ function timeAgo(d) {
 
 // Determine which kanban column a request belongs in
 function columnOf(req) {
-  if (req.current_stage === 's1_pending') return 's1';
-  if (req.current_stage === 's2_pending') {
-    if (req.approval_route === 'avisha_ritu_finance') return 's2';
-    return 'director'; // avisha_director_finance AND avisha_dhruv_finance both wait here
+  const s = req.current_stage;
+  if (s === 's1_pending') return 's1';
+  if (s === 's2_pending') {
+    // Legacy: director/dhruv WhatsApp routes waited at s2_pending
+    if (req.approval_route === 'avisha_director_finance' || req.approval_route === 'avisha_dhruv_finance') return 'director';
+    return 's2'; // new s2_finance_founder AND legacy avisha_ritu_finance
   }
-  if (req.current_stage === 's3_pending') return 'finance';
-  if (req.current_stage === 'paid' || req.status === 'approved') return 'done';
-  if (['s1_rejected', 's2_rejected', 's3_rejected', 'director_rejected'].includes(req.current_stage)) return 'done';
+  if (s === 'director_pending') return 'director';        // new: ≥₹10K director gate
+  if (s === 's3_pending') return 'finance';
+  if (s === 'founder_review_pending') return 'founder';   // new: founder approval gate
+  if (s === 'paid' || req.status === 'approved') return 'done';
+  if (['s1_rejected', 's2_rejected', 's3_rejected', 'director_rejected', 'founder_rejected'].includes(s)) return 'done';
   return 'done';
 }
 
 function routeLabel(route) {
+  // Legacy WhatsApp routes
   if (route === 'avisha_director_finance') return 'Director';
   if (route === 'avisha_dhruv_finance') return 'Dhruv Sir';
   return 'S2 · Ritu';
@@ -51,12 +56,16 @@ function StageBadge({ stage, route }) {
   const map = {
     s1_pending: { label: 'S1 · Avisha', bg: 'bg-blue-100', text: 'text-blue-700' },
     s2_pending: { label: pendingLabel, bg: 'bg-purple-100', text: 'text-purple-700' },
+    director_pending: { label: 'Director', bg: 'bg-indigo-100', text: 'text-indigo-700' },
     s3_pending: { label: 'Finance', bg: 'bg-amber-100', text: 'text-amber-700' },
+    founder_review_pending: { label: 'Founder', bg: 'bg-pink-100', text: 'text-pink-700' },
+    founder_approved: { label: '✓ Founder OK', bg: 'bg-green-100', text: 'text-green-700' },
     paid: { label: '✓ Paid', bg: 'bg-green-100', text: 'text-green-700' },
     s1_rejected: { label: '✗ S1 Rejected', bg: 'bg-red-100', text: 'text-red-700' },
     s2_rejected: { label: '✗ S2 Rejected', bg: 'bg-red-100', text: 'text-red-700' },
     s3_rejected: { label: '✗ Finance Rejected', bg: 'bg-red-100', text: 'text-red-700' },
     director_rejected: { label: '✗ Director Rejected', bg: 'bg-red-100', text: 'text-red-700' },
+    founder_rejected: { label: '✗ Founder Rejected', bg: 'bg-red-100', text: 'text-red-700' },
   };
   const m = map[stage] || { label: stage, bg: 'bg-gray-100', text: 'text-gray-600' };
   return <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${m.bg} ${m.text}`}>{m.label}</span>;
@@ -64,19 +73,29 @@ function StageBadge({ stage, route }) {
 
 function RouteIndicator({ route, stage }) {
   const steps =
-    route === 'avisha_director_finance'
+    // New three-tier routes
+    route === 'avisha_director_finance_founder'
+      ? [{ k: 's1', label: 'Avisha' }, { k: 'dir', label: 'Director' }, { k: 's3', label: 'Finance' }, { k: 'founder', label: 'Founder' }]
+    : route === 's2_finance_founder'
+      ? [{ k: 's2', label: 'Ritu' }, { k: 's3', label: 'Finance' }, { k: 'founder', label: 'Founder' }]
+    : route === 'avisha_finance_founder'
+      ? [{ k: 's1', label: 'Avisha' }, { k: 's3', label: 'Finance' }, { k: 'founder', label: 'Founder' }]
+    // Legacy routes
+    : route === 'avisha_director_finance'
       ? [{ k: 's1', label: 'Avisha' }, { k: 'dir', label: 'Director' }, { k: 's3', label: 'Finance' }]
     : route === 'avisha_dhruv_finance'
       ? [{ k: 's1', label: 'Avisha' }, { k: 'dhruv', label: 'Dhruv Sir' }, { k: 's3', label: 'Finance' }]
       : [{ k: 's1', label: 'Avisha' }, { k: 's2', label: 'Ritu' }, { k: 's3', label: 'Finance' }];
 
   const stagePosition = (() => {
-    if (stage === 's1_pending') return 0;
-    if (stage === 's2_pending') return 1;
-    if (stage === 's3_pending') return 2;
-    if (stage === 'paid') return 3;
     if (stage?.includes('rejected')) return -1;
-    return 3;
+    if (stage === 'paid' || stage === 'founder_approved') return steps.length;
+    const stageKey = {
+      s1_pending: 's1', s2_pending: 's2', director_pending: 'dir',
+      s3_pending: 's3', founder_review_pending: 'founder',
+    }[stage];
+    const idx = steps.findIndex((s) => s.k === stageKey);
+    return idx >= 0 ? idx : steps.length;
   })();
 
   return (
@@ -102,19 +121,19 @@ function KanbanCard({ req, onView, onForward, onReject, actionable }) {
       onClick={() => onView(req)}>
       <RouteIndicator route={req.approval_route} stage={req.current_stage} />
       <div className="flex items-start justify-between gap-2 mt-1.5 mb-1">
-        <span className="font-mono text-[10px] font-semibold text-amber-600">{req.ref_id}</span>
-        <span className="text-[10px] text-gray-400">{timeAgo(req.submitted_at)}</span>
+        <span className="font-mono text-[11px] font-semibold text-amber-600">{req.ref_id}</span>
+        <span className="text-[10px] text-gray-400 whitespace-nowrap">{timeAgo(req.submitted_at)}</span>
       </div>
-      <p className="font-semibold text-sm text-gray-900 truncate">{req.employee?.name || '—'}</p>
+      <p className="font-semibold text-[15px] text-gray-900 truncate">{req.employee?.name || '—'}</p>
       <div className="flex items-baseline justify-between mt-0.5">
-        <p className="text-base font-bold text-gray-900">{fmt(req.amount_requested)}</p>
+        <p className="text-lg font-bold text-gray-900">{fmt(req.amount_requested)}</p>
         {req.approved_amount && req.approved_amount !== req.amount_requested && (
-          <span className="text-[10px] text-green-600">→ {fmt(req.approved_amount)}</span>
+          <span className="text-[11px] text-green-600">→ {fmt(req.approved_amount)}</span>
         )}
       </div>
       <div className="flex flex-wrap gap-1 mt-1.5">
-        <span className="text-[10px] px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded font-medium">{req.category}</span>
-        <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">{req.site}</span>
+        <span className="text-[11px] px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded font-medium">{req.category}</span>
+        <span className="text-[11px] px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">{req.site}</span>
       </div>
       {req.purpose && <p className="text-[11px] text-gray-500 mt-1.5 line-clamp-2">{req.purpose}</p>}
       {req.s1_notes && (
@@ -132,7 +151,7 @@ function KanbanCard({ req, onView, onForward, onReject, actionable }) {
       {actionable && (
         <div className="flex gap-1.5 mt-2">
           <button onClick={(e) => { e.stopPropagation(); onForward(req); }}
-            className={`flex-1 text-[10px] active:scale-95 text-white py-1.5 rounded font-semibold transition-all duration-150 shadow-sm hover:shadow-md ${
+            className={`flex-1 text-[11px] active:scale-95 text-white py-1.5 rounded font-semibold transition-all duration-150 shadow-sm hover:shadow-md ${
               req.current_stage === 's1_pending'
                 ? 'bg-blue-600 hover:bg-blue-700'
                 : 'bg-green-600 hover:bg-green-700'
@@ -140,7 +159,7 @@ function KanbanCard({ req, onView, onForward, onReject, actionable }) {
             {req.current_stage === 's1_pending' ? '⚡ Fast-fwd' : '✓ Forward'}
           </button>
           <button onClick={(e) => { e.stopPropagation(); onReject(req); }}
-            className="flex-1 text-[10px] bg-red-600 hover:bg-red-700 active:scale-95 text-white py-1.5 rounded font-semibold transition-all duration-150 shadow-sm hover:shadow-md">
+            className="flex-1 text-[11px] bg-red-600 hover:bg-red-700 active:scale-95 text-white py-1.5 rounded font-semibold transition-all duration-150 shadow-sm hover:shadow-md">
             ✗ Reject
           </button>
         </div>
@@ -174,8 +193,9 @@ function HistoryItem({ entry, onClick }) {
 const COLUMNS = [
   { key: 's1', title: 'S1 — Avisha', tint: 'bg-blue-50 border-blue-200', heading: 'text-blue-700', dot: '🔵' },
   { key: 's2', title: 'S2 — Ritu', tint: 'bg-purple-50 border-purple-200', heading: 'text-purple-700', dot: '🟣' },
-  { key: 'director', title: 'Dhruv / Director', tint: 'bg-indigo-50 border-indigo-200', heading: 'text-indigo-700', dot: '🟦' },
+  { key: 'director', title: 'Director', tint: 'bg-indigo-50 border-indigo-200', heading: 'text-indigo-700', dot: '🟦' },
   { key: 'finance', title: 'Finance', tint: 'bg-amber-50 border-amber-200', heading: 'text-amber-700', dot: '🟡' },
+  { key: 'founder', title: 'Founder — Dhruv', tint: 'bg-pink-50 border-pink-200', heading: 'text-pink-700', dot: '🩷' },
   { key: 'done', title: 'Recently Done', tint: 'bg-gray-50 border-gray-200', heading: 'text-gray-700', dot: '⚫' },
 ];
 
@@ -225,13 +245,13 @@ export default function S2QueuePage() {
   }, [board, filterSite, filterName]);
 
   const buckets = useMemo(() => {
-    const out = { s1: [], s2: [], director: [], finance: [], done: [] };
+    const out = { s1: [], s2: [], director: [], finance: [], founder: [], done: [] };
     for (const r of filteredBoard) {
       const col = columnOf(r);
       if (out[col]) out[col].push(r);
     }
-    // Sort each column: s1/s2/director/finance by oldest first (urgency), done by most recent first
-    ['s1', 's2', 'director', 'finance'].forEach(k => {
+    // Sort each active column by oldest first (urgency), done by most recent first
+    ['s1', 's2', 'director', 'finance', 'founder'].forEach(k => {
       out[k].sort((a, b) => new Date(a.submitted_at) - new Date(b.submitted_at));
     });
     out.done.sort((a, b) => new Date(b.updated_at || b.submitted_at) - new Date(a.updated_at || a.submitted_at));
@@ -322,15 +342,15 @@ export default function S2QueuePage() {
         {loading ? (
           <div className="flex items-center justify-center flex-1 text-gray-400">Loading...</div>
         ) : (
-          <div className="grid grid-cols-5 gap-3 flex-1 overflow-hidden">
+          <div className="flex gap-3 flex-1 overflow-x-auto overflow-y-hidden pb-2">
             {COLUMNS.map(col => {
               const items = buckets[col.key] || [];
               const isActionable = col.key === 's2' || col.key === 's1';
               return (
-                <div key={col.key} className={`${col.tint} border rounded-xl p-2.5 flex flex-col overflow-hidden`}>
+                <div key={col.key} className={`${col.tint} border rounded-xl p-2.5 flex flex-col overflow-hidden flex-1 min-w-[240px]`}>
                   <div className="flex items-center justify-between mb-2 px-1">
-                    <h2 className={`text-xs font-bold ${col.heading} truncate`}>{col.title}</h2>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${col.heading} bg-white border`}>{items.length}</span>
+                    <h2 className={`text-sm font-bold ${col.heading} truncate`}>{col.title}</h2>
+                    <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${col.heading} bg-white border`}>{items.length}</span>
                   </div>
                   <div className="space-y-2 overflow-y-auto flex-1 pr-1">
                     {items.length === 0 ? (
@@ -451,7 +471,7 @@ export default function S2QueuePage() {
                     <span className={selected.current_stage === 's2_rejected' ? 'text-red-600 mt-0.5' : 'text-purple-600 mt-0.5'}>●</span>
                     <div className="flex-1">
                       <div className="flex justify-between">
-                        <span className="font-semibold">{selected.approval_route === 'avisha_director_finance' ? 'Director' : 'S2 — Ritu'}</span>
+                        <span className="font-semibold">{(selected.approval_route === 'avisha_director_finance_founder' || selected.approval_route === 'avisha_director_finance') ? 'Director' : 'S2 — Ritu'}</span>
                         <span className="text-xs text-gray-500">{fmtDate(selected.s2_approved_at)} {fmtTime(selected.s2_approved_at)}</span>
                       </div>
                       {selected.s2_notes && <p className="text-xs italic text-gray-600">"{selected.s2_notes}"</p>}

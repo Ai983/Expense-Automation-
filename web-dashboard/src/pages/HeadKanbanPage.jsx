@@ -13,7 +13,9 @@ function stageTimestamp(item, stream) {
   if (stream === 'imprest') {
     const s = item.current_stage;
     if (s === 's2_pending') return item.s1_approved_at || item.submitted_at;
-    if (s === 's3_pending') return item.s2_approved_at || item.submitted_at;
+    if (s === 'director_pending') return item.s1_approved_at || item.submitted_at;
+    if (s === 's3_pending') return item.s2_approved_at || item.director_approved_at || item.submitted_at;
+    if (s === 'founder_review_pending') return item.approved_at || item.submitted_at;
     if (s === 's3_approved') return item.approved_at || item.submitted_at;
     return item.submitted_at;
   }
@@ -54,10 +56,11 @@ export default function HeadKanbanPage() {
   const pos = useMemo(() => filter(data.pos, 'po'), [data, site, ageFilter]);
 
   const imprestColumns = [
-    { key: 's1_pending',   title: 'S1 Pending', color: 'bg-yellow-100', items: imprests.filter((i) => i.current_stage === 's1_pending') },
-    { key: 's2_ritu',      title: 'S2 – Ritu', color: 'bg-blue-100',   items: imprests.filter((i) => i.current_stage === 's2_pending' && i.approval_route !== 'avisha_director_finance') },
-    { key: 's2_director',  title: 'Director WA', color: 'bg-purple-100', items: imprests.filter((i) => i.current_stage === 's2_pending' && i.approval_route === 'avisha_director_finance') },
+    { key: 's1_pending',   title: 'S1 – Avisha', color: 'bg-yellow-100', items: imprests.filter((i) => i.current_stage === 's1_pending') },
+    { key: 's2_ritu',      title: 'S2 – Ritu', color: 'bg-blue-100',   items: imprests.filter((i) => i.current_stage === 's2_pending') },
+    { key: 'director',     title: 'Director WA', color: 'bg-purple-100', items: imprests.filter((i) => i.current_stage === 'director_pending') },
     { key: 's3_pending',   title: 'Finance Pending', color: 'bg-orange-100', items: imprests.filter((i) => i.current_stage === 's3_pending') },
+    { key: 'founder',      title: 'Founder WA', color: 'bg-pink-100', items: imprests.filter((i) => i.current_stage === 'founder_review_pending') },
     { key: 's3_approved',  title: 'Approved – Unpaid', color: 'bg-teal-100', items: imprests.filter((i) => i.current_stage === 's3_approved') },
   ];
 

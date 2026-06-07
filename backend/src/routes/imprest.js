@@ -12,6 +12,7 @@ import {
 } from '../services/travelService.js';
 import { extractRideFare } from '../services/visionService.js';
 import { generateImprestRefId } from '../utils/refIdGenerator.js';
+import { resolveImprestRouting } from '../utils/imprestRouting.js';
 import { ok, fail } from '../utils/responseHelper.js';
 import { FINANCE_ROLES, FINANCE_HEAD_ROLES, S1_ROLES, S2_ROLES, FOUNDER_ROLES, DIRECTOR_APPROVAL_THRESHOLD } from '../config/constants.js';
 import { broadcastNewImprest } from '../index.js';
@@ -200,14 +201,9 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       .select()
       .single();
 
-    // Determine approval route automatically
+    // Determine approval route and starting stage (shared three-tier logic)
     const amount = parseFloat(amountRequested);
-    let approvalRoute;
-    if (amount < 10000) {
-      approvalRoute = 'avisha_finance_founder';           // Route A: < ₹10,000 → Finance → Dhruv
-    } else {
-      approvalRoute = 'avisha_director_finance_founder';  // Route B: ≥ ₹10,000 → Bhaskar → Finance → Dhruv
-    }
+    const { approvalRoute, startingStage } = resolveImprestRouting(site, amount);
 
     // Calculate old balance deduction if employee has expired reminders
     let oldBalanceDeduction = 0;
@@ -249,8 +245,8 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       if (category === 'Conveyance' && conveyanceMode) extraFields.conveyance_mode = conveyanceMode;
       if (category === 'Conveyance' && vehicleType) extraFields.vehicle_type = vehicleType;
       if (category === 'Labour Expense' && labourSubcategory) extraFields.labour_subcategory = labourSubcategory;
-      // All new requests start at S1 pending, go through founder gate after Finance
-      extraFields.current_stage = 's1_pending';
+      // Set starting stage based on approval route
+      extraFields.current_stage = startingStage;
       extraFields.approval_route = approvalRoute;
       extraFields.old_balance_deducted = Math.round(oldBalanceDeduction * 100) / 100;
       await supabaseAdmin.from('imprest_requests').update(extraFields).eq('id', imprest.id);
@@ -299,18 +295,22 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
     } catch (e) { console.warn('WF1 employee lookup failed:', e.message); }
 
     // ── Stage arrival WhatsApp notifications (non-blocking) ──────────────
-    const startStage = 's1_pending';
     try {
       const { data: emp } = await supabaseAdmin
         .from('employees').select('name').eq('id', req.user.id).single();
       const empName = emp?.name || 'Employee';
-      console.log(`[Imprest] Sending ${startStage} notification for ${refId} to S1`);
-      await notifyS1({ refId, employeeName: empName, site, category, amount: parseFloat(amountRequested), purpose: purpose || '' });
+      if (startingStage === 's2_pending') {
+        console.log(`[Imprest] Sending s2_pending notification for ${refId} to S2 (Ritu)`);
+        await notifyS2({ refId, employeeName: empName, site, category, amount: parseFloat(amountRequested), purpose: purpose || '', s1Notes: '' });
+      } else {
+        console.log(`[Imprest] Sending s1_pending notification for ${refId} to S1 (Avisha)`);
+        await notifyS1({ refId, employeeName: empName, site, category, amount: parseFloat(amountRequested), purpose: purpose || '' });
+      }
     } catch (e) { console.warn('Stage notify failed:', e.message); }
 
     return ok(res, {
       refId, status: 'pending',
-      currentStage: startStage,
+      currentStage: startingStage,
       approvalRoute,
       message: 'Imprest request submitted. Under review.',
     }, 201);
@@ -501,7 +501,7 @@ router.get('/finance/queue', authMiddleware, roleGuard(FINANCE_HEAD_ROLES), asyn
           .from('expenses')
           .select('imprest_id, amount, status')
           .in('imprest_id', allApprovedIds)
-          .not('status', 'in', '("rejected","blocked")');
+          .in('status', ['approved', 'verified', 'auto_verified']);
         for (const exp of (allLinkedExp || [])) {
           if (!allExpByImprest[exp.imprest_id]) allExpByImprest[exp.imprest_id] = 0;
           allExpByImprest[exp.imprest_id] += parseFloat(exp.amount);
@@ -781,7 +781,7 @@ async function buildStageQueue(req, stageFilter, routeFilter) {
     let expMap = {};
     if (aIds.length > 0) {
       const { data: exps } = await supabaseAdmin.from('expenses').select('imprest_id, amount, status')
-        .in('imprest_id', aIds).not('status', 'in', '("rejected","blocked")');
+        .in('imprest_id', aIds).in('status', ['approved', 'verified', 'auto_verified']);
       for (const e of (exps || [])) { expMap[e.imprest_id] = (expMap[e.imprest_id] || 0) + parseFloat(e.amount); }
     }
     for (const imp of (empImps || [])) {
@@ -824,13 +824,13 @@ router.post('/:id/s1-approve', authMiddleware, roleGuard(S1_ROLES), async (req, 
       s1_note: notes || null,
     };
 
-    // Route A: < ₹10,000 → skip S2, go directly to Finance (S3)
+    // Route A: < ₹10,000 → skip Director, go directly to Finance (S3)
     if (imp.approval_route === 'avisha_finance_founder') {
       updateFields.current_stage = 's3_pending';
     }
-    // Route B: ≥ ₹10,000 → go to Bhaskar (S2) via WhatsApp
+    // Route B: ≥ ₹10,000 → go to Director (Bhaskar) for approval
     else if (imp.approval_route === 'avisha_director_finance_founder') {
-      updateFields.current_stage = 's2_pending';
+      updateFields.current_stage = 'director_pending';
     }
 
     await supabaseAdmin.from('imprest_requests').update(updateFields).eq('id', req.params.id);
@@ -873,9 +873,9 @@ router.post('/:id/s1-approve', authMiddleware, roleGuard(S1_ROLES), async (req, 
     }
 
     // Route A: No WhatsApp, goes directly to Finance queue (notification handled separately)
-    // Removed old Ritu and Dhruv WhatsApp triggers
+    // Route B: Bhaskar WhatsApp already triggered above
 
-    const newStage = imp.approval_route === 'avisha_finance_founder' ? 's3_pending' : 's2_pending';
+    const newStage = imp.approval_route === 'avisha_finance_founder' ? 's3_pending' : 'director_pending';
     await logAudit({
       userId: req.user.id, action: 's1_approve',
       entityType: 'expense', entityId: imp.id,
@@ -993,11 +993,11 @@ router.post('/:id/s2-reject-s1', authMiddleware, roleGuard(S2_ROLES), async (req
 // STAGE 2: Ritu Queue & Actions
 // ════════════════════════════════════════════════════════════════════════════
 
-// GET /api/imprest/s2/queue — Ritu's queue (now empty — all routes migrated to founder gate)
+// GET /api/imprest/s2/queue — Ritu's queue (HO/Bangalore sites)
 router.get('/s2/queue', authMiddleware, roleGuard([...S2_ROLES, 'head']), async (req, res, next) => {
   try {
-    // Route avisha_ritu_finance no longer exists; all requests migrated to avisha_finance_founder
-    return ok(res, { requests: [], total: 0, page: 1, limit: 50 });
+    const result = await buildStageQueue(req, 's2_pending', null);
+    return ok(res, result);
   } catch (err) { next(err); }
 });
 
@@ -1007,11 +1007,11 @@ router.get('/board', authMiddleware, roleGuard([...S1_ROLES, ...S2_ROLES, ...FIN
     const daysWindow = parseInt(req.query.days) || 14;
     const sinceIso = new Date(Date.now() - daysWindow * 86400000).toISOString();
 
-    // Active stages — all pending
+    // Active stages — all pending (includes new three-tier system stages)
     const activeRes = await supabaseAdmin
       .from('imprest_requests')
       .select('*, employee:employee_id (id, name, email, site)')
-      .in('current_stage', ['s1_pending', 's2_pending', 's3_pending'])
+      .in('current_stage', ['s1_pending', 's2_pending', 'director_pending', 's3_pending', 'founder_review_pending'])
       .order('submitted_at', { ascending: false })
       .limit(300);
 
@@ -1019,7 +1019,7 @@ router.get('/board', authMiddleware, roleGuard([...S1_ROLES, ...S2_ROLES, ...FIN
     const terminalRes = await supabaseAdmin
       .from('imprest_requests')
       .select('*, employee:employee_id (id, name, email, site)')
-      .in('current_stage', ['paid', 's1_rejected', 's2_rejected', 's3_rejected', 'director_rejected'])
+      .in('current_stage', ['paid', 's1_rejected', 's2_rejected', 's3_rejected', 'director_rejected', 'founder_rejected'])
       .gte('updated_at', sinceIso)
       .order('updated_at', { ascending: false })
       .limit(100);
@@ -1101,7 +1101,7 @@ router.post('/:id/s2-approve', authMiddleware, roleGuard(S2_ROLES), async (req, 
       .eq('id', req.params.id).single();
     if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
     if (imp.current_stage !== 's2_pending') return fail(res, 'Request is not at Stage 2');
-    if (imp.approval_route !== 'avisha_ritu_finance') return fail(res, 'This request is not routed through Stage 2 reviewer');
+    if (imp.approval_route !== 's2_finance_founder') return fail(res, 'This request is not routed through Stage 2 reviewer');
 
     const updateFields = {
       current_stage: 's3_pending',
@@ -1155,6 +1155,94 @@ router.post('/:id/s2-reject', authMiddleware, roleGuard(S2_ROLES), async (req, r
     });
 
     return ok(res, { refId: imp.ref_id, status: 'rejected' });
+  } catch (err) { next(err); }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// DIRECTOR: Director approves high-value (≥₹10K) imprests
+// ════════════════════════════════════════════════════════════════════════════
+
+// GET /api/imprest/director/queue — Director's approval queue
+router.get('/director/queue', authMiddleware, roleGuard(['admin']), async (req, res, next) => {
+  try {
+    const result = await buildStageQueue(req, 'director_pending', null);
+    return ok(res, result);
+  } catch (err) { next(err); }
+});
+
+// POST /api/imprest/:id/director-approve — Director approves high-value imprests
+router.post('/:id/director-approve', authMiddleware, roleGuard(['admin']), async (req, res, next) => {
+  try {
+    const { notes, approvedAmount } = req.body;
+    const { data: imp, error: fetchErr } = await supabaseAdmin
+      .from('imprest_requests')
+      .select('id, ref_id, current_stage, approval_route, amount_requested, employee_id, site, category, purpose')
+      .eq('id', req.params.id).single();
+    if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
+    if (imp.current_stage !== 'director_pending') return fail(res, 'Request is not awaiting Director approval');
+    if (imp.approval_route !== 'avisha_director_finance_founder') return fail(res, 'This request does not require Director approval');
+
+    const updateFields = {
+      current_stage: 's3_pending',
+      director_approved_by: req.user.id,
+      director_approved_at: new Date().toISOString(),
+      director_note: notes || null,
+    };
+    // Director can reduce the amount
+    if (approvedAmount && parseFloat(approvedAmount) < parseFloat(imp.amount_requested)) {
+      updateFields.director_approved_amount = parseFloat(approvedAmount);
+      updateFields.amount_requested = parseFloat(approvedAmount);
+    } else {
+      updateFields.director_approved_amount = parseFloat(imp.amount_requested);
+    }
+
+    await supabaseAdmin.from('imprest_requests').update(updateFields).eq('id', req.params.id);
+
+    await logAudit({
+      userId: req.user.id, action: 'director_approve', entityType: 'expense', entityId: imp.id,
+      oldValue: { current_stage: 'director_pending' },
+      newValue: { current_stage: 's3_pending', director_note: notes },
+      ipAddress: req.ip,
+    });
+
+    // Notify Finance when forwarded to s3_pending
+    try {
+      const empName = (await supabaseAdmin.from('employees').select('name').eq('id', imp.employee_id).single()).data?.name || '';
+      notifyFinance({ refId: imp.ref_id, employeeName: empName, site: imp.site, category: imp.category, amount: parseFloat(updateFields.amount_requested || imp.amount_requested), purpose: imp.purpose || '', s2Notes: notes || '' });
+    } catch (e) { console.warn('Finance notify failed:', e.message); }
+
+    return ok(res, { refId: imp.ref_id, currentStage: 's3_pending', message: 'Forwarded to Finance team' });
+  } catch (err) { next(err); }
+});
+
+// POST /api/imprest/:id/director-reject — Director rejects
+router.post('/:id/director-reject', authMiddleware, roleGuard(['admin']), async (req, res, next) => {
+  try {
+    const { reason } = req.body;
+    if (!reason?.trim()) return fail(res, 'Rejection reason is required');
+    const { data: imp, error: fetchErr } = await supabaseAdmin
+      .from('imprest_requests')
+      .select('id, ref_id, current_stage, approval_route')
+      .eq('id', req.params.id).single();
+    if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
+    if (imp.current_stage !== 'director_pending') return fail(res, 'Request is not at Director approval stage');
+
+    await supabaseAdmin.from('imprest_requests').update({
+      current_stage: 's1_pending',
+      director_approved_by: null,
+      director_approved_at: null,
+      director_note: reason,
+      director_approved_amount: null,
+    }).eq('id', req.params.id);
+
+    await logAudit({
+      userId: req.user.id, action: 'director_reject', entityType: 'expense', entityId: imp.id,
+      oldValue: { current_stage: 'director_pending' },
+      newValue: { current_stage: 's1_pending', reason },
+      ipAddress: req.ip,
+    });
+
+    return ok(res, { refId: imp.ref_id, currentStage: 's1_pending', message: 'Request sent back to S1 for revision' });
   } catch (err) { next(err); }
 });
 

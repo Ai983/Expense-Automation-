@@ -92,44 +92,65 @@ function downloadImprestCSV(requests) {
 
 // ── Approval Timeline ──────────────────────────────────────────────────────
 function ApprovalTimeline({ req }) {
-  const isDirector = req.approval_route === 'avisha_director_finance';
-  const steps = [
-    {
-      label: 'S1 — Review',
-      sub: 'Avisha',
+  const route = req.approval_route;
+  // New three-tier routes (with legacy fallbacks)
+  const isDirector = route === 'avisha_director_finance_founder' || route === 'avisha_director_finance';
+  const isHO = route === 's2_finance_founder';
+  const hasFounderGate = route === 'avisha_finance_founder' || route === 'avisha_director_finance_founder' || route === 's2_finance_founder';
+  const financeDone = ['founder_review_pending', 'founder_approved', 's3_approved'].includes(req.current_stage) || !!req.paid;
+
+  const steps = [];
+
+  // Stage 1 — S1 (Avisha) for normal sites, or S2 (Ritu) for Head Office / Bangalore
+  if (isHO) {
+    steps.push({
+      label: 'S2 — Ritu', sub: 'Approval',
+      done: !!req.s2_approved_at || financeDone,
+      rejected: req.current_stage === 's2_rejected',
+      date: req.s2_approved_at, note: req.s2_notes,
+    });
+  } else {
+    steps.push({
+      label: 'S1 — Review', sub: 'Avisha',
       done: !!req.s1_approved_at,
-      rejected: false,
-      date: req.s1_approved_at,
-      note: req.s1_notes,
-    },
-    {
-      label: req.approval_route === 'avisha_director_finance' ? 'Director / Bhaskar Sir'
-           : req.approval_route === 'avisha_dhruv_finance' ? 'Dhruv Sir'
-           : 'S2 — Ritu',
-      sub: 'Approval',
-      done: !!(req.s2_approved_at || req.founder_review_status === 'approved'),
-      rejected: req.current_stage === 'director_rejected' || req.founder_review_status === 'rejected',
-      date: req.s2_approved_at || req.founder_review_at,
-      note: req.s2_notes || req.founder_review_comment,
-      extra: req.director_approved_amount ? `Ceiling: ${fmt(req.director_approved_amount)}` : null,
-    },
-    {
-      label: 'Finance',
-      sub: 'Stage 3',
-      done: req.current_stage === 's3_approved' || !!req.paid,
-      rejected: req.current_stage === 's3_rejected',
-      date: req.approved_at,
-      note: req.rejection_reason && req.current_stage === 's3_rejected' ? req.rejection_reason : null,
-    },
-    {
-      label: 'Payment',
-      sub: req.paid ? fmt(req.paid_amount) : 'Not yet paid',
-      done: !!req.paid,
-      rejected: false,
-      date: req.paid_at,
-      note: null,
-    },
-  ];
+      rejected: req.current_stage === 's1_rejected',
+      date: req.s1_approved_at, note: req.s1_notes,
+    });
+    if (isDirector) {
+      steps.push({
+        label: 'Director / Bhaskar Sir', sub: 'WhatsApp',
+        done: !!req.director_approved_at || financeDone,
+        rejected: req.current_stage === 'director_rejected',
+        date: req.director_approved_at, note: req.director_note,
+        extra: req.director_approved_amount ? `Ceiling: ${fmt(req.director_approved_amount)}` : null,
+      });
+    }
+  }
+
+  // Finance review
+  steps.push({
+    label: 'Finance', sub: 'Review',
+    done: financeDone,
+    rejected: req.current_stage === 's3_rejected',
+    date: req.approved_at,
+    note: req.rejection_reason && req.current_stage === 's3_rejected' ? req.rejection_reason : null,
+  });
+
+  // Founder gate (Dhruv Sir) — final approval before payment in the new system
+  if (hasFounderGate) {
+    steps.push({
+      label: 'Founder / Dhruv Sir', sub: 'WhatsApp',
+      done: req.founder_review_status === 'approved' || req.current_stage === 'founder_approved' || !!req.paid,
+      rejected: req.founder_review_status === 'rejected' || req.current_stage === 'founder_rejected',
+      date: req.founder_review_at, note: req.founder_review_comment,
+    });
+  }
+
+  // Payment
+  steps.push({
+    label: 'Payment', sub: req.paid ? fmt(req.paid_amount) : 'Not yet paid',
+    done: !!req.paid, rejected: false, date: req.paid_at, note: null,
+  });
 
   return (
     <div>
@@ -434,9 +455,10 @@ export default function ImprestQueuePage() {
                         {req.requires_founder_approval ? (
                           <div>
                             <div className="text-xs text-gray-500">
-                              {req.approval_route === 'avisha_director_finance' ? 'Bhaskar Sir'
+                              {(req.approval_route === 'avisha_director_finance_founder' || req.approval_route === 'avisha_director_finance') ? 'Bhaskar Sir'
                                : req.approval_route === 'avisha_dhruv_finance' ? 'Dhruv Sir'
-                               : "Ritu Ma'am"}
+                               : req.approval_route === 's2_finance_founder' ? "Ritu Ma'am"
+                               : 'Dhruv Sir (Founder)'}
                             </div>
                             {req.founder_review_status === 'approved' && <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-green-100 text-green-700 border border-green-200">Approved</span>}
                             {req.founder_review_status === 'rejected' && <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-red-100 text-red-700 border border-red-200">Rejected</span>}
@@ -459,6 +481,17 @@ export default function ImprestQueuePage() {
                               <button onClick={() => openApprove(req)} className="text-xs bg-green-600 text-white px-3 py-1 rounded-lg hover:bg-green-700 transition-colors font-medium">Approve</button>
                               <button onClick={() => openReject(req)} className="text-xs bg-red-600 text-white px-3 py-1 rounded-lg hover:bg-red-700 transition-colors font-medium">Reject</button>
                             </>
+                          )}
+                          {req.current_stage === 'founder_review_pending' && (
+                            <button onClick={async () => {
+                              try {
+                                await api.post(`/api/imprest/${req.id}/resend-founder-gate`);
+                                alert('✅ WhatsApp resent to Founder (Dhruv Sir)');
+                              } catch (e) { alert('❌ Resend failed: ' + (e.response?.data?.error || e.message)); }
+                            }}
+                              className="text-xs bg-pink-600 text-white px-3 py-1 rounded-lg hover:bg-pink-700 transition-colors font-medium">
+                              📲 Resend
+                            </button>
                           )}
                           {req.current_stage === 's3_approved' && !req.paid && (
                             <button onClick={() => { setPayReq(req); setPayReceipt(null); setActionError(''); }}

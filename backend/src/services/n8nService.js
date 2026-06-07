@@ -79,6 +79,7 @@ export async function triggerFounderGate({
   return postJSON(FOUNDER_GATE_URL, {
     imprestId,
     refId,
+    founderPhone: FOUNDER_PHONE,
     employeeName,
     site,
     amountApproved,

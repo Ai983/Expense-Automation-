@@ -13,11 +13,9 @@ const STUCK_ON = {
 
 function stuckOnLabel(item, stream) {
   if (stream === 'imprest') {
-    if (item.current_stage === 's2_pending') {
-      return item.approval_route === 'avisha_director_finance'
-        ? 'Bhaskar Sir (WhatsApp)'
-        : "Ritu Ma'am (Stage 2)";
-    }
+    if (item.current_stage === 's2_pending') return "Ritu Ma'am (Stage 2)";
+    if (item.current_stage === 'director_pending') return 'Bhaskar Sir (Director WhatsApp)';
+    if (item.current_stage === 'founder_review_pending') return 'Dhruv Sir (Founder WhatsApp)';
     return STUCK_ON[item.current_stage] || item.current_stage;
   }
   if (stream === 'expense') return STUCK_ON[item.status] || item.status;
@@ -30,7 +28,9 @@ function stageTimestamp(item, stream) {
     const s = item.current_stage;
     if (s === 's1_pending') return item.submitted_at;
     if (s === 's2_pending') return item.s1_approved_at || item.submitted_at;
-    if (s === 's3_pending') return item.s2_approved_at || item.submitted_at;
+    if (s === 'director_pending') return item.s1_approved_at || item.submitted_at;
+    if (s === 's3_pending') return item.s2_approved_at || item.director_approved_at || item.submitted_at;
+    if (s === 'founder_review_pending') return item.approved_at || item.submitted_at;
     if (s === 's3_approved') return item.approved_at || item.submitted_at;
     return item.submitted_at;
   }
