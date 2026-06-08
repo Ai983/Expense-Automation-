@@ -107,14 +107,14 @@ function ApprovalTimeline({ req }) {
       label: 'S2 — Ritu', sub: 'Approval',
       done: !!req.s2_approved_at || financeDone,
       rejected: req.current_stage === 's2_rejected',
-      date: req.s2_approved_at, note: req.s2_notes,
+      date: req.s2_approved_at, note: req.s2_note || req.s2_notes,
     });
   } else {
     steps.push({
       label: 'S1 — Review', sub: 'Avisha',
       done: !!req.s1_approved_at,
       rejected: req.current_stage === 's1_rejected',
-      date: req.s1_approved_at, note: req.s1_notes,
+      date: req.s1_approved_at, note: req.s1_note || req.s1_notes,
     });
     if (isDirector) {
       steps.push({
@@ -209,6 +209,7 @@ export default function ImprestQueuePage() {
   const [selected, setSelected] = useState(null);
   const [modalMode, setModalMode] = useState(null);
   const [approveAmount, setApproveAmount] = useState('');
+  const [approveNote, setApproveNote] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState('');
@@ -249,21 +250,22 @@ export default function ImprestQueuePage() {
 
   const openApprove = (req) => {
     setSelected(req); setApproveAmount(String(req.amount_requested));
-    setRejectReason(''); setActionError(''); setModalMode('approve');
+    setApproveNote(''); setRejectReason(''); setActionError(''); setModalMode('approve');
   };
   const openReject = (req) => {
     setSelected(req); setRejectReason(''); setActionError(''); setModalMode('reject');
   };
   const closeModal = () => {
     setSelected(null); setModalMode(null);
-    setApproveAmount(''); setRejectReason(''); setActionError('');
+    setApproveAmount(''); setApproveNote(''); setRejectReason(''); setActionError('');
   };
 
   const handleApprove = async () => {
     if (!approveAmount || parseFloat(approveAmount) <= 0) { setActionError('Enter a valid approved amount.'); return; }
+    if (!approveNote.trim()) { setActionError('Finance note is required before sending to Founder.'); return; }
     setActionLoading(true); setActionError('');
     try {
-      await api.post(`/api/imprest/${selected.id}/approve`, { approvedAmount: parseFloat(approveAmount) });
+      await api.post(`/api/imprest/${selected.id}/approve`, { approvedAmount: parseFloat(approveAmount), s3Note: approveNote.trim() });
       closeModal(); fetchQueue();
     } catch (e) { setActionError(e.response?.data?.error || 'Approval failed.'); }
     finally { setActionLoading(false); }
@@ -765,21 +767,29 @@ export default function ImprestQueuePage() {
               </div>
 
               {modalMode === 'approve' && (
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Approved Amount (₹)</label>
-                  <input type="number" value={approveAmount}
-                    onChange={(e) => setApproveAmount(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                    placeholder="Enter approved amount" />
-                  {parseFloat(approveAmount) < parseFloat(selected.amount_requested) && approveAmount && (
-                    <p className="text-xs text-blue-600 mt-1">This will be recorded as a partial approval.</p>
-                  )}
-                  {selected?.director_approved_amount && (
-                    <p className="text-xs text-orange-600 mt-1">Director approved {fmt(selected.director_approved_amount)} — you cannot exceed this amount.</p>
-                  )}
-                  {selected?.old_balance_deducted > 0 && (
-                    <p className="text-xs text-amber-600 mt-1">Old balance deduction: {fmt(selected.old_balance_deducted)} will be subtracted.</p>
-                  )}
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Approved Amount (₹)</label>
+                    <input type="number" value={approveAmount}
+                      onChange={(e) => setApproveAmount(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                      placeholder="Enter approved amount" />
+                    {parseFloat(approveAmount) < parseFloat(selected.amount_requested) && approveAmount && (
+                      <p className="text-xs text-blue-600 mt-1">This will be recorded as a partial approval.</p>
+                    )}
+                    {selected?.director_approved_amount && (
+                      <p className="text-xs text-orange-600 mt-1">Director approved {fmt(selected.director_approved_amount)} — you cannot exceed this amount.</p>
+                    )}
+                    {selected?.old_balance_deducted > 0 && (
+                      <p className="text-xs text-amber-600 mt-1">Old balance deduction: {fmt(selected.old_balance_deducted)} will be subtracted.</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Finance Note <span className="text-red-500">*</span></label>
+                    <textarea value={approveNote} onChange={(e) => setApproveNote(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
+                      rows={2} placeholder="Add your review note (visible to Founder)…" />
+                  </div>
                 </div>
               )}
 

@@ -654,9 +654,10 @@ router.post('/finance/unblock/:employeeId', authMiddleware, roleGuard(FINANCE_RO
 router.post('/:id/approve', authMiddleware, roleGuard(FINANCE_ROLES), async (req, res, next) => {
   try {
     const { approvedAmount, s3Note } = req.body;
+    if (!s3Note?.trim()) return fail(res, 'Finance note is required before sending to Founder for approval.');
     const { data: imp, error: fetchErr } = await supabaseAdmin
       .from('imprest_requests')
-      .select('id, ref_id, status, amount_requested, employee_id, category, site, purpose, current_stage, approval_route, director_approved_amount, old_balance_deducted, s1_note, s2_note, director_note')
+      .select('id, ref_id, status, amount_requested, employee_id, category, site, purpose, current_stage, approval_route, director_approved_amount, old_balance_deducted, s1_note, s2_note, s2_notes, director_note')
       .eq('id', req.params.id).single();
     if (fetchErr || !imp) return fail(res, 'Imprest request not found', 404);
 
@@ -695,10 +696,11 @@ router.post('/:id/approve', authMiddleware, roleGuard(FINANCE_ROLES), async (req
     await supabaseAdmin.from('imprest_requests').update(updateData).eq('id', req.params.id);
 
     // Trigger WF5: notify Dhruv Sir via WhatsApp
+    // s2_note is canonical; fall back to s2_notes (legacy plural column written by older code)
     const allNotes = {
       s1: imp.s1_note || null,
-      s2: imp.s2_note || null,
-      s3: s3Note || null,
+      s2: imp.s2_note || imp.s2_notes || null,
+      s3: s3Note.trim(),
       director: imp.director_note || null,
     };
     try {
@@ -852,6 +854,7 @@ router.get('/s1/queue', authMiddleware, roleGuard([...S1_ROLES, 'head']), async 
 router.post('/:id/s1-approve', authMiddleware, roleGuard(S1_ROLES), async (req, res, next) => {
   try {
     const { notes } = req.body;
+    if (!notes?.trim()) return fail(res, 'A note is required before forwarding to the next stage.');
     const { data: imp, error: fetchErr } = await supabaseAdmin
       .from('imprest_requests')
       .select('id, ref_id, current_stage, approval_route, amount_requested, employee_id, site, category, purpose, old_balance_deducted')
@@ -863,7 +866,7 @@ router.post('/:id/s1-approve', authMiddleware, roleGuard(S1_ROLES), async (req, 
     const updateFields = {
       s1_approved_by: req.user.id,
       s1_approved_at: now,
-      s1_note: notes || null,
+      s1_note: notes.trim(),
     };
 
     // Route A: < ₹10,000 → skip Director, go directly to Finance (S3)
@@ -965,6 +968,7 @@ router.post('/:id/s1-reject', authMiddleware, roleGuard(S1_ROLES), async (req, r
 router.post('/:id/s2-override', authMiddleware, roleGuard(S2_ROLES), async (req, res, next) => {
   try {
     const { notes, approvedAmount } = req.body;
+    if (!notes?.trim()) return fail(res, 'A note is required before forwarding to Finance.');
     const { data: imp, error: fetchErr } = await supabaseAdmin
       .from('imprest_requests')
       .select('id, ref_id, current_stage, approval_route, amount_requested, employee_id, site, category, purpose')
@@ -977,10 +981,10 @@ router.post('/:id/s2-override', authMiddleware, roleGuard(S2_ROLES), async (req,
       current_stage: 's3_pending',
       s1_approved_by: req.user.id,
       s1_approved_at: now,
-      s1_notes: '(Forwarded by S2)',
+      s1_note: '(Forwarded by S2)',
       s2_approved_by: req.user.id,
       s2_approved_at: now,
-      s2_notes: notes || null,
+      s2_note: notes.trim(),
     };
     if (approvedAmount && parseFloat(approvedAmount) < parseFloat(imp.amount_requested)) {
       updateFields.amount_requested = parseFloat(approvedAmount);
@@ -1137,6 +1141,7 @@ router.get('/s2/history', authMiddleware, roleGuard([...S2_ROLES, 'head']), asyn
 router.post('/:id/s2-approve', authMiddleware, roleGuard(S2_ROLES), async (req, res, next) => {
   try {
     const { notes, approvedAmount } = req.body;
+    if (!notes?.trim()) return fail(res, 'A note is required before forwarding to Finance.');
     const { data: imp, error: fetchErr } = await supabaseAdmin
       .from('imprest_requests')
       .select('id, ref_id, current_stage, approval_route, amount_requested, employee_id, site, category, purpose')
@@ -1149,7 +1154,7 @@ router.post('/:id/s2-approve', authMiddleware, roleGuard(S2_ROLES), async (req, 
       current_stage: 's3_pending',
       s2_approved_by: req.user.id,
       s2_approved_at: new Date().toISOString(),
-      s2_notes: notes || null,
+      s2_note: notes.trim(),
     };
     // Ritu can reduce the amount
     if (approvedAmount && parseFloat(approvedAmount) < parseFloat(imp.amount_requested)) {
@@ -1216,6 +1221,7 @@ router.get('/director/queue', authMiddleware, roleGuard(['admin']), async (req, 
 router.post('/:id/director-approve', authMiddleware, roleGuard(['admin']), async (req, res, next) => {
   try {
     const { notes, approvedAmount } = req.body;
+    if (!notes?.trim()) return fail(res, 'A note is required before forwarding to Finance.');
     const { data: imp, error: fetchErr } = await supabaseAdmin
       .from('imprest_requests')
       .select('id, ref_id, current_stage, approval_route, amount_requested, employee_id, site, category, purpose')

@@ -136,11 +136,11 @@ function KanbanCard({ req, onView, onForward, onReject, actionable }) {
         <span className="text-[11px] px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">{req.site}</span>
       </div>
       {req.purpose && <p className="text-[11px] text-gray-500 mt-1.5 line-clamp-2">{req.purpose}</p>}
-      {req.s1_notes && (
-        <p className="text-[11px] text-blue-600 mt-1 italic line-clamp-1" title={req.s1_notes}>S1: "{req.s1_notes}"</p>
+      {(req.s1_note || req.s1_notes) && (
+        <p className="text-[11px] text-blue-600 mt-1 italic line-clamp-1" title={req.s1_note || req.s1_notes}>S1: "{req.s1_note || req.s1_notes}"</p>
       )}
-      {req.s2_notes && (
-        <p className="text-[11px] text-purple-600 mt-1 italic line-clamp-1" title={req.s2_notes}>S2: "{req.s2_notes}"</p>
+      {(req.s2_note || req.s2_notes) && (
+        <p className="text-[11px] text-purple-600 mt-1 italic line-clamp-1" title={req.s2_note || req.s2_notes}>S2: "{req.s2_note || req.s2_notes}"</p>
       )}
       {isRejected && req.rejection_reason && (
         <p className="text-[11px] text-red-600 mt-1 italic line-clamp-1" title={req.rejection_reason}>✗ "{req.rejection_reason}"</p>
@@ -284,13 +284,14 @@ export default function S2QueuePage() {
   const closeModal = () => { setSelected(null); setModalMode(null); };
 
   const handleForward = async () => {
+    if (!notes.trim()) { setActionError('A note is required before forwarding to Finance.'); return; }
     setActing(true); setActionError('');
     try {
       const endpoint = selected.current_stage === 's1_pending'
         ? `/api/imprest/${selected.id}/s2-override`
         : `/api/imprest/${selected.id}/s2-approve`;
       await api.post(endpoint, {
-        notes: notes.trim() || undefined,
+        notes: notes.trim(),
         approvedAmount: parseFloat(approveAmount) || undefined,
       });
       showToast(selected.current_stage === 's1_pending' ? 'Fast-forwarded to Finance team' : 'Forwarded to Finance team', 'success');
@@ -462,7 +463,7 @@ export default function S2QueuePage() {
                     <span className="text-blue-600 mt-0.5">●</span>
                     <div className="flex-1">
                       <div className="flex justify-between"><span className="font-semibold">S1 — Avisha</span><span className="text-xs text-gray-500">{fmtDate(selected.s1_approved_at)} {fmtTime(selected.s1_approved_at)}</span></div>
-                      {selected.s1_notes && <p className="text-xs italic text-gray-600">"{selected.s1_notes}"</p>}
+                      {(selected.s1_note || selected.s1_notes) && <p className="text-xs italic text-gray-600">"{selected.s1_note || selected.s1_notes}"</p>}
                     </div>
                   </div>
                 )}
@@ -474,7 +475,7 @@ export default function S2QueuePage() {
                         <span className="font-semibold">{(selected.approval_route === 'avisha_director_finance_founder' || selected.approval_route === 'avisha_director_finance') ? 'Director' : 'S2 — Ritu'}</span>
                         <span className="text-xs text-gray-500">{fmtDate(selected.s2_approved_at)} {fmtTime(selected.s2_approved_at)}</span>
                       </div>
-                      {selected.s2_notes && <p className="text-xs italic text-gray-600">"{selected.s2_notes}"</p>}
+                      {(selected.s2_note || selected.s2_notes) && <p className="text-xs italic text-gray-600">"{selected.s2_note || selected.s2_notes}"</p>}
                       {selected.founder_review_comment && <p className="text-xs italic text-gray-600">Founder: "{selected.founder_review_comment}"</p>}
                     </div>
                   </div>
@@ -510,10 +511,10 @@ export default function S2QueuePage() {
                     )}
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">S2 Approval Remark</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">S2 Approval Note <span className="text-red-500">*</span></label>
                     <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
-                      className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-400" rows={2} />
-                    <p className="text-xs text-gray-400 mt-1">This remark will be saved on the approval trail and visible to Finance.</p>
+                      className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-400" rows={2} placeholder="Required — your review note visible to Finance and Founder" />
+                    <p className="text-xs text-gray-400 mt-1">This note is required and visible to Finance and Founder in the approval trail.</p>
                   </div>
                 </>
               )}

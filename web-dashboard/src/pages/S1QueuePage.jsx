@@ -131,13 +131,14 @@ export default function S1QueuePage() {
   };
 
   const handleForward = async () => {
+    if (!notes.trim()) { setActionError('A note is required before forwarding to the next stage.'); return; }
     setActing(true); setActionError('');
     const requestId = selected.id;
     const isDirectorRoute = selected.approval_route === 'avisha_director_finance_founder'
       || selected.approval_route === 'avisha_director_finance';
     const destination = isDirectorRoute ? 'Director (WhatsApp)' : 'Finance';
     try {
-      await api.post(`/api/imprest/${requestId}/s1-approve`, { notes: notes.trim() || undefined });
+      await api.post(`/api/imprest/${requestId}/s1-approve`, { notes: notes.trim() });
       showToast(`✓ Forwarded to ${destination}`, 'success');
       closeModal();
       // Animate the row out then refetch
@@ -319,9 +320,9 @@ export default function S1QueuePage() {
 
               {modalMode === 'forward' && (
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Notes (optional)</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Note <span className="text-red-500">*</span></label>
                   <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-400" rows={2} placeholder="Any notes for the next reviewer..." />
+                    className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-400" rows={2} placeholder="Add your review note (required before forwarding)..." />
                   <p className="text-xs text-gray-400 mt-1">
                     {(selected.approval_route === 'avisha_director_finance_founder' || selected.approval_route === 'avisha_director_finance')
                       ? '⚡ A WhatsApp approval request will be sent to Bhaskar Sir (Director)'
