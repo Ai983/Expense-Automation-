@@ -13,7 +13,7 @@ const IMPREST_SITES = [
   'DEE Development Engineer - Canteen', 'DEE Development Engineer - Admin',
   'Vaneet Infra', 'Dee Foundation Omaxe, Faridabad', 'Auma India Bengaluru',
   'Minebea Mitsumi', 'Hero Homes Ludhiana', 'Hero Homes Greater Noida',
-  'Bansal Tower', 'KOKO Town, Chandigarh', 'Vinfast Jaipur', 'Head Office', 'Bangalore Office', 'Others',
+  'Bansal Tower', 'KOKO Town, Chandigarh', 'Vinfast Jaipur', 'M3M', 'Head Office', 'Bangalore Office', 'Others',
 ];
 
 const STATUS_OPTIONS = [

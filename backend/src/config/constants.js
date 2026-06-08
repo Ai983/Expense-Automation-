@@ -25,6 +25,7 @@ export const SITES = [
   'Dee Foundation Omaxe, Faridabad',
   'Hero Homes Ludhiana',
   'Delhi NCR',
+  'M3M',
 ];
 
 export const CATEGORIES = [
@@ -86,6 +87,7 @@ export const IMPREST_SITES = [
   'Bansal Tower',
   'KOKO Town, Chandigarh',
   'Vinfast Jaipur',
+  'M3M',
   'Head Office',
   'Bangalore Office',
   'Others',

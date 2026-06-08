@@ -11,6 +11,7 @@ const SITES = [
   'Auma India Bengaluru',
   'Minebea Mitsumi',
   'Hero Homes Ludhiana',
+  'M3M',
 ];
 
 export default function FilterBar({ filters, onChange }) {

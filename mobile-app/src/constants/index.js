@@ -25,6 +25,7 @@ export const SITES = [
   'Hero Homes Ludhiana',
   'Delhi NCR',
   'Vinfast Jaipur',
+  'M3M',
 ];
 
 export const CATEGORIES = [
@@ -56,6 +57,7 @@ export const IMPREST_SITES = [
   'Bansal Tower',
   'KOKO Town, Chandigarh',
   'Vinfast Jaipur',
+  'M3M',
   'Head Office',
   'Bangalore Office',
   'Others',
