@@ -2,7 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator,
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
+import { supabase } from '../../src/supabaseClient';
 import { getMyImprestRequests } from '../../src/services/imprestService';
 import { IMPREST_STATUS_LABELS, IMPREST_STATUS_COLOURS } from '../../src/constants';
 
@@ -33,6 +35,30 @@ export default function MyImprestScreen() {
   useEffect(() => {
     fetchRequests();
   }, [fetchRequests]);
+
+  // Re-fetch when screen comes into focus (e.g. user returns from background after WhatsApp notification)
+  useFocusEffect(
+    useCallback(() => {
+      fetchRequests();
+    }, [fetchRequests])
+  );
+
+  // Supabase Realtime — auto-refresh when Finance marks payment on this employee's requests
+  useEffect(() => {
+    if (!user?.id) return;
+    const channel = supabase
+      .channel(`imprest-paid-${user.id}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'finance',
+        table: 'imprest_requests',
+        filter: `employee_id=eq.${user.id}`,
+      }, () => {
+        fetchRequests();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user?.id, fetchRequests]);
 
   if (loading) {
     return (
@@ -79,17 +105,25 @@ const STAGE_LABELS = {
   's2_approved': 'Approved',
   's2_rejected': 'Rejected',
   's3_pending': 'With Finance',
-  's3_approved': 'Approved - Payment Pending',
+  's3_approved': 'Approved - Awaiting Founder',
   's3_rejected': 'Rejected by Finance',
+  'founder_review_pending': 'Awaiting Founder Approval',
+  'founder_approved': '✅ Founder Approved — Payment Coming',
+  'founder_rejected': 'Rejected by Founder',
+  'director_pending': 'With Director',
   'director_rejected': 'Rejected by Director',
-  'paid': 'Paid',
+  'paid': '💸 Paid',
 };
 const STAGE_COLOURS = {
   's1_pending': '#f59e0b',
   's1_rejected': '#ef4444',
   's2_pending': '#f97316',
   's3_pending': '#3b82f6',
-  's3_approved': '#10b981',
+  's3_approved': '#8b5cf6',
+  'founder_review_pending': '#f97316',
+  'founder_approved': '#059669',
+  'founder_rejected': '#ef4444',
+  'director_pending': '#6366f1',
   'paid': '#16a34a',
   'director_rejected': '#ef4444',
   's3_rejected': '#ef4444',
@@ -127,9 +161,20 @@ function ImprestCard({ request }) {
       </View>
 
       {request.paid && request.paid_amount && (
-        <Text style={[styles.approvedAmount, { color: '#16a34a', marginTop: 4 }]}>
-          Paid: ₹{Number(request.paid_amount).toLocaleString('en-IN')}
-        </Text>
+        <View style={styles.paidBox}>
+          <Text style={styles.paidText}>
+            💸 Paid ₹{Number(request.paid_amount).toLocaleString('en-IN')}
+            {request.paid_at ? `  •  ${new Date(request.paid_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}` : ''}
+          </Text>
+          {request.payment_remark ? (
+            <Text style={styles.paymentRemark}>Note: {request.payment_remark}</Text>
+          ) : null}
+        </View>
+      )}
+      {request.current_stage === 'founder_approved' && !request.paid && (
+        <View style={styles.founderApprovedBox}>
+          <Text style={styles.founderApprovedText}>✅ Founder approved — Finance will process payment shortly.</Text>
+        </View>
       )}
       {request.status === 'rejected' && request.rejection_reason && (
         <Text style={styles.rejectionReason}>Reason: {request.rejection_reason}</Text>
@@ -174,5 +219,21 @@ const styles = StyleSheet.create({
   rejectionReason: {
     marginTop: 8, fontSize: 12, color: '#ef4444', fontStyle: 'italic',
     paddingTop: 8, borderTopWidth: 1, borderTopColor: '#fee2e2',
+  },
+  paidBox: {
+    marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#d1fae5',
+  },
+  paidText: {
+    fontSize: 13, fontWeight: '700', color: '#16a34a',
+  },
+  paymentRemark: {
+    marginTop: 3, fontSize: 12, color: '#374151', fontStyle: 'italic',
+  },
+  founderApprovedBox: {
+    marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#a7f3d0',
+    backgroundColor: '#ecfdf5', borderRadius: 6, padding: 8,
+  },
+  founderApprovedText: {
+    fontSize: 12, color: '#065f46', fontWeight: '600',
   },
 });

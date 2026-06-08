@@ -323,6 +323,8 @@ router.get('/my-reminders/:employeeId', authMiddleware, async (req, res, next) =
     if (req.user.role === 'employee' && req.user.id !== req.params.employeeId) {
       return fail(res, 'Access denied', 403);
     }
+    const employeeId = req.params.employeeId;
+
     // Return both pending AND expired reminders — employee still needs to submit for expired ones
     const { data, error } = await supabaseAdmin
       .from('imprest_expense_reminders')
@@ -330,26 +332,65 @@ router.get('/my-reminders/:employeeId', authMiddleware, async (req, res, next) =
         *,
         imprest:imprest_id (id, ref_id, amount_requested, approved_amount, site, category, approved_at)
       `)
-      .eq('employee_id', req.params.employeeId)
+      .eq('employee_id', employeeId)
       .in('status', ['pending', 'expired'])
       .order('deadline', { ascending: true });
     if (error) throw error;
 
+    // Self-heal: find paid imprests with no reminder record (e.g. if reminder creation failed silently)
+    // Must check ALL reminder statuses (not just pending/expired) to avoid re-creating fulfilled ones
+    const { data: allReminderRows } = await supabaseAdmin
+      .from('imprest_expense_reminders')
+      .select('imprest_id')
+      .eq('employee_id', employeeId);
+    const reminderImprestIds = new Set((allReminderRows || []).map((r) => r.imprest_id));
+
+    const { data: orphanedPaid } = await supabaseAdmin
+      .from('imprest_requests')
+      .select('id, ref_id, amount_requested, approved_amount, net_approved_amount, site, category, paid_at')
+      .eq('employee_id', employeeId)
+      .eq('paid', true)
+      .eq('current_stage', 'paid')
+      .gte('paid_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()); // only last 30 days
+
+    const healedReminders = [];
+    for (const imp of orphanedPaid || []) {
+      if (reminderImprestIds.has(imp.id)) continue; // already has a reminder (any status)
+      // Auto-create the missing reminder so it shows in the app
+      const deadline = new Date((imp.paid_at ? new Date(imp.paid_at) : new Date()).getTime() + 3 * 24 * 60 * 60 * 1000).toISOString();
+      try {
+        const { data: inserted } = await supabaseAdmin.from('imprest_expense_reminders').insert({
+          imprest_id: imp.id, employee_id: employeeId,
+          imprest_ref_id: imp.ref_id, deadline, status: 'pending',
+        }).select().single();
+        if (inserted) {
+          healedReminders.push({ ...inserted, imprest: imp });
+        }
+      } catch (e) {
+        // Already exists or another constraint — synthesise a virtual reminder so the screen shows it
+        healedReminders.push({
+          id: `virtual-${imp.id}`, imprest_id: imp.id, employee_id: employeeId,
+          imprest_ref_id: imp.ref_id, deadline, status: 'pending',
+          fulfilled_amount: 0, imprest: imp,
+        });
+      }
+    }
+
     // Calculate actual submitted amount from expenses (uses finance-approved amounts, not submission amounts)
-    const imprestIds = (data || []).map((r) => r.imprest_id).filter(Boolean);
+    const allImprestIds = [...new Set([...(data || []).map((r) => r.imprest_id), ...healedReminders.map((r) => r.imprest_id)].filter(Boolean))];
     const submittedMap = {};
-    if (imprestIds.length > 0) {
+    if (allImprestIds.length > 0) {
       const { data: expRows } = await supabaseAdmin
         .from('expenses')
         .select('imprest_id, amount')
-        .in('imprest_id', imprestIds)
+        .in('imprest_id', allImprestIds)
         .not('status', 'in', '(rejected,blocked)');
       for (const e of expRows || []) {
         submittedMap[e.imprest_id] = Math.round(((submittedMap[e.imprest_id] || 0) + parseFloat(e.amount)) * 100) / 100;
       }
     }
 
-    const reminders = (data || []).map((r) => ({
+    const reminders = [...(data || []), ...healedReminders].map((r) => ({
       ...r,
       actual_submitted: submittedMap[r.imprest_id] || 0,
     }));
@@ -1261,6 +1302,7 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
     if (imp.current_stage !== 'founder_approved') return fail(res, 'Founder approval required before payment.');
 
     const paidAmount = parseFloat(imp.net_approved_amount || imp.approved_amount);
+    const paymentRemark = req.body?.paymentRemark?.trim() || null;
 
     const updateFields = {
       paid: true,
@@ -1268,6 +1310,7 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
       paid_by: req.user.id,
       paid_amount: Math.round(paidAmount * 100) / 100,
       current_stage: 'paid',
+      payment_remark: paymentRemark,
     };
 
     // Upload payment receipt if provided
@@ -1289,7 +1332,7 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
         deadline,
         status: 'pending',
       });
-    } catch (e) { console.warn('Failed to create reminder:', e.message); }
+    } catch (e) { console.error('[CRITICAL] Failed to create expense reminder for', imp.ref_id, ':', e.message); }
 
     // Send WhatsApp notification
     try {
@@ -1299,7 +1342,7 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
         await sendImprestApprovalReminder({
           name: emp.name, phone: emp.phone, refId: imp.ref_id,
           approvedAmount: paidAmount, site: emp.site,
-          category: imp.category || '', deadline,
+          category: imp.category || '', deadline, paymentRemark,
         });
       }
     } catch (e) { console.warn('WhatsApp pay notification failed:', e.message); }

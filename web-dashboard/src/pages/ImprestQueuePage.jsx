@@ -214,6 +214,7 @@ export default function ImprestQueuePage() {
   const [actionError, setActionError] = useState('');
   const [payReq, setPayReq] = useState(null);
   const [payReceipt, setPayReceipt] = useState(null);
+  const [payRemark, setPayRemark] = useState('');
 
   const detailScrollRef = useRef(null);
 
@@ -284,10 +285,11 @@ export default function ImprestQueuePage() {
     try {
       const formData = new FormData();
       if (payReceipt) formData.append('receipt', payReceipt);
+      if (payRemark.trim()) formData.append('paymentRemark', payRemark.trim());
       await api.post(`/api/imprest/${payReq.id}/pay`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setPayReq(null); setPayReceipt(null); fetchQueue();
+      setPayReq(null); setPayReceipt(null); setPayRemark(''); fetchQueue();
     } catch (e) { setActionError(e.response?.data?.error || 'Pay failed'); }
     finally { setActionLoading(false); }
   };
@@ -493,9 +495,9 @@ export default function ImprestQueuePage() {
                               📲 Resend
                             </button>
                           )}
-                          {req.current_stage === 's3_approved' && !req.paid && (
-                            <button onClick={() => { setPayReq(req); setPayReceipt(null); setActionError(''); }}
-                              className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 transition-colors font-medium">Pay</button>
+                          {req.current_stage === 'founder_approved' && !req.paid && (
+                            <button onClick={() => { setPayReq(req); setPayReceipt(null); setPayRemark(''); setActionError(''); }}
+                              className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 transition-colors font-medium">💸 Pay</button>
                           )}
                           {req.paid && (
                             <span className="text-xs text-green-600 font-semibold">✓ Paid {fmtDate(req.paid_at)}</span>
@@ -632,10 +634,30 @@ export default function ImprestQueuePage() {
                 </div>
               )}
 
+              {/* Founder Approved Banner */}
+              {detailReq.current_stage === 'founder_approved' && !detailReq.paid && (
+                <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-300 rounded-xl px-4 py-3">
+                  <span className="text-xl">✅</span>
+                  <div>
+                    <p className="text-sm font-bold text-emerald-800">Approved by Founder (Dhruv Sir)</p>
+                    {detailReq.founder_gate_comment && (
+                      <p className="text-xs text-emerald-700 mt-0.5 italic">"{detailReq.founder_gate_comment}"</p>
+                    )}
+                    <p className="text-xs text-emerald-600 mt-0.5 font-medium">Ready for payment — click Pay Now below.</p>
+                  </div>
+                </div>
+              )}
+
               {/* Approval Journey */}
               <div className="bg-gray-50 rounded-xl p-4">
                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5"><span className="w-1 h-3 rounded-full bg-green-400 inline-block" />Approval Journey</p>
                 <ApprovalTimeline req={detailReq} />
+                {detailReq.payment_remark && (
+                  <div className="mt-2 pt-2 border-t border-gray-200">
+                    <p className="text-xs font-semibold text-gray-500 mb-0.5">Finance Note</p>
+                    <p className="text-sm text-gray-700 italic">"{detailReq.payment_remark}"</p>
+                  </div>
+                )}
                 {detailReq.payment_receipt_url && (
                   <div className="mt-2 pt-2 border-t border-gray-200">
                     <a href={detailReq.payment_receipt_url} target="_blank" rel="noopener noreferrer"
@@ -697,8 +719,8 @@ export default function ImprestQueuePage() {
                   </button>
                 </>
               )}
-              {detailReq.current_stage === 's3_approved' && !detailReq.paid && (
-                <button onClick={() => { setDetailReq(null); setPayReq(detailReq); setPayReceipt(null); setActionError(''); }}
+              {detailReq.current_stage === 'founder_approved' && !detailReq.paid && (
+                <button onClick={() => { setDetailReq(null); setPayReq(detailReq); setPayReceipt(null); setPayRemark(''); setActionError(''); }}
                   className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 active:scale-95 transition-all">
                   💸 Pay Now
                 </button>
@@ -806,6 +828,19 @@ export default function ImprestQueuePage() {
                 <div className="flex justify-between"><span className="text-gray-500">Site</span><span>{payReq.site}</span></div>
               </div>
               <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  Finance Remark <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <textarea
+                  value={payRemark}
+                  onChange={(e) => setPayRemark(e.target.value)}
+                  rows={2}
+                  placeholder="e.g. Paid via NEFT, transferred to account ending 4521…"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                />
+                <p className="text-xs text-gray-400 mt-1">This remark will be sent to the employee over WhatsApp.</p>
+              </div>
+              <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Payment Receipt <span className="text-gray-400 font-normal">(optional)</span></label>
                 <input type="file" accept="image/*,application/pdf"
                   onChange={(e) => setPayReceipt(e.target.files[0] || null)}
@@ -815,7 +850,7 @@ export default function ImprestQueuePage() {
               {actionError && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{actionError}</p>}
             </div>
             <div className="p-5 border-t flex justify-end gap-3">
-              <button onClick={() => { setPayReq(null); setPayReceipt(null); setActionError(''); }}
+              <button onClick={() => { setPayReq(null); setPayReceipt(null); setPayRemark(''); setActionError(''); }}
                 className="px-4 py-2 text-sm text-gray-600 border rounded-lg hover:bg-gray-50 active:scale-95 transition-all">Cancel</button>
               <button onClick={handlePay} disabled={actionLoading}
                 className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60 active:scale-95 transition-all">

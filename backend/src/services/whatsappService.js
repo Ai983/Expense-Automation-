@@ -107,24 +107,26 @@ export async function notifyFinance({ refId, employeeName, site, category, amoun
   } catch (e) { console.warn('[WhatsApp] Finance notify failed:', e.message); }
 }
 
-export async function sendImprestApprovalReminder({ name, phone, refId, approvedAmount, site, category, deadline }) {
+export async function sendImprestApprovalReminder({ name, phone, refId, approvedAmount, site, category, deadline, paymentRemark }) {
   const deadlineStr = new Date(deadline).toLocaleDateString('en-IN', {
     day: '2-digit', month: 'short', year: 'numeric',
   });
 
   const message =
     `Hi ${name}! 👋\n\n` +
-    `Your imprest request *${refId}* has been approved ✅\n\n` +
-    `💰 *Approved Amount:* ₹${Number(approvedAmount).toLocaleString('en-IN')}\n` +
+    `💸 *Payment Dispatched — ${refId}*\n\n` +
+    `Your imprest advance has been approved by the Founder and payment has been released ✅\n\n` +
+    `💰 *Amount Paid:* ₹${Number(approvedAmount).toLocaleString('en-IN')}\n` +
     `📍 *Site:* ${site}\n` +
-    `📁 *Category:* ${category}\n\n` +
-    `⏰ *Please submit your expense by: ${deadlineStr}*\n\n` +
-    `Open the HagerStone app → Submit tab to fill in your expense details.\n\n` +
-    `_If you do not submit within 3 days, your imprest access will be blocked._`;
+    `📁 *Category:* ${category}\n` +
+    (paymentRemark ? `📝 *Finance Note:* ${paymentRemark}\n` : '') +
+    `\n⏰ *Please submit your expenses by: ${deadlineStr}*\n\n` +
+    `Open the HagerStone app → My Imprest to view this update.\n\n` +
+    `_Expense submission required within 3 days or your imprest access will be blocked._`;
 
   try {
     await sendWhatsApp(phone, message);
-    console.log(`[WhatsApp] Approval reminder sent to ${name} (${phone})`);
+    console.log(`[WhatsApp] Payment notification sent to ${name} (${phone})`);
   } catch (err) {
     console.warn(`[WhatsApp] Failed to send to ${name}:`, err.response?.data || err.message);
   }
