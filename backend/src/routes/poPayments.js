@@ -193,6 +193,7 @@ router.get('/finance-queue', authMiddleware, roleGuard([...FINANCE_ROLES, 'head'
         finance_adjusted_amount, finance_adjusted_by, finance_adjusted_at,
         paid_amount, paid_by, paid_at, finance_notes,
         payment_receipt_path, payment_logs,
+        payment_model, cps_authorization_ref, cps_tranche_id,
         created_at, ingested_at
       `)
       .in('status', ['pending_payment', 'partially_paid', 'paid', 'payment_rejected', 'superseded'])

@@ -64,6 +64,8 @@ export default function POPaymentsTab() {
   // SPEC-PAY-01 Gate-2: authorized installment payables (paid against a CPS authorization)
   const [payables, setPayables] = useState([]);
   const [payAuthModal, setPayAuthModal] = useState(null);
+  // Free-text search across all sections (PO no., auth ref, supplier name)
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => { loadQueue(); loadPayables(); }, []);
 
@@ -397,6 +399,36 @@ export default function POPaymentsTab() {
   const paid = queue.filter(p => p.status === 'paid');
   const superseded = queue.filter(p => p.status === 'superseded');
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000);
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
+
+  // Recently paid (last 7 days) — surfaces tranche payments that authorize
+  // and pay through within minutes, so the founder can SEE that 0135/0136
+  // actually went through (instead of just trusting the aggregate count).
+  const recentlyPaid = paid
+    .filter(p => p.paid_at && new Date(p.paid_at) > sevenDaysAgo)
+    .sort((a, b) => new Date(b.paid_at) - new Date(a.paid_at));
+
+  // Cross-section search (PO number, auth ref, supplier name, project name)
+  const q = searchTerm.trim().toLowerCase();
+  const hit = (text) => !q || String(text || '').toLowerCase().includes(q);
+  const paymentMatchesSearch = (p) => !q || [p.cps_po_ref, p.supplier_name, p.project_name, p.cps_authorization_ref].some(hit);
+  const payableMatchesSearch = (p) => !q || [p.po_number, p.auth_number, p.supplier_name, p.project_name].some(hit);
+
+  // Relative time for the Recently Paid timestamp.
+  const timeAgo = (iso) => {
+    if (!iso) return '';
+    const ms = Date.now() - new Date(iso).getTime();
+    if (ms < 0) return 'just now';
+    const min = Math.floor(ms / 60000);
+    if (min < 1) return 'just now';
+    if (min < 60) return `${min} min ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}h ago`;
+    const day = Math.floor(hr / 24);
+    if (day === 1) return 'yesterday';
+    if (day < 7) return `${day} days ago`;
+    return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  };
 
   if (loading) {
     return (
@@ -406,8 +438,35 @@ export default function POPaymentsTab() {
     );
   }
 
+  // Counts/totals shown in the headers respect any active search.
+  const visiblePayables = payables.filter(payableMatchesSearch);
+  const visibleRecentlyPaid = recentlyPaid.filter(paymentMatchesSearch);
+
   return (
     <div className="space-y-6">
+      {/* Quick search — jump to any PO / authorization across all sections */}
+      <div className="bg-white rounded-xl border p-3 flex items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0">
+          <circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path>
+        </svg>
+        <input
+          type="text"
+          placeholder="Search by PO number, authorization ref, or supplier name…"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full text-sm border-0 outline-none focus:ring-0 placeholder:text-gray-400"
+        />
+        {searchTerm && (
+          <button
+            type="button"
+            onClick={() => setSearchTerm('')}
+            className="text-xs text-gray-500 hover:text-gray-800 px-2 py-0.5 rounded shrink-0"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
       {/* Summary cards */}
       <div className="grid grid-cols-3 gap-4">
         <div className="bg-white rounded-xl border p-4">
@@ -435,10 +494,10 @@ export default function POPaymentsTab() {
       {payables.length > 0 && (
         <div>
           <h3 className="text-sm font-medium text-gray-700 mb-3">
-            🔓 Authorized Payables ({payables.length}) <span className="font-normal text-gray-400">— founder ne release approve kiya</span>
+            🔓 Authorized Payables ({visiblePayables.length}{q && visiblePayables.length !== payables.length ? ` of ${payables.length}` : ''}) <span className="font-normal text-gray-400">— founder ne release approve kiya</span>
           </h3>
           <div className="space-y-3">
-            {payables.map(p => {
+            {visiblePayables.map(p => {
               const remaining = Number(p.authorized_amount) - Number(p.already_paid || 0);
               return (
                 <div key={p.auth_number} className="bg-white rounded-xl border border-green-200 p-5">
@@ -476,12 +535,64 @@ export default function POPaymentsTab() {
         </div>
       )}
 
-      {/* Pending / Partial section */}
-      {pending.length > 0 && (
+      {/* Recently Paid (last 7 days) — so the founder can see WHICH POs actually went
+          through (tranche payments often clear within minutes of authorization, so they
+          never appear in "Authorized Payables" long enough to notice). */}
+      {recentlyPaid.length > 0 && (
         <div>
-          <h3 className="text-sm font-medium text-gray-700 mb-3">Pending Payment ({pending.length})</h3>
+          <h3 className="text-sm font-medium text-gray-700 mb-3">
+            ✓ Recently Paid · Last 7 Days ({visibleRecentlyPaid.length}{q && visibleRecentlyPaid.length !== recentlyPaid.length ? ` of ${recentlyPaid.length}` : ''})
+          </h3>
+          <div className="space-y-2">
+            {visibleRecentlyPaid.map(p => {
+              const isTranche = p.payment_model === 'tranche';
+              return (
+                <div key={p.id} className="bg-white rounded-xl border border-gray-200 p-4 hover:border-gray-300 transition-colors">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-sm font-medium">{p.cps_po_ref}</span>
+                        {isTranche && p.cps_authorization_ref && (
+                          <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full">{p.cps_authorization_ref}</span>
+                        )}
+                        <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full">✓ Paid</span>
+                        <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full">{isTranche ? 'tranche' : 'legacy'}</span>
+                      </div>
+                      <p className="text-sm font-medium text-gray-800 mt-1">
+                        {p.project_name || '—'}{p.supplier_name ? ` · ${p.supplier_name}` : ''}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        Paid {timeAgo(p.paid_at)}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-xs text-gray-400">Paid</p>
+                      <p className="text-lg font-semibold text-emerald-700">{fmt(p.paid_amount)}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {q && visibleRecentlyPaid.length === 0 && (
+              <p className="text-sm text-gray-500 italic">No recently-paid items match "{searchTerm}".</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Pending / Partial section */}
+      {pending.length > 0 && (() => {
+        const visiblePending = pending.filter(paymentMatchesSearch);
+        return (
+        <div>
+          <h3 className="text-sm font-medium text-gray-700 mb-3">
+            Pending Payment ({visiblePending.length}{q && visiblePending.length !== pending.length ? ` of ${pending.length}` : ''})
+          </h3>
           <div className="space-y-3">
-            {pending.map(po => {
+            {q && visiblePending.length === 0 && (
+              <p className="text-sm text-gray-500 italic">No pending payments match "{searchTerm}".</p>
+            )}
+            {visiblePending.map(po => {
               const authAmt = getAuthoritativeAmount(po);
               const alreadyPaid = parseFloat(po.paid_amount || 0);
               const remaining = getRemainingBalance(po);
@@ -702,7 +813,8 @@ export default function POPaymentsTab() {
             })}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {pending.length === 0 && (
         <div className="text-center py-10 text-gray-400 bg-white rounded-xl border">
