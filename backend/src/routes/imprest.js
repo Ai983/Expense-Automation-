@@ -379,21 +379,43 @@ router.get('/my-reminders/:employeeId', authMiddleware, async (req, res, next) =
     // Calculate actual submitted amount from expenses (uses finance-approved amounts, not submission amounts)
     const allImprestIds = [...new Set([...(data || []).map((r) => r.imprest_id), ...healedReminders.map((r) => r.imprest_id)].filter(Boolean))];
     const submittedMap = {};
+    const financeApprovedSet = new Set(); // imprest IDs where at least one expense is finance-approved
     if (allImprestIds.length > 0) {
       const { data: expRows } = await supabaseAdmin
         .from('expenses')
-        .select('imprest_id, amount')
+        .select('imprest_id, amount, status')
         .in('imprest_id', allImprestIds)
         .not('status', 'in', '(rejected,blocked)');
       for (const e of expRows || []) {
         submittedMap[e.imprest_id] = Math.round(((submittedMap[e.imprest_id] || 0) + parseFloat(e.amount)) * 100) / 100;
+        if (e.status === 'approved') financeApprovedSet.add(e.imprest_id);
       }
     }
 
-    const reminders = [...(data || []), ...healedReminders].map((r) => ({
-      ...r,
-      actual_submitted: submittedMap[r.imprest_id] || 0,
-    }));
+    // Auto-settle: if actual_submitted >= approved_amount AND finance has approved at least one
+    // expense, the reminder is fully covered — mark it fulfilled so it disappears from the submit screen.
+    const autoSettledIds = [];
+    const allReminders = [...(data || []), ...healedReminders];
+    for (const r of allReminders) {
+      if (!r.imprest_id || r.id?.startsWith('virtual-')) continue;
+      const approvedAmt = parseFloat(r.imprest?.approved_amount || r.imprest?.amount_requested || 0);
+      const submitted = submittedMap[r.imprest_id] || 0;
+      const fullySettled = approvedAmt > 0 && submitted >= approvedAmt && financeApprovedSet.has(r.imprest_id);
+      if (fullySettled) {
+        autoSettledIds.push(r.id);
+      }
+    }
+    if (autoSettledIds.length > 0) {
+      await supabaseAdmin
+        .from('imprest_expense_reminders')
+        .update({ status: 'fulfilled' })
+        .in('id', autoSettledIds);
+    }
+
+    const reminders = allReminders
+      .map((r) => ({ ...r, actual_submitted: submittedMap[r.imprest_id] || 0 }))
+      // Exclude reminders that were just auto-settled or are already fulfilled
+      .filter((r) => !autoSettledIds.includes(r.id));
 
     return ok(res, { reminders });
   } catch (err) { next(err); }
