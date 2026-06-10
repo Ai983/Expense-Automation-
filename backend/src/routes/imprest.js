@@ -971,11 +971,12 @@ router.post('/:id/s1-reject', authMiddleware, roleGuard(S1_ROLES), async (req, r
     if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
     if (imp.current_stage !== 's1_pending') return fail(res, 'Request is not at Stage 1');
 
-    await supabaseAdmin.from('imprest_requests').update({
+    const { error: updErr } = await supabaseAdmin.from('imprest_requests').update({
       status: 'rejected', rejection_reason: reason.trim(),
       current_stage: 's1_rejected',
       s1_approved_by: req.user.id, s1_approved_at: new Date().toISOString(),
     }).eq('id', req.params.id);
+    if (updErr) return fail(res, `Failed to reject request: ${updErr.message}`, 500);
 
     await logAudit({
       userId: req.user.id, action: 's1_reject', entityType: 'expense', entityId: imp.id,
