@@ -645,6 +645,9 @@ export default function ImprestQueuePage() {
                     {detailReq.founder_gate_comment && (
                       <p className="text-xs text-emerald-700 mt-0.5 italic">"{detailReq.founder_gate_comment}"</p>
                     )}
+                    {detailReq.founder_adjusted_amount != null && (
+                      <p className="text-xs font-semibold text-blue-700 mt-1">✏️ Founder adjusted the amount: {fmt(detailReq.approved_amount)} → {fmt(detailReq.founder_adjusted_amount)}</p>
+                    )}
                     <p className="text-xs text-emerald-600 mt-0.5 font-medium">Ready for payment — click Pay Now below.</p>
                   </div>
                 </div>
@@ -685,6 +688,9 @@ export default function ImprestQueuePage() {
                       {detailReq.approved_amount != null && (
                         <CompactRow label="Approved Amount" value={fmt(detailReq.approved_amount)} bold
                           className={Number(detailReq.approved_amount) < Number(detailReq.amount_requested) ? 'text-blue-600' : 'text-green-600'} />
+                      )}
+                      {detailReq.founder_adjusted_amount != null && (
+                        <CompactRow label="Founder Set (payout)" value={fmt(detailReq.founder_adjusted_amount)} bold className="text-blue-600" />
                       )}
                       {detailReq.approver?.name && <CompactRow label="By" value={detailReq.approver.name} />}
                       {detailReq.approved_at && <CompactRow label="On" value={fmtDate(detailReq.approved_at)} />}
@@ -833,7 +839,10 @@ export default function ImprestQueuePage() {
             </div>
             <div className="p-5 space-y-4">
               <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-gray-500">Amount</span><span className="font-bold text-green-700 text-base">{fmt(payReq.net_approved_amount || payReq.approved_amount)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Amount</span><span className="font-bold text-green-700 text-base">{fmt(payReq.founder_adjusted_amount ?? (payReq.net_approved_amount || payReq.approved_amount))}</span></div>
+                {payReq.founder_adjusted_amount != null && (
+                  <div className="flex justify-between text-xs"><span className="text-blue-600">✏️ Set by founder — fixed</span><span className="text-gray-400 line-through">{fmt(payReq.approved_amount)}</span></div>
+                )}
                 <div className="flex justify-between"><span className="text-gray-500">Category</span><span>{payReq.category}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Site</span><span>{payReq.site}</span></div>
               </div>

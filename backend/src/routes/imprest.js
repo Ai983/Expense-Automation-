@@ -1325,12 +1325,16 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
   try {
     const { data: imp, error: fetchErr } = await supabaseAdmin
       .from('imprest_requests')
-      .select('id, ref_id, current_stage, status, approved_amount, net_approved_amount, employee_id, category, old_balance_deducted')
+      .select('id, ref_id, current_stage, status, approved_amount, net_approved_amount, founder_adjusted_amount, employee_id, category, old_balance_deducted')
       .eq('id', req.params.id).single();
     if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
     if (imp.current_stage !== 'founder_approved') return fail(res, 'Founder approval required before payment.');
 
-    const paidAmount = parseFloat(imp.net_approved_amount || imp.approved_amount);
+    // If the founder adjusted the amount at the gate, that is the EXACT payout
+    // (old-balance deduction is ignored). Otherwise fall back to the net/approved.
+    const paidAmount = imp.founder_adjusted_amount != null
+      ? parseFloat(imp.founder_adjusted_amount)
+      : parseFloat(imp.net_approved_amount || imp.approved_amount);
     const paymentRemark = req.body?.paymentRemark?.trim() || null;
 
     const updateFields = {
@@ -1397,29 +1401,60 @@ router.get('/founder/queue', authMiddleware, roleGuard(FOUNDER_ROLES), async (re
   } catch (err) { next(err); }
 });
 
+// GET /api/imprest/founder/history — Dhruv's past decisions (approved + rejected),
+// including payment status so the Hub can show "Paid / Payment pending".
+router.get('/founder/history', authMiddleware, roleGuard(FOUNDER_ROLES), async (req, res, next) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('imprest_requests')
+      .select(`*, employee:employee_id (id, name, email, phone, site), approver:approved_by (id, name)`)
+      .in('founder_gate_status', ['approved', 'rejected'])
+      .order('founder_gate_reviewed_at', { ascending: false })
+      .limit(200);
+    if (error) throw error;
+    return ok(res, { requests: data || [] });
+  } catch (err) { next(err); }
+});
+
 // POST /api/imprest/:id/founder-gate-approve — Dhruv approves
 router.post('/:id/founder-gate-approve', authMiddleware, roleGuard(FOUNDER_ROLES), async (req, res, next) => {
   try {
-    const { founderGateComment } = req.body;
+    const { founderGateComment, adjustedAmount } = req.body;
     const { data: imp, error: fetchErr } = await supabaseAdmin
       .from('imprest_requests')
-      .select('id, ref_id, current_stage')
+      .select('id, ref_id, current_stage, approved_amount, amount_requested')
       .eq('id', req.params.id).single();
     if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
     if (imp.current_stage !== 'founder_review_pending') return fail(res, 'Request is not awaiting founder approval');
 
+    // Optional founder amount adjustment. Reduce-only, and a note is mandatory
+    // when the amount is changed. When set, this becomes the EXACT payout.
+    const cap = Number(imp.approved_amount ?? imp.amount_requested);
+    let founderAdjusted = null;
+    if (adjustedAmount !== undefined && adjustedAmount !== null && adjustedAmount !== '') {
+      const adj = Number(adjustedAmount);
+      if (!Number.isFinite(adj) || adj <= 0) return fail(res, 'Adjusted amount must be a positive number');
+      if (Math.round(adj * 100) !== Math.round(cap * 100)) {
+        if (adj > cap) return fail(res, `Amount can only be reduced (max ₹${cap})`);
+        if (!founderGateComment?.trim()) return fail(res, 'A note is required when you change the amount');
+        founderAdjusted = Math.round(adj * 100) / 100;
+      }
+    }
+
     const now = new Date().toISOString();
-    await supabaseAdmin.from('imprest_requests').update({
+    const updateFields = {
       current_stage: 'founder_approved',
       founder_gate_status: 'approved',
       founder_gate_reviewed_at: now,
-      founder_gate_comment: founderGateComment || null,
-    }).eq('id', req.params.id);
+      founder_gate_comment: founderGateComment?.trim() || null,
+    };
+    if (founderAdjusted !== null) updateFields.founder_adjusted_amount = founderAdjusted;
+    await supabaseAdmin.from('imprest_requests').update(updateFields).eq('id', req.params.id);
 
     await logAudit({
       userId: req.user.id, action: 'founder_gate_approve',
       entityType: 'expense', entityId: imp.id,
-      newValue: { current_stage: 'founder_approved', founder_gate_status: 'approved' },
+      newValue: { current_stage: 'founder_approved', founder_gate_status: 'approved', founder_adjusted_amount: founderAdjusted },
       ipAddress: req.ip,
     });
 
