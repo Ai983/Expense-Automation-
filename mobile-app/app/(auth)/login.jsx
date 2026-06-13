@@ -59,9 +59,24 @@ export default function LoginScreen() {
       }
       router.replace('/(app)/submit');
     } catch (err) {
-      const msg = err.response?.data?.error || 'Invalid email or password';
+      // Only call it a credential problem when the SERVER actually said so.
+      // A missing err.response means the request never reached the backend
+      // (Wi-Fi/DNS/CORS down, or the Railway server cold-starting/timing out) —
+      // showing "Invalid email or password" for that has had users convinced
+      // their password was wrong when it was really a connectivity problem.
+      let msg;
+      if (err.response) {
+        // Backend responded: 401 bad creds, 404 no profile, 403 suspended, etc.
+        msg = err.response.data?.error || 'Invalid email or password';
+      } else if (err.code === 'ECONNABORTED' || /timeout/i.test(err.message || '')) {
+        msg = 'The server took too long to respond — it may be waking up. Please tap Sign In again in a few seconds.';
+      } else {
+        msg = 'Could not reach the server. Check your internet connection (try switching Wi-Fi / mobile data) and try again.';
+      }
       setError(msg);
       showAlert('Login Failed', msg);
+      // Leave a real breadcrumb for support instead of a misleading toast.
+      console.warn('[login] failed:', { code: err.code, status: err.response?.status, message: err.message });
     } finally {
       setLoading(false);
     }
