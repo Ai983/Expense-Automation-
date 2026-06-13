@@ -1,0 +1,27 @@
+name: Keep Railway backend warm
+
+# Railway can idle the backend after inactivity. A cold start adds several
+# seconds, which is fatal to logins on slow site connections (the request
+# times out and the app shows a connectivity error). Pinging /health on a
+# schedule keeps the service warm so logins stay fast.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *' # every 10 minutes (GitHub may delay under load)
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend /health
+        run: |
+          URL="https://expense-automation-production.up.railway.app/health"
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$URL") || code=000
+            echo "attempt $i -> HTTP $code"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 10
+          done
+          echo "Backend health check failed after 3 attempts"
+          exit 1
