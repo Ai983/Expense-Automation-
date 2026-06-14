@@ -21,6 +21,124 @@ import { triggerSubmissionConfirmation, triggerFounderApproval, triggerFounderGa
 
 const router = Router();
 
+// Monday 00:00 of the calendar week containing `date` (server time).
+function getWeekStart(date = new Date()) {
+  const d = new Date(date);
+  const dayOfWeek = d.getDay();              // 0=Sun … 6=Sat
+  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  d.setDate(d.getDate() - daysFromMonday);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+// ── Weekly emergency-limit overrides (Finance grants a one-week exception) ─────
+// GET /api/imprest/weekly-overrides — list overrides still active (this week)
+router.get('/weekly-overrides', authMiddleware, roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('imprest_weekly_overrides')
+      .select('*, creator:created_by (id, name)')
+      .gt('expires_at', new Date().toISOString())
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return ok(res, data);
+  } catch (err) { next(err); }
+});
+
+// GET /api/imprest/weekly-overrides/at-limit-sites — sites that have hit the
+// weekly >₹10,000 limit this week (exact site strings from real data), with
+// whether an override is already active. Drives the dashboard so Finance grants
+// against the exact site string the engineer used (site names are free-text).
+router.get('/weekly-overrides/at-limit-sites', authMiddleware, roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
+  try {
+    const weekStart = getWeekStart();
+    const weekStartDate = weekStart.toISOString().slice(0, 10);
+
+    const { data: bigReqs, error } = await supabaseAdmin
+      .from('imprest_requests')
+      .select('site')
+      .gt('amount_requested', 10000)
+      .gte('submitted_at', weekStart.toISOString())
+      .not('current_stage', 'in', '("s1_rejected","s2_rejected","s3_rejected","director_rejected")')
+      .neq('status', 'rejected');
+    if (error) throw error;
+
+    const counts = {};
+    for (const r of bigReqs) {
+      if (r.site === 'Head Office') continue;        // exempt from the limit
+      counts[r.site] = (counts[r.site] || 0) + 1;
+    }
+
+    const { data: ovs } = await supabaseAdmin
+      .from('imprest_weekly_overrides')
+      .select('id, site, reason, creator:created_by (id, name)')
+      .eq('week_start', weekStartDate);
+    const ovMap = {};
+    for (const o of (ovs || [])) ovMap[o.site] = o;
+
+    const sites = Object.keys(counts).sort().map((site) => ({
+      site,
+      bigCount: counts[site],
+      override: ovMap[site] || null,
+    }));
+    return ok(res, { weekStart: weekStartDate, sites });
+  } catch (err) { next(err); }
+});
+
+// POST /api/imprest/weekly-overrides — grant an override for a site for THIS week
+router.post('/weekly-overrides', authMiddleware, roleGuard(FINANCE_ROLES), async (req, res, next) => {
+  try {
+    const { site, reason } = req.body;
+    if (!site?.trim()) return fail(res, 'site is required');
+
+    const weekStart = getWeekStart();
+    const weekStartDate = weekStart.toISOString().slice(0, 10);
+    const expiresAt = new Date(weekStart);
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    const { data: existing } = await supabaseAdmin
+      .from('imprest_weekly_overrides')
+      .select('id').eq('site', site.trim()).eq('week_start', weekStartDate).limit(1);
+    if (existing?.length > 0) {
+      return fail(res, 'An override for this site is already active this week.');
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('imprest_weekly_overrides')
+      .insert({
+        site: site.trim(),
+        week_start: weekStartDate,
+        expires_at: expiresAt.toISOString(),
+        reason: reason?.trim() || null,
+        created_by: req.user.id,
+      })
+      .select('*, creator:created_by (id, name)')
+      .single();
+    if (error) throw error;
+
+    await logAudit({
+      userId: req.user.id, action: 'create_weekly_override', entityType: 'imprest',
+      entityId: data.id, newValue: { site: data.site, week_start: weekStartDate, reason: data.reason },
+      ipAddress: req.ip,
+    });
+    return ok(res, data);
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/imprest/weekly-overrides/:id — revoke an override
+router.delete('/weekly-overrides/:id', authMiddleware, roleGuard(FINANCE_ROLES), async (req, res, next) => {
+  try {
+    const { error } = await supabaseAdmin
+      .from('imprest_weekly_overrides').delete().eq('id', req.params.id);
+    if (error) throw error;
+    await logAudit({
+      userId: req.user.id, action: 'revoke_weekly_override', entityType: 'imprest',
+      entityId: req.params.id, ipAddress: req.ip,
+    });
+    return ok(res, { message: 'Override revoked' });
+  } catch (err) { next(err); }
+});
+
 // ── GET /api/imprest/food-rates ───────────────────────────────────────────────
 router.get('/food-rates', authMiddleware, async (req, res, next) => {
   try {
@@ -138,12 +256,8 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
     // Weekly site emergency limit: only one imprest > ₹10,000 per site per calendar week
     // Head Office is exempt — no upper limit applies there
     if (parseFloat(amountRequested) > 10000 && site !== 'Head Office') {
-      const now = new Date();
-      const dayOfWeek = now.getDay();
-      const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      const weekStart = new Date(now);
-      weekStart.setDate(now.getDate() - daysFromMonday);
-      weekStart.setHours(0, 0, 0, 0);
+      const weekStart = getWeekStart();
+      const weekStartDate = weekStart.toISOString().slice(0, 10);
 
       const { data: weeklyCheck } = await supabaseAdmin
         .from('imprest_requests')
@@ -156,11 +270,21 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
         .limit(1);
 
       if (weeklyCheck?.length > 0) {
-        return fail(
-          res,
-          'WEEKLY_LIMIT: Your site\'s weekly emergency advance (>₹10,000) has already been raised this week. Please submit the expense for that advance first, and you can raise a new emergency advance after this week.',
-          429
-        );
+        // Finance may have granted a one-week override for this site
+        const { data: override } = await supabaseAdmin
+          .from('imprest_weekly_overrides')
+          .select('id')
+          .eq('site', site)
+          .eq('week_start', weekStartDate)
+          .limit(1);
+
+        if (!override?.length) {
+          return fail(
+            res,
+            'WEEKLY_LIMIT: Your site\'s weekly emergency advance (>₹10,000) has already been raised this week. Please submit the expense for that advance first, and you can raise a new emergency advance after this week.',
+            429
+          );
+        }
       }
     }
 

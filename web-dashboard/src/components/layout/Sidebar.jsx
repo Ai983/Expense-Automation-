@@ -36,6 +36,7 @@ function getNavItems(role) {
         { to: '/imprest-analytics', label: 'Imprest Analytics', icon: '📈' },
         { to: '/reports', label: 'Employee Report', icon: '👥' },
         { to: '/adjustments', label: 'Pending Settlements', icon: '⚠️' },
+        { to: '/weekly-overrides', label: 'Weekly Overrides', icon: '🔓' },
       ];
   }
 }
