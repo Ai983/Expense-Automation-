@@ -520,8 +520,11 @@ export default function POPaymentsTab() {
                       )}
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-xs text-gray-400">Authorized</p>
+                      <p className="text-xs text-gray-400">Authorized (this installment)</p>
                       <p className="text-lg font-semibold">{fmt(p.authorized_amount)}</p>
+                      {p.po_grand_total != null && (
+                        <p className="text-xs text-gray-400">of {fmt(p.po_grand_total)} PO total</p>
+                      )}
                       {Number(p.already_paid) > 0 && <p className="text-xs text-gray-500">Paid {fmt(p.already_paid)} · Bal {fmt(remaining)}</p>}
                       <div className="flex gap-2 mt-2 justify-end items-center">
                         {p.po_pdf_url && <a href={p.po_pdf_url} target="_blank" rel="noreferrer" className="text-xs text-gray-500 underline">PO PDF</a>}
