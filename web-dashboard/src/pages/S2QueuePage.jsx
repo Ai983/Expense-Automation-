@@ -7,7 +7,7 @@ const IMPREST_SITES = [
   'DEE Development Engineer - Canteen', 'DEE Development Engineer - Admin',
   'Vaneet Infra', 'Dee Foundation Omaxe, Faridabad', 'Auma India Bengaluru',
   'Minebea Mitsumi', 'Hero Homes Ludhiana', 'Hero Homes Greater Noida',
-  'Bansal Tower', 'KOKO Town, Chandigarh', 'Vinfast Jaipur', 'M3M', 'Head Office', 'Bangalore Office', 'Others',
+  'Bansal Tower', 'KOKO Town, Chandigarh', 'Vinfast Jaipur', 'M3M', 'Vinfast Jikarpur', 'Head Office', 'Bangalore Office', 'Others',
 ];
 
 function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}`; }
@@ -141,6 +141,9 @@ function KanbanCard({ req, onView, onForward, onReject, actionable }) {
       )}
       {(req.s2_note || req.s2_notes) && (
         <p className="text-[11px] text-purple-600 mt-1 italic line-clamp-1" title={req.s2_note || req.s2_notes}>S2: "{req.s2_note || req.s2_notes}"</p>
+      )}
+      {req.director_note && (
+        <p className="text-[11px] text-orange-600 mt-1 italic line-clamp-1" title={req.director_note}>Director: "{req.director_note}"</p>
       )}
       {isRejected && req.rejection_reason && (
         <p className="text-[11px] text-red-600 mt-1 italic line-clamp-1" title={req.rejection_reason}>✗ "{req.rejection_reason}"</p>

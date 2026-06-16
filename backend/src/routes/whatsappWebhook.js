@@ -174,12 +174,15 @@ async function handleFounderDirectorReply({ msgText, cleanPhone, quotedMsg, deci
   let imprestId = replyTo ? (replyTo.split('||')[1] || '') : '';
 
   if (!imprestId) {
-    console.log('[WhatsApp] No ReplyID found, looking up latest pending imprest...');
+    console.log('[WhatsApp] No ReplyID found, looking up latest imprest awaiting Director...');
+    // Route B (≥ ₹10K) parks the request at `director_pending` while it waits for the
+    // Director's WhatsApp approval. That is the signal to match on — the old query keyed
+    // off `requires_founder_approval`/`founder_review_status='pending'`, which are never set
+    // for this stage, so the lookup always came back empty and the reply was dropped.
     const { data: latestPending } = await supabaseAdmin
       .from('imprest_requests')
       .select('id, ref_id')
-      .eq('requires_founder_approval', true)
-      .eq('founder_review_status', 'pending')
+      .eq('current_stage', 'director_pending')
       .order('submitted_at', { ascending: false })
       .limit(1)
       .single();

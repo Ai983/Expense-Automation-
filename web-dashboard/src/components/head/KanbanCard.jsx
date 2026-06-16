@@ -62,6 +62,9 @@ export default function KanbanCard({ item, stream, onClick }) {
       <p className="font-medium text-gray-800 truncate">{name} · {site}</p>
       <p className="text-gray-500 text-xs truncate">{item.category || '—'}</p>
       <p className="font-bold text-gray-900 mt-1">{fmt(amount)}</p>
+      {stream === 'imprest' && item.director_note && (
+        <p className="text-[11px] text-orange-600 mt-1 italic truncate" title={item.director_note}>Director: "{item.director_note}"</p>
+      )}
       <p className="text-gray-400 text-xs mt-1 truncate">
         Awaiting: {stuckOnLabel(item, stream)}
       </p>

@@ -20,7 +20,7 @@ router.get('/kanban', async (req, res, next) => {
         .select(`
           id, ref_id, site, category, amount_requested, status,
           current_stage, approval_route, submitted_at,
-          s1_approved_at, s2_approved_at, director_approved_at, approved_at,
+          s1_approved_at, s2_approved_at, director_approved_at, director_note, approved_at,
           founder_review_status, founder_review_at, paid, paid_amount,
           employee:employee_id (name)
         `)
