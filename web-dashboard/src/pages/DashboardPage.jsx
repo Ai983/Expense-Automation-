@@ -4,11 +4,13 @@ import { SiteChart, CategoryChart, StatusChart, DrillDownTable } from '../compon
 import { showToast } from '../components/layout/Toast';
 import { useAuth } from '../context/AuthContext';
 import POPaymentsTab from '../components/POPaymentsTab';
+import WOPaymentsTab from '../components/WOPaymentsTab';
 import ProjectSpendTab from '../components/ProjectSpendTab';
 
 const TABS = [
   { id: 'expenses', label: 'Expense Analytics', roles: ['finance', 'manager', 'admin'] },
   { id: 'po-payments', label: 'PO Payments', roles: ['finance', 'manager', 'admin'] },
+  { id: 'wo-payments', label: 'WO Payments', roles: ['finance', 'manager', 'admin'] },
   { id: 'project-spend', label: 'Project Spend', roles: ['finance', 'manager', 'admin'] },
 ];
 
@@ -115,6 +117,9 @@ export default function DashboardPage() {
 
       {/* PO Payments tab */}
       {activeTab === 'po-payments' && <POPaymentsTab />}
+
+      {/* WO Payments tab */}
+      {activeTab === 'wo-payments' && <WOPaymentsTab />}
 
       {/* Project Spend tab */}
       {activeTab === 'project-spend' && <ProjectSpendTab />}

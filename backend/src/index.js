@@ -13,6 +13,7 @@ import reportRoutes from './routes/reports.js';
 import whatsappWebhookRoutes from './routes/whatsappWebhook.js';
 import feedbackRoutes from './routes/feedback.js';
 import poPaymentsRoutes from './routes/poPayments.js';
+import woPaymentsRoutes from './routes/woPayments.js';
 import headRoutes from './routes/head.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
@@ -104,6 +105,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/whatsapp', whatsappWebhookRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/po-payments', poPaymentsRoutes);
+app.use('/api/wo-payments', woPaymentsRoutes);
 app.use('/api/head', headRoutes);
 
 // ── 404 handler ───────────────────────────────────────────────────────────────
