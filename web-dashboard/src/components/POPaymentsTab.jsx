@@ -64,6 +64,8 @@ export default function POPaymentsTab() {
   // SPEC-PAY-01 Gate-2: authorized installment payables (paid against a CPS authorization)
   const [payables, setPayables] = useState([]);
   const [payAuthModal, setPayAuthModal] = useState(null);
+  // Authorized Payable whose payment-history dropdown is open (keyed by auth_number)
+  const [expandedPayable, setExpandedPayable] = useState(null);
   // Free-text search across all sections (PO no., auth ref, supplier name)
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -499,6 +501,8 @@ export default function POPaymentsTab() {
           <div className="space-y-3">
             {visiblePayables.map(p => {
               const remaining = Number(p.authorized_amount) - Number(p.already_paid || 0);
+              const history = Array.isArray(p.payment_logs) ? p.payment_logs : [];
+              const isOpen = expandedPayable === p.auth_number;
               return (
                 <div key={p.auth_number} className="bg-white rounded-xl border border-green-200 p-5">
                   <div className="flex items-start justify-between gap-4">
@@ -528,6 +532,44 @@ export default function POPaymentsTab() {
                       </div>
                     </div>
                   </div>
+
+                  {/* Payment-history dropdown — shows when at least one payment has been made */}
+                  {history.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-green-100">
+                      <button
+                        onClick={() => setExpandedPayable(isOpen ? null : p.auth_number)}
+                        className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                      >
+                        {isOpen ? '▲ Hide payment history' : `▼ View payment history (${history.length})`}
+                      </button>
+                      {isOpen && (
+                        <div className="mt-2 space-y-2">
+                          {history.map((log, idx) => (
+                            <div key={idx} className="flex items-center justify-between bg-green-50/50 border border-green-100 rounded-lg px-3 py-2">
+                              <div className="flex items-center gap-3">
+                                <span className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
+                                <div>
+                                  <p className="text-xs text-gray-600">{log.paid_at ? fmtDate(log.paid_at) : '—'}</p>
+                                  {log.notes && <p className="text-xs text-gray-400 italic">"{log.notes}"</p>}
+                                  {log.paid_by_name && <p className="text-xs text-gray-400">by {log.paid_by_name}</p>}
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-sm font-semibold text-green-700">{fmt(log.amount)}</p>
+                                {log.receipt_path && (
+                                  <a href={log.receipt_path} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">Receipt</a>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                          <div className="flex justify-between text-xs text-gray-500 px-3 pt-1 border-t">
+                            <span>Total Paid</span>
+                            <span className="font-semibold text-green-700">{fmt(history.reduce((s, l) => s + (Number(l.amount) || 0), 0))}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}

@@ -559,7 +559,7 @@ router.get('/authorized-payables', authMiddleware, roleGuard(ALL_VIEWER_ROLES), 
     const refs = auths.map(a => a.auth_number);
     const { data: payments } = await supabaseAdmin
       .from('po_payments')
-      .select('cps_authorization_ref,status,paid_amount')
+      .select('cps_authorization_ref,status,paid_amount,paid_at,payment_logs')
       .in('cps_authorization_ref', refs);
     const payByRef = {};
     (payments ?? []).forEach(p => { payByRef[p.cps_authorization_ref] = p; });
@@ -602,6 +602,8 @@ router.get('/authorized-payables', authMiddleware, roleGuard(ALL_VIEWER_ROLES), 
           trigger_offset_days: tr.trigger_offset_days ?? null,
           authorized_amount: Number(a.amount),
           already_paid: pay ? Number(pay.paid_amount || 0) : 0,
+          payment_logs: Array.isArray(pay?.payment_logs) ? pay.payment_logs : [],
+          last_paid_at: pay?.paid_at ?? null,
           po_grand_total: po.grand_total != null ? Number(po.grand_total) : null,
           po_pdf_url: po.po_pdf_url ?? null,
           bank_account_holder_name: po.bank_account_holder_name ?? null,
