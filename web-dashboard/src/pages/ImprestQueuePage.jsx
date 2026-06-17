@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import api from '../services/api';
+import { useSites } from '../hooks/useSites';
 
 const IMPREST_CATEGORIES = [
   'Food Expense', 'Site Room Rent', 'Travelling', 'Conveyance',
@@ -8,7 +9,7 @@ const IMPREST_CATEGORIES = [
   'Material Expense', 'Office Expense', 'Other',
 ];
 
-const IMPREST_SITES = [
+const FALLBACK_IMPREST_SITES = [
   'MAX Hospital, Saket Delhi',
   'DEE Development Engineer - Canteen', 'DEE Development Engineer - Admin',
   'Vaneet Infra', 'Dee Foundation Omaxe, Faridabad', 'Auma India Bengaluru',
@@ -192,6 +193,8 @@ function ApprovalTimeline({ req }) {
 }
 
 export default function ImprestQueuePage() {
+  const _fetched = useSites();
+  const IMPREST_SITES = _fetched.length ? [..._fetched, 'Others'] : FALLBACK_IMPREST_SITES;
   const [requests, setRequests] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);

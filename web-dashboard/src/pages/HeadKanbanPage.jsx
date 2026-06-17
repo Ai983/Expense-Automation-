@@ -2,8 +2,9 @@ import { useState, useEffect, useMemo } from 'react';
 import { getKanban } from '../services/headService';
 import KanbanColumn from '../components/head/KanbanColumn';
 import { getAgingLevel } from '../components/head/AgingPill';
+import { useSites } from '../hooks/useSites';
 
-const SITES = [
+const FALLBACK_SITES = [
   'All', 'Head Office', 'Bhuj', 'Bansal Tower', 'MAX Hospital, Saket Delhi',
   'Vaneet Infra', 'Dee Foundation Omaxe, Faridabad', 'Auma India Bengaluru',
   'Minebea Mitsumi', 'Hero Homes Ludhiana', 'KOKO Town, Chandigarh', 'Vinfast Jaipur', 'M3M', 'Bangalore Office',
@@ -30,6 +31,8 @@ function agingOf(item, stream) {
 }
 
 export default function HeadKanbanPage() {
+  const _fetched = useSites();
+  const SITES = _fetched.length ? ['All', ..._fetched] : FALLBACK_SITES;
   const [data, setData] = useState({ imprests: [], expenses: [], pos: [] });
   const [loading, setLoading] = useState(true);
   const [stream, setStream] = useState('all');

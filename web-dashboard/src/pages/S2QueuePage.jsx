@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../services/api';
 import { showToast } from '../components/layout/Toast';
 import { useAuth } from '../context/AuthContext';
+import { useSites } from '../hooks/useSites';
 
 // Per-role behaviour on the shared Imprest Pipeline Board.
 // Each role can only act on its own column(s); the board UI is identical for all.
@@ -49,7 +50,7 @@ const ROLE_CFG = {
 ROLE_CFG.manager = ROLE_CFG.finance;
 ROLE_CFG.admin = ROLE_CFG.approver_s2;
 
-const IMPREST_SITES = [
+const FALLBACK_IMPREST_SITES = [
   'MAX Hospital, Saket Delhi',
   'DEE Development Engineer - Canteen', 'DEE Development Engineer - Admin',
   'Vaneet Infra', 'Dee Foundation Omaxe, Faridabad', 'Auma India Bengaluru',
@@ -250,6 +251,8 @@ const COLUMNS = [
 ];
 
 export default function S2QueuePage() {
+  const _fetched = useSites();
+  const IMPREST_SITES = _fetched.length ? [..._fetched, 'Others'] : FALLBACK_IMPREST_SITES;
   const { user } = useAuth();
   const role = user?.role;
   const cfg = ROLE_CFG[role] || ROLE_CFG.approver_s2;

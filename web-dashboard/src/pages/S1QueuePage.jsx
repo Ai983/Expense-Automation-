@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '../services/api';
 import { showToast } from '../components/layout/Toast';
+import { useSites } from '../hooks/useSites';
 
-const IMPREST_SITES = [
+const FALLBACK_IMPREST_SITES = [
   'MAX Hospital, Saket Delhi',
   'DEE Development Engineer - Canteen', 'DEE Development Engineer - Admin',
   'Vaneet Infra', 'Dee Foundation Omaxe, Faridabad', 'Auma India Bengaluru',
@@ -82,6 +83,8 @@ function Spinner({ className = '' }) {
 }
 
 export default function S1QueuePage() {
+  const _fetched = useSites();
+  const IMPREST_SITES = _fetched.length ? [..._fetched, 'Others'] : FALLBACK_IMPREST_SITES;
   const [requests, setRequests] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
