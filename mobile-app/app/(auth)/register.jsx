@@ -8,6 +8,7 @@ import { Picker } from '@react-native-picker/picker';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
 import { SITES } from '../../src/constants';
+import { useSites } from '../../src/hooks/useSites';
 
 const ENGINEER_NAMES = [
   'Sonu',
@@ -44,6 +45,7 @@ export default function RegisterScreen() {
   const [selectedName, setSelectedName] = useState(ENGINEER_NAMES[0]);
   const [customName, setCustomName]     = useState('');
   const [form, setForm] = useState({ email: '', phone: '', password: '', site: SITES[0] });
+  const sites = useSites();
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -180,7 +182,7 @@ export default function RegisterScreen() {
           <Text style={styles.label}>Site *</Text>
           <View style={styles.pickerWrapper}>
             <Picker selectedValue={form.site} onValueChange={(v) => set('site', v)} style={styles.picker}>
-              {SITES.map((s) => <Picker.Item key={s} label={s} value={s} />)}
+              {sites.map((s) => <Picker.Item key={s} label={s} value={s} />)}
             </Picker>
           </View>
 

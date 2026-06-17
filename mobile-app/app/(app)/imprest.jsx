@@ -6,6 +6,7 @@ import {
 import { Picker } from '@react-native-picker/picker';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../src/context/AuthContext';
+import { useSites } from '../../src/hooks/useSites';
 import {
   IMPREST_SITES, IMPREST_CATEGORIES,
   CONVEYANCE_MODES, OWN_VEHICLE_TYPES, TRAVEL_SUBTYPES, LABOUR_SUBCATEGORIES,
@@ -139,6 +140,7 @@ export default function ImprestScreen() {
 
   // Common fields
   const [site, setSite] = useState(IMPREST_SITES[0]);
+  const sites = useSites();
   const [customSite, setCustomSite] = useState(''); // used when site === 'Others'
   const [category, setCategory] = useState(IMPREST_CATEGORIES[0]);
   const [peopleCount, setPeopleCount] = useState('1');
@@ -543,7 +545,7 @@ export default function ImprestScreen() {
                 style={styles.picker}
                 dropdownIconColor="#e8a24a"
               >
-                {IMPREST_SITES.map((s) => <Picker.Item key={s} label={s} value={s} />)}
+                {[...sites, 'Others'].map((s) => <Picker.Item key={s} label={s} value={s} />)}
               </Picker>
             </View>
             {site === 'Others' && (

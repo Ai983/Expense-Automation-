@@ -10,6 +10,7 @@ import { submitExpense, getMyAdjustments } from '../../src/services/expenseServi
 import { getMyReminders, fulfillReminder } from '../../src/services/imprestService';
 import { Picker } from '@react-native-picker/picker';
 import { SITES, CATEGORIES, IMPREST_TO_EXPENSE_CATEGORY } from '../../src/constants';
+import { useSites } from '../../src/hooks/useSites';
 
 const INITIAL_FORM = { site: SITES[0], amount: '', category: CATEGORIES[0], description: '' };
 
@@ -28,6 +29,7 @@ export default function SubmitExpenseScreen() {
   const [activeAdjustmentId, setActiveAdjustmentId] = useState(null);
   const [settlementForExpenseId, setSettlementForExpenseId] = useState(null);
   const [imprestSiteExtra, setImprestSiteExtra] = useState(null); // site from imprest when not in SITES list
+  const sites = useSites();
   const { user } = useAuth();
 
   const fetchReminders = useCallback(async () => {
@@ -389,7 +391,7 @@ export default function SubmitExpenseScreen() {
                 {imprestSiteExtra && (
                   <Picker.Item key={imprestSiteExtra} label={imprestSiteExtra} value={imprestSiteExtra} />
                 )}
-                {SITES.map((s) => <Picker.Item key={s} label={s} value={s} />)}
+                {sites.map((s) => <Picker.Item key={s} label={s} value={s} />)}
               </Picker>
             </View>
 
