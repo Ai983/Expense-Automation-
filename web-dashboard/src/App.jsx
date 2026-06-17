@@ -86,6 +86,7 @@ function AppRoutes() {
       <Route path="/weekly-overrides" element={<ProtectedLayout><WeeklyOverridesPage /></ProtectedLayout>} />
       <Route path="/s1-queue" element={<ProtectedLayout><S1QueuePage /></ProtectedLayout>} />
       <Route path="/s2-queue" element={<ProtectedLayout><S2QueuePage /></ProtectedLayout>} />
+      <Route path="/imprest-board" element={<ProtectedLayout><S2QueuePage /></ProtectedLayout>} />
       <Route path="/feedback" element={<ProtectedLayout><FeedbackPage /></ProtectedLayout>} />
       <Route path="/procurement-queue" element={<ProtectedLayout><ProcurementQueuePage /></ProtectedLayout>} />
       <Route path="/head" element={<ProtectedLayout><HeadDashboardPage /></ProtectedLayout>} />

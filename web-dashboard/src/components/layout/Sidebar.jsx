@@ -15,6 +15,7 @@ function getNavItems(role) {
     case 'approver_s1':
       return [
         { to: '/s1-queue', label: 'Imprest Review', icon: '📋' },
+        { to: '/imprest-board', label: 'Pipeline Board', icon: '📌' },
         { to: '/imprest-analytics', label: 'Imprest Analytics', icon: '📈' },
         { to: '/procurement-queue', label: 'Procurement Payments', icon: '📦' },
       ];
@@ -32,6 +33,7 @@ function getNavItems(role) {
       return [
         { to: '/queue', label: 'Expense Queue', icon: '📋' },
         { to: '/imprest-queue', label: 'Imprest Queue', icon: '💰' },
+        { to: '/imprest-board', label: 'Pipeline Board', icon: '📌' },
         { to: '/dashboard', label: 'Expense Analytics', icon: '📊' },
         { to: '/imprest-analytics', label: 'Imprest Analytics', icon: '📈' },
         { to: '/reports', label: 'Employee Report', icon: '👥' },

@@ -1,6 +1,53 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../services/api';
 import { showToast } from '../components/layout/Toast';
+import { useAuth } from '../context/AuthContext';
+
+// Per-role behaviour on the shared Imprest Pipeline Board.
+// Each role can only act on its own column(s); the board UI is identical for all.
+const ROLE_CFG = {
+  // Ritu — full S2 powers: acts on S1 (fast-forward) and S2 columns
+  approver_s2: {
+    actionCols: ['s1', 's2'],
+    actorField: 's2_approved_by', actorAt: 's2_approved_at',
+    canAct: (r) => r.current_stage === 's1_pending' || r.current_stage === 's2_pending',
+    forward: (r) => r.current_stage === 's1_pending' ? `/api/imprest/${r.id}/s2-override` : `/api/imprest/${r.id}/s2-approve`,
+    reject: (r) => r.current_stage === 's1_pending' ? `/api/imprest/${r.id}/s2-reject-s1` : `/api/imprest/${r.id}/s2-reject`,
+    forwardPayload: ({ notes, amt }) => ({ notes, approvedAmount: amt }),
+    canReduce: true, noteLabel: 'S2 Approval Note',
+    fwdTitle: (r) => r.current_stage === 's1_pending' ? 'Fast-forward to Finance (Skip S1)' : 'Forward to Finance',
+    fwdBtn: (r) => r.current_stage === 's1_pending' ? 'Fast-forward →' : 'Forward',
+    defaultNote: (r) => r.current_stage === 's1_pending' ? 'Approved and forwarded by S2 (Ritu)' : 'Approved by S2 approval',
+  },
+  // Avisha — S1 column only
+  approver_s1: {
+    actionCols: ['s1'],
+    actorField: 's1_approved_by', actorAt: 's1_approved_at',
+    canAct: (r) => r.current_stage === 's1_pending',
+    forward: (r) => `/api/imprest/${r.id}/s1-approve`,
+    reject: (r) => `/api/imprest/${r.id}/s1-reject`,
+    forwardPayload: ({ notes }) => ({ notes }),
+    canReduce: false, noteLabel: 'S1 Approval Note',
+    fwdTitle: () => 'Forward to next stage',
+    fwdBtn: () => 'Forward',
+    defaultNote: () => 'Approved and forwarded by S1 (Avisha)',
+  },
+  // Finance — Finance column only (approve/reject at s3)
+  finance: {
+    actionCols: ['finance'],
+    actorField: 'approved_by', actorAt: 'approved_at',
+    canAct: (r) => r.current_stage === 's3_pending',
+    forward: (r) => `/api/imprest/${r.id}/approve`,
+    reject: (r) => `/api/imprest/${r.id}/reject`,
+    forwardPayload: ({ notes, amt }) => ({ approvedAmount: amt, s3Note: notes }),
+    canReduce: true, noteLabel: 'Finance Note',
+    fwdTitle: () => 'Approve & send to Founder',
+    fwdBtn: () => 'Approve',
+    defaultNote: () => '',
+  },
+};
+ROLE_CFG.manager = ROLE_CFG.finance;
+ROLE_CFG.admin = ROLE_CFG.approver_s2;
 
 const IMPREST_SITES = [
   'MAX Hospital, Saket Delhi',
@@ -171,16 +218,16 @@ function KanbanCard({ req, onView, onForward, onReject, actionable }) {
   );
 }
 
-function HistoryItem({ entry, onClick }) {
-  const isRejected = entry.current_stage === 's2_rejected' || entry.status === 'rejected';
+function HistoryItem({ entry, onClick, atField = 's2_approved_at' }) {
+  const isRejected = entry.current_stage?.includes('rejected') || entry.status === 'rejected';
   return (
     <div onClick={() => onClick(entry)}
       className="history-item bg-white border border-gray-100 rounded-md p-2 hover:bg-gray-50 hover:shadow-sm cursor-pointer transition-all duration-150">
       <div className="flex items-start justify-between gap-2">
         <span className="font-mono text-[10px] font-semibold text-amber-600">{entry.ref_id}</span>
-        <span className="text-[10px] text-gray-400">{fmtTime(entry.s2_approved_at)}</span>
+        <span className="text-[10px] text-gray-400">{fmtTime(entry[atField])}</span>
       </div>
-      <p className="text-xs text-gray-700 truncate mt-0.5">{entry.employee_name || '—'}</p>
+      <p className="text-xs text-gray-700 truncate mt-0.5">{entry.employee?.name || entry.employee_name || '—'}</p>
       <div className="flex items-center justify-between mt-1">
         <span className="text-sm font-semibold text-gray-900">{fmt(entry.amount_requested)}</span>
         <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
@@ -203,8 +250,11 @@ const COLUMNS = [
 ];
 
 export default function S2QueuePage() {
+  const { user } = useAuth();
+  const role = user?.role;
+  const cfg = ROLE_CFG[role] || ROLE_CFG.approver_s2;
+
   const [board, setBoard] = useState([]);
-  const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterSite, setFilterSite] = useState('all');
   const [filterName, setFilterName] = useState('');
@@ -225,15 +275,16 @@ export default function S2QueuePage() {
     finally { setLoading(false); }
   }, []);
 
-  const fetchHistory = useCallback(async () => {
-    try {
-      const { data } = await api.get('/api/imprest/s2/history', { params: { limit: 50 } });
-      setHistory(data.data.history || []);
-    } catch { /* silent */ }
-  }, []);
-
   useEffect(() => { fetchBoard(); }, [fetchBoard]);
-  useEffect(() => { fetchHistory(); }, [fetchHistory]);
+
+  // "My Approval History" derived from the board — items this user acted on, per their role
+  const history = useMemo(() => {
+    if (!user?.id) return [];
+    return board
+      .filter((r) => r[cfg.actorField] === user.id && r[cfg.actorAt])
+      .sort((a, b) => new Date(b[cfg.actorAt]) - new Date(a[cfg.actorAt]))
+      .slice(0, 50);
+  }, [board, cfg, user]);
 
   // Apply filters then bucket
   const filteredBoard = useMemo(() => {
@@ -267,38 +318,35 @@ export default function S2QueuePage() {
     const weekAgo = new Date(today); weekAgo.setDate(today.getDate() - 7);
     const out = { today: [], yesterday: [], week: [], older: [] };
     for (const r of history) {
-      if (!r.s2_approved_at) continue;
-      const d = new Date(r.s2_approved_at); d.setHours(0, 0, 0, 0);
+      if (!r[cfg.actorAt]) continue;
+      const d = new Date(r[cfg.actorAt]); d.setHours(0, 0, 0, 0);
       if (d.getTime() === today.getTime()) out.today.push(r);
       else if (d.getTime() === yesterday.getTime()) out.yesterday.push(r);
       else if (d >= weekAgo) out.week.push(r);
       else out.older.push(r);
     }
     return out;
-  }, [history]);
+  }, [history, cfg]);
 
   const openView = (req) => { setSelected(req); setModalMode('view'); };
   const openForward = (req) => {
     setSelected(req); setApproveAmount(String(req.amount_requested));
-    setNotes(req.current_stage === 's1_pending' ? 'Approved and forwarded by S2 (Ritu)' : 'Approved by S2 approval');
+    setNotes(cfg.defaultNote(req));
     setActionError(''); setModalMode('forward');
   };
   const openReject = (req) => { setSelected(req); setRejectReason(''); setActionError(''); setModalMode('reject'); };
   const closeModal = () => { setSelected(null); setModalMode(null); };
 
   const handleForward = async () => {
-    if (!notes.trim()) { setActionError('A note is required before forwarding to Finance.'); return; }
+    if (!notes.trim()) { setActionError('A note is required before forwarding.'); return; }
     setActing(true); setActionError('');
     try {
-      const endpoint = selected.current_stage === 's1_pending'
-        ? `/api/imprest/${selected.id}/s2-override`
-        : `/api/imprest/${selected.id}/s2-approve`;
-      await api.post(endpoint, {
+      await api.post(cfg.forward(selected), cfg.forwardPayload({
         notes: notes.trim(),
-        approvedAmount: parseFloat(approveAmount) || undefined,
-      });
-      showToast(selected.current_stage === 's1_pending' ? 'Fast-forwarded to Finance team' : 'Forwarded to Finance team', 'success');
-      closeModal(); fetchBoard(); fetchHistory();
+        amt: parseFloat(approveAmount) || undefined,
+      }));
+      showToast('Forwarded successfully', 'success');
+      closeModal(); fetchBoard();
     } catch (e) { setActionError(e.response?.data?.error || 'Failed'); }
     finally { setActing(false); }
   };
@@ -307,18 +355,15 @@ export default function S2QueuePage() {
     if (!rejectReason.trim()) { setActionError('Reason is required'); return; }
     setActing(true); setActionError('');
     try {
-      const endpoint = selected.current_stage === 's1_pending'
-        ? `/api/imprest/${selected.id}/s2-reject-s1`
-        : `/api/imprest/${selected.id}/s2-reject`;
-      await api.post(endpoint, { reason: rejectReason.trim() });
+      await api.post(cfg.reject(selected), { reason: rejectReason.trim() });
       showToast('Request rejected', 'info');
-      closeModal(); fetchBoard(); fetchHistory();
+      closeModal(); fetchBoard();
     } catch (e) { setActionError(e.response?.data?.error || 'Failed'); }
     finally { setActing(false); }
   };
 
   const totalCount = filteredBoard.length;
-  const myActionable = buckets.s2.length + buckets.s1.length;
+  const myActionable = cfg.actionCols.reduce((sum, k) => sum + (buckets[k]?.length || 0), 0);
 
   return (
     <div className="flex gap-4 h-[calc(100vh-7rem)]">
@@ -349,7 +394,7 @@ export default function S2QueuePage() {
           <div className="flex gap-3 flex-1 overflow-x-auto overflow-y-hidden pb-2">
             {COLUMNS.map(col => {
               const items = buckets[col.key] || [];
-              const isActionable = col.key === 's2' || col.key === 's1';
+              const isActionable = cfg.actionCols.includes(col.key);
               return (
                 <div key={col.key} className={`${col.tint} border rounded-xl p-2.5 flex flex-col overflow-hidden flex-1 min-w-[240px]`}>
                   <div className="flex items-center justify-between mb-2 px-1">
@@ -366,7 +411,7 @@ export default function S2QueuePage() {
                           onView={openView}
                           onForward={openForward}
                           onReject={openReject}
-                          actionable={isActionable && (r.current_stage === 's2_pending' || r.current_stage === 's1_pending')}
+                          actionable={isActionable && cfg.canAct(r)}
                         />
                       </div>
                     ))}
@@ -393,7 +438,7 @@ export default function S2QueuePage() {
                 <div>
                   <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1.5 px-1">Today</p>
                   <div className="space-y-1.5">
-                    {historyBuckets.today.map(e => <HistoryItem key={e.id} entry={e} onClick={openView} />)}
+                    {historyBuckets.today.map(e => <HistoryItem key={e.id} entry={e} onClick={openView} atField={cfg.actorAt} />)}
                   </div>
                 </div>
               )}
@@ -401,7 +446,7 @@ export default function S2QueuePage() {
                 <div>
                   <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1.5 px-1">Yesterday</p>
                   <div className="space-y-1.5">
-                    {historyBuckets.yesterday.map(e => <HistoryItem key={e.id} entry={e} onClick={openView} />)}
+                    {historyBuckets.yesterday.map(e => <HistoryItem key={e.id} entry={e} onClick={openView} atField={cfg.actorAt} />)}
                   </div>
                 </div>
               )}
@@ -409,7 +454,7 @@ export default function S2QueuePage() {
                 <div>
                   <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1.5 px-1">This Week</p>
                   <div className="space-y-1.5">
-                    {historyBuckets.week.map(e => <HistoryItem key={e.id} entry={e} onClick={openView} />)}
+                    {historyBuckets.week.map(e => <HistoryItem key={e.id} entry={e} onClick={openView} atField={cfg.actorAt} />)}
                   </div>
                 </div>
               )}
@@ -417,7 +462,7 @@ export default function S2QueuePage() {
                 <div>
                   <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1.5 px-1">Older</p>
                   <div className="space-y-1.5">
-                    {historyBuckets.older.map(e => <HistoryItem key={e.id} entry={e} onClick={openView} />)}
+                    {historyBuckets.older.map(e => <HistoryItem key={e.id} entry={e} onClick={openView} atField={cfg.actorAt} />)}
                   </div>
                 </div>
               )}
@@ -435,7 +480,7 @@ export default function S2QueuePage() {
                 <div>
                   <h2 className="text-lg font-bold text-gray-900">
                     {modalMode === 'forward'
-                      ? (selected.current_stage === 's1_pending' ? 'Fast-forward to Finance (Skip S1)' : 'Forward to Finance')
+                      ? cfg.fwdTitle(selected)
                       : modalMode === 'reject' ? 'Reject Request' : 'Request Details'}
                   </h2>
                   <p className="text-sm text-gray-500 mt-1">{selected.ref_id} — {selected.employee?.name || selected.employee_name}</p>
@@ -505,19 +550,21 @@ export default function S2QueuePage() {
 
               {modalMode === 'forward' && (
                 <>
+                  {cfg.canReduce && (
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Approved Amount (₹) — you can reduce</label>
+                      <input type="number" value={approveAmount} onChange={(e) => setApproveAmount(e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                      {parseFloat(approveAmount) < parseFloat(selected.amount_requested) && approveAmount && (
+                        <p className="text-xs text-blue-600 mt-1">Amount reduced from {fmt(selected.amount_requested)} to {fmt(approveAmount)}</p>
+                      )}
+                    </div>
+                  )}
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">Approved Amount (₹) — you can reduce</label>
-                    <input type="number" value={approveAmount} onChange={(e) => setApproveAmount(e.target.value)}
-                      className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-                    {parseFloat(approveAmount) < parseFloat(selected.amount_requested) && approveAmount && (
-                      <p className="text-xs text-blue-600 mt-1">Amount reduced from {fmt(selected.amount_requested)} to {fmt(approveAmount)}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">S2 Approval Note <span className="text-red-500">*</span></label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">{cfg.noteLabel} <span className="text-red-500">*</span></label>
                     <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
-                      className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-400" rows={2} placeholder="Required — your review note visible to Finance and Founder" />
-                    <p className="text-xs text-gray-400 mt-1">This note is required and visible to Finance and Founder in the approval trail.</p>
+                      className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-400" rows={2} placeholder="Required — your review note, visible in the approval trail" />
+                    <p className="text-xs text-gray-400 mt-1">This note is required and visible to the next approvers in the trail.</p>
                   </div>
                 </>
               )}
@@ -537,7 +584,7 @@ export default function S2QueuePage() {
               {modalMode === 'forward' && (
                 <button onClick={handleForward} disabled={acting}
                   className="px-5 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-60 active:scale-95 transition-all duration-150">
-                  {acting ? 'Forwarding...' : selected?.current_stage === 's1_pending' ? 'Fast-forward to Finance' : 'Forward to Finance'}
+                  {acting ? 'Submitting...' : cfg.fwdBtn(selected)}
                 </button>
               )}
               {modalMode === 'reject' && (
@@ -546,11 +593,11 @@ export default function S2QueuePage() {
                   {acting ? 'Rejecting...' : 'Reject'}
                 </button>
               )}
-              {modalMode === 'view' && (selected.current_stage === 's2_pending' || selected.current_stage === 's1_pending') && (
+              {modalMode === 'view' && cfg.canAct(selected) && (
                 <>
                   <button onClick={() => openReject(selected)} className="px-4 py-2 text-sm text-red-700 border border-red-300 rounded-lg hover:bg-red-50 active:scale-95 transition-all duration-150">Reject</button>
                   <button onClick={() => openForward(selected)} className="px-5 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 active:scale-95 transition-all duration-150">
-                    {selected.current_stage === 's1_pending' ? 'Fast-forward →' : 'Forward'}
+                    {cfg.fwdBtn(selected)}
                   </button>
                 </>
               )}
