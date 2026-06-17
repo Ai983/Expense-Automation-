@@ -15,6 +15,7 @@ import feedbackRoutes from './routes/feedback.js';
 import poPaymentsRoutes from './routes/poPayments.js';
 import woPaymentsRoutes from './routes/woPayments.js';
 import headRoutes from './routes/head.js';
+import projectRoutes from './routes/projects.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 const app = express();
@@ -107,6 +108,7 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/po-payments', poPaymentsRoutes);
 app.use('/api/wo-payments', woPaymentsRoutes);
 app.use('/api/head', headRoutes);
+app.use('/api/projects', projectRoutes);
 
 // ── 404 handler ───────────────────────────────────────────────────────────────
 app.use((_req, res) => {

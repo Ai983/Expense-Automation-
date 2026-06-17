@@ -3,7 +3,8 @@ import { supabaseAdmin, supabaseAnon } from '../config/supabase.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { logAudit } from '../services/auditService.js';
 import { ok, fail } from '../utils/responseHelper.js';
-import { SITES, ROLES } from '../config/constants.js';
+import { ROLES } from '../config/constants.js';
+import { isValidSite } from '../config/sites.js';
 
 const router = Router();
 
@@ -17,8 +18,8 @@ router.post('/register', async (req, res, next) => {
     if (!email || !password || !name || !site) {
       return fail(res, 'email, password, name, and site are required');
     }
-    if (!SITES.includes(site)) {
-      return fail(res, `Invalid site. Must be one of: ${SITES.join(', ')}`);
+    if (!(await isValidSite(site))) {
+      return fail(res, 'Invalid site. Please pick a project from the list.');
     }
     if (role && !ROLES.includes(role)) {
       return fail(res, `Invalid role. Must be one of: ${ROLES.join(', ')}`);

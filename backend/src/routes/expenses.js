@@ -9,7 +9,8 @@ import { checkDuplicates } from '../services/duplicateService.js';
 import { logAudit } from '../services/auditService.js';
 import { generateRefId } from '../utils/refIdGenerator.js';
 import { ok, fail } from '../utils/responseHelper.js';
-import { SITES, CATEGORIES, FINANCE_ROLES, FINANCE_HEAD_ROLES } from '../config/constants.js';
+import { CATEGORIES, FINANCE_ROLES, FINANCE_HEAD_ROLES } from '../config/constants.js';
+import { isValidSite } from '../config/sites.js';
 import { broadcastNewExpense } from '../index.js';
 
 const router = Router();
@@ -34,8 +35,8 @@ router.post(
       if (!site || !amount || !category) {
         return fail(res, 'site, amount, and category are required');
       }
-      if (!imprestId && !SITES.includes(site)) {
-        return fail(res, `Invalid site. Must be one of: ${SITES.join(', ')}`);
+      if (!imprestId && !(await isValidSite(site))) {
+        return fail(res, 'Invalid site. Please pick a project from the list.');
       }
       if (!CATEGORIES.includes(category)) {
         return fail(res, `Invalid category. Must be one of: ${CATEGORIES.join(', ')}`);
