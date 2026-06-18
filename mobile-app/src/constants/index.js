@@ -62,7 +62,6 @@ export const IMPREST_SITES = [
   'Vinfast Jikarpur',
   'Head Office',
   'Bangalore Office',
-  'Others',
 ];
 
 export const IMPREST_REQUESTED_TO = [

@@ -545,7 +545,7 @@ export default function ImprestScreen() {
                 style={styles.picker}
                 dropdownIconColor="#e8a24a"
               >
-                {[...sites, 'Others'].map((s) => <Picker.Item key={s} label={s} value={s} />)}
+                {sites.map((s) => <Picker.Item key={s} label={s} value={s} />)}
               </Picker>
             </View>
             {site === 'Others' && (
