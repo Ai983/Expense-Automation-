@@ -1,4 +1,15 @@
+import { useState } from 'react';
+import api from '../../services/api';
 import AgingPill from './AgingPill';
+
+function ResendIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+    </svg>
+  );
+}
 
 const STUCK_ON = {
   s1_pending:       'Avisha (Stage 1)',
@@ -46,9 +57,28 @@ const fmt = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 export default function KanbanCard({ item, stream, onClick }) {
   const stageAt = stageTimestamp(item, stream);
   const ref = item.ref_id || item.cps_po_ref || item.id?.slice(0, 8);
-  const name = item.employee_name || item.supplier_name || '—';
+  const name = item.employee_name || item.supplier_name || item.employee?.name || '—';
   const site = item.site || item.project_name || '—';
   const amount = stream === 'po' ? item.total_amount : (item.amount_requested || item.amount);
+  const isDirectorPending = stream === 'imprest' && item.current_stage === 'director_pending';
+
+  const [resending, setResending] = useState(false);
+  const [resendDone, setResendDone] = useState(false);
+
+  const handleResend = async (e) => {
+    e.stopPropagation();
+    if (resending) return;
+    setResending(true);
+    try {
+      await api.post(`/api/imprest/${item.id}/resend-director`);
+      setResendDone(true);
+      setTimeout(() => setResendDone(false), 3000);
+    } catch {
+      // silently fail — toast not available here
+    } finally {
+      setResending(false);
+    }
+  };
 
   return (
     <div
@@ -68,6 +98,28 @@ export default function KanbanCard({ item, stream, onClick }) {
       <p className="text-gray-400 text-xs mt-1 truncate">
         Awaiting: {stuckOnLabel(item, stream)}
       </p>
+      {isDirectorPending && (
+        <button
+          onClick={handleResend}
+          disabled={resending}
+          title="Resend WhatsApp approval request to Director (Bhaskar Sir)"
+          className={`mt-2 w-full inline-flex items-center justify-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-md transition-all active:scale-95 disabled:opacity-60 ${
+            resendDone
+              ? 'bg-green-100 text-green-700 border border-green-300'
+              : 'bg-purple-100 text-purple-700 border border-purple-300 hover:bg-purple-200'
+          }`}
+        >
+          {resending ? (
+            <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" />
+              <path d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+          ) : (
+            <ResendIcon />
+          )}
+          {resendDone ? 'Sent ✓' : resending ? 'Sending…' : 'Resend to Director'}
+        </button>
+      )}
     </div>
   );
 }

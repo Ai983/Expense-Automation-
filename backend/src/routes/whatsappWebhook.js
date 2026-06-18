@@ -170,25 +170,46 @@ router.post('/incoming', async (req, res) => {
 
 // ─── Founder / Director Reply Handler ──────────────────────────────────────────
 async function handleFounderDirectorReply({ msgText, cleanPhone, quotedMsg, decision, comment }) {
+  // 1) Exact match: ReplyID token (ref_id||uuid) embedded in the reply or the quoted message.
   let replyTo = extractReplyId(msgText) || extractReplyId(quotedMsg);
   let imprestId = replyTo ? (replyTo.split('||')[1] || '') : '';
 
+  // 2) Quoted-reply fallback: WhatsApp/Maytapi often strips the ReplyID line from the
+  //    quoted preview but keeps the bare Ref ID (IMP-YYYYMMDD-NNNN). Resolve that to the
+  //    imprest row so a plain "Okay" reply to the approval message still routes correctly.
   if (!imprestId) {
-    console.log('[WhatsApp] No ReplyID found, looking up latest imprest awaiting Director...');
-    // Route B (≥ ₹10K) parks the request at `director_pending` while it waits for the
-    // Director's WhatsApp approval. That is the signal to match on — the old query keyed
-    // off `requires_founder_approval`/`founder_review_status='pending'`, which are never set
-    // for this stage, so the lookup always came back empty and the reply was dropped.
-    const { data: latestPending } = await supabaseAdmin
+    const refId = extractRefFromMessage(quotedMsg) || extractRefFromMessage(msgText);
+    if (refId) {
+      const { data: byRef } = await supabaseAdmin
+        .from('imprest_requests')
+        .select('id, ref_id, current_stage')
+        .eq('ref_id', refId)
+        .eq('current_stage', 'director_pending')
+        .limit(1)
+        .maybeSingle();
+      if (byRef) {
+        imprestId = byRef.id;
+        console.log('[WhatsApp] Matched Director reply to', byRef.ref_id, 'via quoted Ref ID');
+      }
+    }
+  }
+
+  // 3) Last resort: if there is EXACTLY ONE request awaiting the Director, it is
+  //    unambiguous — approve/reject it. If several are pending we must NOT guess
+  //    (that could approve the wrong request); the dashboard "Resend to Director"
+  //    button is the recovery path for those.
+  if (!imprestId) {
+    const { data: pendingList } = await supabaseAdmin
       .from('imprest_requests')
       .select('id, ref_id')
       .eq('current_stage', 'director_pending')
-      .order('submitted_at', { ascending: false })
-      .limit(1)
-      .single();
-    if (latestPending) {
-      imprestId = latestPending.id;
-      console.log('[WhatsApp] Found pending imprest:', latestPending.ref_id);
+      .order('submitted_at', { ascending: false });
+    if (pendingList?.length === 1) {
+      imprestId = pendingList[0].id;
+      console.log('[WhatsApp] Single pending imprest — matched to', pendingList[0].ref_id);
+    } else if ((pendingList?.length || 0) > 1) {
+      console.warn(`[WhatsApp] Director reply "${msgText}" has no Ref ID and ${pendingList.length} requests are pending — cannot safely match. Ask Director to quote/include the Ref ID, or use Resend.`);
+      return;
     }
   }
 

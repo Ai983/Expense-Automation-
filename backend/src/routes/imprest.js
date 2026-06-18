@@ -1364,6 +1364,14 @@ router.get('/director/queue', authMiddleware, roleGuard(['admin']), async (req, 
   } catch (err) { next(err); }
 });
 
+// GET /api/imprest/director-pending — S1/Head view of requests waiting at Director stage
+router.get('/director-pending', authMiddleware, roleGuard([...S1_ROLES, 'head']), async (req, res, next) => {
+  try {
+    const result = await buildStageQueue(req, 'director_pending', null);
+    return ok(res, result);
+  } catch (err) { next(err); }
+});
+
 // POST /api/imprest/:id/director-approve — Director approves high-value imprests
 router.post('/:id/director-approve', authMiddleware, roleGuard(['admin']), async (req, res, next) => {
   try {
@@ -1438,6 +1446,60 @@ router.post('/:id/director-reject', authMiddleware, roleGuard(['admin']), async 
     });
 
     return ok(res, { refId: imp.ref_id, currentStage: 's1_pending', message: 'Request sent back to S1 for revision' });
+  } catch (err) { next(err); }
+});
+
+// POST /api/imprest/:id/resend-director — S1 resends WhatsApp approval request to Director
+router.post('/:id/resend-director', authMiddleware, roleGuard(S1_ROLES), async (req, res, next) => {
+  try {
+    const { data: imp, error: fetchErr } = await supabaseAdmin
+      .from('imprest_requests')
+      .select('id, ref_id, current_stage, approval_route, amount_requested, employee_id, site, category, purpose, s1_note, old_balance_deducted')
+      .eq('id', req.params.id).single();
+    if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
+    if (imp.current_stage !== 'director_pending') return fail(res, 'Request is not awaiting Director approval');
+
+    const calcOutstanding = async () => {
+      let out = 0;
+      const { data: empImps } = await supabaseAdmin
+        .from('imprest_requests').select('id, approved_amount, amount_requested')
+        .eq('employee_id', imp.employee_id)
+        .in('status', ['approved', 'partially_approved'])
+        .neq('id', imp.id);
+      if (empImps?.length > 0) {
+        const aIds = empImps.map(r => r.id);
+        const { data: exps } = await supabaseAdmin.from('expenses').select('imprest_id, amount, status')
+          .in('imprest_id', aIds).not('status', 'in', '("rejected","blocked")');
+        const expMap = {};
+        for (const e of (exps || [])) { expMap[e.imprest_id] = (expMap[e.imprest_id] || 0) + parseFloat(e.amount); }
+        for (const r of empImps) {
+          out += Math.max(0, parseFloat(r.approved_amount || r.amount_requested) - (expMap[r.id] || 0));
+        }
+      }
+      return Math.round(out * 100) / 100;
+    };
+
+    try {
+      const [empName, oldBalance] = await Promise.all([
+        supabaseAdmin.from('employees').select('name').eq('id', imp.employee_id).single().then(r => r.data?.name || ''),
+        calcOutstanding(),
+      ]);
+      await triggerFounderApproval({
+        imprestId: imp.id, refId: imp.ref_id, requestedTo: 'Bhaskar Sir',
+        employeeName: empName, employeeSite: imp.site,
+        amount: parseFloat(imp.amount_requested), category: imp.category,
+        purpose: imp.purpose || '', oldBalance, submittedAt: new Date().toISOString(),
+      });
+    } catch (e) { console.warn('Resend Director WhatsApp failed:', e.message); }
+
+    await logAudit({
+      userId: req.user.id, action: 'resend_director_whatsapp',
+      entityType: 'expense', entityId: imp.id,
+      newValue: { current_stage: 'director_pending', resent_at: new Date().toISOString() },
+      ipAddress: req.ip,
+    });
+
+    return ok(res, { message: 'WhatsApp approval request resent to Director (Bhaskar Sir)' });
   } catch (err) { next(err); }
 });
 

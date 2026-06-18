@@ -3,12 +3,21 @@ import api from '../services/api';
 import { showToast } from '../components/layout/Toast';
 import { useSites } from '../hooks/useSites';
 
+function ResendIcon({ size = 12 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+    </svg>
+  );
+}
+
 const FALLBACK_IMPREST_SITES = [
   'MAX Hospital, Saket Delhi',
   'DEE Development Engineer - Canteen', 'DEE Development Engineer - Admin',
   'Vaneet Infra', 'Dee Foundation Omaxe, Faridabad', 'Auma India Bengaluru',
   'Minebea Mitsumi', 'Hero Homes Ludhiana', 'Hero Homes Greater Noida',
-  'Bansal Tower', 'KOKO Town, Chandigarh', 'Vinfast Jaipur', 'M3M', 'Head Office', 'Bangalore Office', 'Others',
+  'Bansal Tower', 'KOKO Town, Chandigarh', 'Vinfast Jaipur', 'M3M', 'Vinfast Jikarpur', 'Head Office', 'Bangalore Office', 'Others',
 ];
 
 function fmt(n) { return `₹${Number(n).toLocaleString('en-IN')}`; }
@@ -102,6 +111,11 @@ export default function S1QueuePage() {
   const [exitingRows, setExitingRows] = useState(new Set());
   const limit = 50;
 
+  // Director-pending section
+  const [directorPending, setDirectorPending] = useState([]);
+  const [directorLoading, setDirectorLoading] = useState(true);
+  const [resendingId, setResendingId] = useState(null);
+
   const fetchQueue = useCallback(async () => {
     setLoading(true);
     try {
@@ -116,6 +130,29 @@ export default function S1QueuePage() {
   }, [page, filterSite, filterName]);
 
   useEffect(() => { fetchQueue(); }, [fetchQueue]);
+
+  const fetchDirectorPending = useCallback(async () => {
+    setDirectorLoading(true);
+    try {
+      const { data } = await api.get('/api/imprest/director-pending');
+      setDirectorPending(data.data.requests || []);
+    } catch { /* silently ignore — section just shows empty */ }
+    finally { setDirectorLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchDirectorPending(); }, [fetchDirectorPending]);
+
+  const handleResendDirector = async (req) => {
+    setResendingId(req.id);
+    try {
+      await api.post(`/api/imprest/${req.id}/resend-director`);
+      showToast(`✓ WhatsApp re-sent to Director for ${req.ref_id}`, 'success');
+    } catch (e) {
+      showToast(e.response?.data?.error || 'Failed to resend', 'error');
+    } finally {
+      setResendingId(null);
+    }
+  };
 
   // Trigger modal slide-in after mount
   useEffect(() => {
@@ -277,6 +314,76 @@ export default function S1QueuePage() {
           </div>
         )}
       </div>
+
+      {/* Director Pending — forwarded requests awaiting Director WhatsApp approval */}
+      {(directorLoading || directorPending.length > 0) && (
+        <div className="mt-8">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="inline-flex items-center gap-1.5 bg-purple-100 text-purple-700 text-xs font-semibold px-2.5 py-1 rounded-full">
+              <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+              Awaiting Director Approval (WhatsApp)
+            </span>
+            <span className="text-xs text-gray-400">— use Resend if Director hasn't replied</span>
+          </div>
+          <div className="bg-white rounded-xl border border-purple-200 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-purple-50 border-b border-purple-100">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-600 uppercase">Ref ID</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-600 uppercase">Employee</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-600 uppercase">Category</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-purple-600 uppercase">Amount</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-600 uppercase">Forwarded On</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-600 uppercase">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {directorLoading ? (
+                    Array(2).fill(0).map((_, i) => (
+                      <tr key={i} className="animate-pulse">
+                        {Array(6).fill(0).map((__, j) => (
+                          <td key={j} className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-full max-w-[80px]" /></td>
+                        ))}
+                      </tr>
+                    ))
+                  ) : directorPending.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-gray-400 text-xs">No requests awaiting Director approval</td>
+                    </tr>
+                  ) : (
+                    directorPending.map((req) => (
+                      <tr key={req.id} className="hover:bg-purple-50/40 transition-colors">
+                        <td className="px-4 py-3 font-mono text-xs text-purple-600 font-semibold">{req.ref_id}</td>
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-gray-900">{req.employee?.name || '--'}</div>
+                          <div className="text-xs text-gray-500">{req.site}</div>
+                        </td>
+                        <td className="px-4 py-3 text-gray-700 text-xs">{req.category}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-gray-900">{fmt(req.amount_requested)}</td>
+                        <td className="px-4 py-3 text-xs text-gray-500">{fmtDate(req.s1_approved_at || req.submitted_at)}</td>
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => handleResendDirector(req)}
+                            disabled={resendingId === req.id}
+                            title="Resend WhatsApp approval request to Director (Bhaskar Sir)"
+                            className="inline-flex items-center gap-1.5 text-xs bg-purple-600 text-white px-3 py-1.5 rounded-lg hover:bg-purple-700 active:scale-95 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            {resendingId === req.id
+                              ? <Spinner className="text-white" />
+                              : <ResendIcon size={12} />}
+                            {resendingId === req.id ? 'Sending…' : 'Resend to Director'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal with slide-up + fade animation */}
       {selected && modalMode && (
