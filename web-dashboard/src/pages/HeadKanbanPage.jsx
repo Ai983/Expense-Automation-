@@ -7,7 +7,7 @@ import { useSites } from '../hooks/useSites';
 const FALLBACK_SITES = [
   'All', 'Head Office', 'Bhuj', 'Bansal Tower', 'MAX Hospital, Saket Delhi',
   'Vaneet Infra', 'Dee Foundation Omaxe, Faridabad', 'Auma India Bengaluru',
-  'Minebea Mitsumi', 'Hero Homes Ludhiana', 'KOKO Town, Chandigarh', 'Vinfast Jaipur', 'M3M', 'Bangalore Office',
+  'Minebea Mitsumi', 'Hero Homes Ludhiana', 'KOKO Town, Chandigarh', 'Vinfast Jaipur', 'M3M', 'Vinfast Jikarpur', 'Bangalore Office',
 ];
 
 function stageTimestamp(item, stream) {
