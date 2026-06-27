@@ -104,6 +104,7 @@ export default function S1QueuePage() {
   const [modalMode, setModalMode] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [notes, setNotes] = useState('');
+  const [adjustedAmount, setAdjustedAmount] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [acting, setActing] = useState(false);
   const [actionError, setActionError] = useState('');
@@ -163,7 +164,7 @@ export default function S1QueuePage() {
     }
   }, [selected, modalMode]);
 
-  const openForward = (req) => { setSelected(req); setNotes(''); setActionError(''); setModalMode('forward'); };
+  const openForward = (req) => { setSelected(req); setNotes(''); setAdjustedAmount(''); setActionError(''); setModalMode('forward'); };
   const openReject = (req) => { setSelected(req); setRejectReason(''); setActionError(''); setModalMode('reject'); };
   const closeModal = () => {
     setModalVisible(false);
@@ -172,13 +173,19 @@ export default function S1QueuePage() {
 
   const handleForward = async () => {
     if (!notes.trim()) { setActionError('A note is required before forwarding to the next stage.'); return; }
+    if (adjustedAmount !== '' && (isNaN(parseFloat(adjustedAmount)) || parseFloat(adjustedAmount) <= 0)) {
+      setActionError('Adjusted amount must be a positive number.');
+      return;
+    }
     setActing(true); setActionError('');
     const requestId = selected.id;
     const isDirectorRoute = selected.approval_route === 'avisha_director_finance_founder'
       || selected.approval_route === 'avisha_director_finance';
     const destination = isDirectorRoute ? 'Director (WhatsApp)' : 'Finance';
+    const payload = { notes: notes.trim() };
+    if (adjustedAmount !== '') payload.adjustedAmount = parseFloat(adjustedAmount);
     try {
-      await api.post(`/api/imprest/${requestId}/s1-approve`, { notes: notes.trim() });
+      await api.post(`/api/imprest/${requestId}/s1-approve`, payload);
       showToast(`✓ Forwarded to ${destination}`, 'success');
       closeModal();
       // Animate the row out then refetch
@@ -429,16 +436,38 @@ export default function S1QueuePage() {
               </div>
 
               {modalMode === 'forward' && (
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Note <span className="text-red-500">*</span></label>
-                  <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-400" rows={2} placeholder="Add your review note (required before forwarding)..." />
-                  <p className="text-xs text-gray-400 mt-1">
-                    {(selected.approval_route === 'avisha_director_finance_founder' || selected.approval_route === 'avisha_director_finance')
-                      ? '⚡ A WhatsApp approval request will be sent to Bhaskar Sir (Director)'
-                      : '⚡ This will move to the Finance review queue'}
-                  </p>
-                </div>
+                <>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">
+                      Adjust Amount <span className="text-xs font-normal text-gray-400">(optional — leave blank to approve as-is)</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-medium">₹</span>
+                      <input
+                        type="number" min="1" step="1"
+                        value={adjustedAmount}
+                        onChange={(e) => setAdjustedAmount(e.target.value)}
+                        placeholder={String(selected.amount_requested)}
+                        className="w-full border rounded-lg pl-7 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      />
+                    </div>
+                    {adjustedAmount !== '' && parseFloat(adjustedAmount) !== parseFloat(selected.amount_requested) && (
+                      <p className="text-xs text-amber-600 mt-1 font-medium">
+                        Amount will change from {fmt(selected.amount_requested)} → {fmt(adjustedAmount)}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Note <span className="text-red-500">*</span></label>
+                    <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
+                      className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-400" rows={2} placeholder="Add your review note (required before forwarding)..." />
+                    <p className="text-xs text-gray-400 mt-1">
+                      {(selected.approval_route === 'avisha_director_finance_founder' || selected.approval_route === 'avisha_director_finance')
+                        ? '⚡ A WhatsApp approval request will be sent to Bhaskar Sir (Director)'
+                        : '⚡ This will move to the Finance review queue'}
+                    </p>
+                  </div>
+                </>
               )}
 
               {modalMode === 'reject' && (

@@ -999,7 +999,7 @@ router.get('/s1/queue', authMiddleware, roleGuard([...S1_ROLES, 'head']), async 
 // POST /api/imprest/:id/s1-approve — Avisha forwards
 router.post('/:id/s1-approve', authMiddleware, roleGuard(S1_ROLES), async (req, res, next) => {
   try {
-    const { notes } = req.body;
+    const { notes, adjustedAmount } = req.body;
     if (!notes?.trim()) return fail(res, 'A note is required before forwarding to the next stage.');
     const { data: imp, error: fetchErr } = await supabaseAdmin
       .from('imprest_requests')
@@ -1008,11 +1008,22 @@ router.post('/:id/s1-approve', authMiddleware, roleGuard(S1_ROLES), async (req, 
     if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
     if (imp.current_stage !== 's1_pending') return fail(res, 'Request is not at Stage 1');
 
+    // Validate optional adjusted amount
+    let s1Adjusted = null;
+    if (adjustedAmount !== undefined && adjustedAmount !== null && adjustedAmount !== '') {
+      const parsed = parseFloat(adjustedAmount);
+      if (isNaN(parsed) || parsed <= 0) return fail(res, 'Adjusted amount must be a positive number.');
+      if (parsed !== parseFloat(imp.amount_requested)) {
+        s1Adjusted = parsed;
+      }
+    }
+
     const now = new Date().toISOString();
     const updateFields = {
       s1_approved_by: req.user.id,
       s1_approved_at: now,
       s1_note: notes.trim(),
+      ...(s1Adjusted !== null && { s1_adjusted_amount: s1Adjusted }),
     };
 
     // Route A: < ₹10,000 → skip Director, go directly to Finance (S3)
@@ -1057,7 +1068,7 @@ router.post('/:id/s1-approve', authMiddleware, roleGuard(S1_ROLES), async (req, 
         triggerFounderApproval({
           imprestId: imp.id, refId: imp.ref_id, requestedTo: 'Bhaskar Sir',
           employeeName: empName, employeeSite: imp.site,
-          amount: parseFloat(imp.amount_requested), category: imp.category,
+          amount: s1Adjusted ?? parseFloat(imp.amount_requested), category: imp.category,
           purpose: imp.purpose || '', oldBalance, submittedAt: now,
         }).catch((e) => console.warn('WF2 Bhaskar trigger failed:', e.message));
       } catch (e) { console.warn('Bhaskar WhatsApp trigger failed:', e.message); }
@@ -1071,7 +1082,7 @@ router.post('/:id/s1-approve', authMiddleware, roleGuard(S1_ROLES), async (req, 
       userId: req.user.id, action: 's1_approve',
       entityType: 'expense', entityId: imp.id,
       oldValue: { current_stage: 's1_pending' },
-      newValue: { current_stage: newStage, s1_note: notes },
+      newValue: { current_stage: newStage, s1_note: notes, ...(s1Adjusted !== null && { s1_adjusted_amount: s1Adjusted }) },
       ipAddress: req.ip,
     });
 
