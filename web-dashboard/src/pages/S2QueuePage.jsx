@@ -268,6 +268,8 @@ export default function S2QueuePage() {
   const [rejectReason, setRejectReason] = useState('');
   const [acting, setActing] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [empHistory, setEmpHistory] = useState([]);
+  const [empHistoryLoading, setEmpHistoryLoading] = useState(false);
 
   const fetchBoard = useCallback(async () => {
     setLoading(true);
@@ -330,6 +332,23 @@ export default function S2QueuePage() {
     }
     return out;
   }, [history, cfg]);
+
+  // Employee's past paid imprest — fetched as soon as a request is opened, so
+  // the reviewer can check the employee's track record right in this modal
+  // instead of digging through "My Approval History" or another page.
+  useEffect(() => {
+    if (!selected?.employee_id) { setEmpHistory([]); return; }
+    setEmpHistoryLoading(true);
+    api.get(`/api/dashboard/employee/${selected.employee_id}/detail`)
+      .then(({ data }) => {
+        const paid = (data.data.imprests || [])
+          .filter((i) => i.paid && i.id !== selected.id)
+          .slice(0, 10);
+        setEmpHistory(paid);
+      })
+      .catch(() => setEmpHistory([]))
+      .finally(() => setEmpHistoryLoading(false));
+  }, [selected?.employee_id, selected?.id]);
 
   const openView = (req) => { setSelected(req); setModalMode('view'); };
   const openForward = (req) => {
@@ -504,6 +523,33 @@ export default function S2QueuePage() {
                 <div className="flex justify-between"><span className="text-gray-500">Site</span><span>{selected.site}</span></div>
                 {selected.purpose && <div className="flex justify-between"><span className="text-gray-500">Purpose</span><span className="text-right max-w-[280px]">{selected.purpose}</span></div>}
                 <div className="flex justify-between"><span className="text-gray-500">Submitted</span><span>{fmtDate(selected.submitted_at)} {fmtTime(selected.submitted_at)}</span></div>
+              </div>
+
+              {/* Employee's past paid imprest — visible immediately, no extra clicks */}
+              <div className="border rounded-xl p-4 text-sm">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Employee's Paid Imprest History</p>
+                {empHistoryLoading ? (
+                  <p className="text-xs text-gray-400">Loading history…</p>
+                ) : empHistory.length === 0 ? (
+                  <p className="text-xs text-gray-400">No prior paid imprest for this employee.</p>
+                ) : (
+                  <div className="divide-y divide-gray-100 max-h-40 overflow-y-auto">
+                    {empHistory.map((h) => (
+                      <div key={h.id} className="py-2 flex items-center justify-between text-xs">
+                        <div>
+                          <span className="font-mono text-gray-500">{h.ref_id}</span>
+                          <span className="text-gray-400"> · {h.category} · {fmtDate(h.submitted_at)}</span>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-semibold text-gray-900">{fmt(h.paid_amount ?? h.amount_requested)}</div>
+                          {h.remainingBalance > 0 && (
+                            <div className="text-red-600 font-medium">{fmt(h.remainingBalance)} unsettled</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Timeline of stage actions */}
