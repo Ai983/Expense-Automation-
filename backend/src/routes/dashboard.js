@@ -270,7 +270,8 @@ router.get('/by-employee', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next)
 });
 
 // GET /api/dashboard/employee/:id/detail — full detail for one employee
-router.get('/employee/:id/detail', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
+// (also used by S1/S2 approvers to review an employee's imprest history before forwarding)
+router.get('/employee/:id/detail', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
   try {
     const empId = req.params.id;
     const { site } = req.query; // optional — scope detail to a single project

@@ -110,6 +110,8 @@ export default function S1QueuePage() {
   const [actionError, setActionError] = useState('');
   const [rowActioning, setRowActioning] = useState({}); // { reqId: 'forward'|'reject' }
   const [exitingRows, setExitingRows] = useState(new Set());
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const limit = 50;
 
   // Director-pending section
@@ -170,6 +172,22 @@ export default function S1QueuePage() {
     setModalVisible(false);
     setTimeout(() => { setSelected(null); setModalMode(null); }, 200);
   };
+
+  // Pull the employee's past PAID imprest history so S1 can sanity-check this
+  // request against their track record without leaving the modal.
+  useEffect(() => {
+    if (!selected?.employee_id) { setHistory([]); return; }
+    setHistoryLoading(true);
+    api.get(`/api/dashboard/employee/${selected.employee_id}/detail`)
+      .then(({ data }) => {
+        const paid = (data.data.imprests || [])
+          .filter((i) => i.paid && i.id !== selected.id)
+          .slice(0, 10);
+        setHistory(paid);
+      })
+      .catch(() => setHistory([]))
+      .finally(() => setHistoryLoading(false));
+  }, [selected?.employee_id, selected?.id]);
 
   const handleForward = async () => {
     if (!notes.trim()) { setActionError('A note is required before forwarding to the next stage.'); return; }
@@ -432,6 +450,32 @@ export default function S1QueuePage() {
                 {selected.purpose && <div className="flex justify-between"><span className="text-gray-500">Purpose</span><span className="text-right max-w-[200px]">{selected.purpose}</span></div>}
                 {selected.employee_total_balance > 0 && (
                   <div className="flex justify-between"><span className="text-gray-500">Prev Balance</span><span className="font-bold text-red-600">{fmt(selected.employee_total_balance)}</span></div>
+                )}
+              </div>
+
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Past Paid Imprest History</p>
+                {historyLoading ? (
+                  <p className="text-xs text-gray-400">Loading history…</p>
+                ) : history.length === 0 ? (
+                  <p className="text-xs text-gray-400">No prior paid imprest for this employee.</p>
+                ) : (
+                  <div className="border rounded-xl divide-y divide-gray-100 max-h-40 overflow-y-auto">
+                    {history.map((h) => (
+                      <div key={h.id} className="px-3 py-2 flex items-center justify-between text-xs">
+                        <div>
+                          <span className="font-mono text-gray-500">{h.ref_id}</span>
+                          <span className="text-gray-400"> · {h.category} · {fmtDate(h.submitted_at)}</span>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-semibold text-gray-900">{fmt(h.paid_amount ?? h.amount_requested)}</div>
+                          {h.remainingBalance > 0 && (
+                            <div className="text-red-600 font-medium">{fmt(h.remainingBalance)} unsettled</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
 
