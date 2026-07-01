@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
-import { notifyS2, notifyFinance } from '../services/whatsappService.js';
+import { notifyS2, notifyFinance, sendWhatsApp } from '../services/whatsappService.js';
+import { logAudit } from '../services/auditService.js';
 
 const router = Router();
 
@@ -168,6 +169,38 @@ router.post('/incoming', async (req, res) => {
   }
 });
 
+/**
+ * When a Director reply can't be matched to a single request (no Ref ID, and
+ * multiple requests are pending), tell the Director exactly which Ref IDs are
+ * waiting and ask them to resend with one — instead of dropping the reply
+ * silently, which previously made delayed approvals disappear.
+ */
+async function notifyDirectorAmbiguousReply(pendingList, decision) {
+  await logAudit({
+    userId: null,
+    action: 'director_reply_ambiguous',
+    entityType: 'expense',
+    entityId: null,
+    oldValue: null,
+    newValue: { decision, pendingRefIds: pendingList.map((p) => p.ref_id) },
+  });
+
+  if (!DIRECTOR_PHONE) return;
+  const list = pendingList
+    .map((p) => `• ${p.ref_id} — Rs.${Number(p.amount_requested).toLocaleString('en-IN')} (${p.category}, ${p.site})`)
+    .join('\n');
+  const msg =
+    `⚠️ *Couldn't identify which request you meant*\n\n` +
+    `Your last reply didn't include a Ref ID, and ${pendingList.length} requests are awaiting your approval:\n\n` +
+    `${list}\n\n` +
+    `Please reply again with *YES <Ref ID>* or *NO <Ref ID> <reason>*, e.g. *YES ${pendingList[0].ref_id}*.`;
+  try {
+    await sendWhatsApp(DIRECTOR_PHONE, msg);
+  } catch (e) {
+    console.warn('[WhatsApp] Failed to send ambiguous-reply clarification to Director:', e.message);
+  }
+}
+
 // ─── Founder / Director Reply Handler ──────────────────────────────────────────
 async function handleFounderDirectorReply({ msgText, cleanPhone, quotedMsg, decision, comment }) {
   // 1) Exact match: ReplyID token (ref_id||uuid) embedded in the reply or the quoted message.
@@ -196,19 +229,21 @@ async function handleFounderDirectorReply({ msgText, cleanPhone, quotedMsg, deci
 
   // 3) Last resort: if there is EXACTLY ONE request awaiting the Director, it is
   //    unambiguous — approve/reject it. If several are pending we must NOT guess
-  //    (that could approve the wrong request); the dashboard "Resend to Director"
-  //    button is the recovery path for those.
+  //    (that could approve the wrong request). Instead of silently dropping the
+  //    reply — which is what made delayed replies vanish once the Director's
+  //    queue grew past one item — ask the Director to resend with the Ref ID.
   if (!imprestId) {
     const { data: pendingList } = await supabaseAdmin
       .from('imprest_requests')
-      .select('id, ref_id')
+      .select('id, ref_id, amount_requested, site, category')
       .eq('current_stage', 'director_pending')
       .order('submitted_at', { ascending: false });
     if (pendingList?.length === 1) {
       imprestId = pendingList[0].id;
       console.log('[WhatsApp] Single pending imprest — matched to', pendingList[0].ref_id);
     } else if ((pendingList?.length || 0) > 1) {
-      console.warn(`[WhatsApp] Director reply "${msgText}" has no Ref ID and ${pendingList.length} requests are pending — cannot safely match. Ask Director to quote/include the Ref ID, or use Resend.`);
+      console.warn(`[WhatsApp] Director reply "${msgText}" has no Ref ID and ${pendingList.length} requests are pending — cannot safely match.`);
+      await notifyDirectorAmbiguousReply(pendingList, decision);
       return;
     }
   }
