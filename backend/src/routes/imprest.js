@@ -615,7 +615,7 @@ router.get('/my-requests/:employeeId', authMiddleware, async (req, res, next) =>
 // ── GET /api/imprest/finance/queue ────────────────────────────────────────────
 router.get('/finance/queue', authMiddleware, roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
-    const { status, site, category, dateFrom, dateTo, employeeName, page = 1, limit = 50 } = req.query;
+    const { status, site, category, dateFrom, dateTo, employeeName, stage, allStages, page = 1, limit = 50 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     let employeeIds = null;
@@ -639,8 +639,16 @@ router.get('/finance/queue', authMiddleware, roleGuard(FINANCE_HEAD_ROLES), asyn
       .order('submitted_at', { ascending: false })
       .range(offset, offset + parseInt(limit) - 1);
 
-    // Finance sees S3+ and founder gate stages
-    query = query.in('current_stage', ['s3_pending', 'founder_review_pending', 'founder_approved', 'founder_rejected', 's3_rejected', 'director_rejected', 'paid', 'withdrawn']);
+    // Finance sees S3+ and founder gate stages. The Head read-only "All Imprests"
+    // view opts into the full pipeline via allStages/stage (Finance never sends these,
+    // so its behaviour is unchanged).
+    if (stage && stage !== 'all') {
+      query = query.eq('current_stage', stage);
+    } else if (allStages === 'true' || allStages === '1') {
+      // no stage restriction — show the entire pipeline (read-only Head view)
+    } else {
+      query = query.in('current_stage', ['s3_pending', 'founder_review_pending', 'founder_approved', 'founder_rejected', 's3_rejected', 'director_rejected', 'paid', 'withdrawn']);
+    }
     if (status && status !== 'all') query = query.eq('status', status);
     if (site && site !== 'all') query = query.eq('site', site);
     if (category && category !== 'all') query = query.eq('category', category);
@@ -1263,7 +1271,7 @@ router.get('/s2/history', authMiddleware, roleGuard([...S2_ROLES, 'head']), asyn
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
     const { data, error } = await supabaseAdmin
       .from('imprest_requests')
-      .select('id, ref_id, site, category, purpose, amount_requested, current_stage, status, s2_approved_at, s2_notes, rejection_reason, submitted_at, employee_id')
+      .select('id, ref_id, site, category, purpose, amount_requested, current_stage, status, s2_approved_at, s2_note, s2_notes, rejection_reason, submitted_at, employee_id')
       .eq('s2_approved_by', req.user.id)
       .order('s2_approved_at', { ascending: false })
       .limit(limit);
@@ -1279,7 +1287,9 @@ router.get('/s2/history', authMiddleware, roleGuard([...S2_ROLES, 'head']), asyn
         .in('id', employeeIds);
       employeeMap = Object.fromEntries((emps || []).map(e => [e.id, e.name]));
     }
-    const enriched = (data || []).map(r => ({ ...r, employee_name: employeeMap[r.employee_id] || null }));
+    // s2_note (singular) is the column HTTP approvals write; s2_notes is the legacy
+    // column the WhatsApp path writes. Expose a unified value so history shows either.
+    const enriched = (data || []).map(r => ({ ...r, s2_notes: r.s2_note || r.s2_notes || null, employee_name: employeeMap[r.employee_id] || null }));
     return ok(res, { history: enriched, count: enriched.length });
   } catch (err) { next(err); }
 });

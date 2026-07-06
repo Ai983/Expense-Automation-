@@ -57,7 +57,7 @@ async function buildReport(period) {
   const { data: pipeline } = await supabaseAdmin
     .from('imprest_requests')
     .select('id, current_stage, approval_route, amount_requested')
-    .in('current_stage', ['s1_pending', 's2_pending', 's3_pending']);
+    .in('current_stage', ['s1_pending', 's2_pending', 'director_pending', 's3_pending']);
   const pipelineRows = pipeline || [];
 
   // PO payments in window
@@ -115,8 +115,9 @@ async function buildReport(period) {
   const pendingPipeline = {
     s1: pipelineRows.filter(r => r.current_stage === 's1_pending').length,
     s1Amount: pipelineRows.filter(r => r.current_stage === 's1_pending').reduce((s, r) => s + parseFloat(r.amount_requested || 0), 0),
-    s2_ritu: pipelineRows.filter(r => r.current_stage === 's2_pending' && r.approval_route === 'avisha_ritu_finance').length,
-    s2_director: pipelineRows.filter(r => r.current_stage === 's2_pending' && r.approval_route === 'avisha_director_finance').length,
+    // S2 (Ritu) = everything currently at s2_pending (HO/Bangalore route); Director = items parked at director_pending
+    s2_ritu: pipelineRows.filter(r => r.current_stage === 's2_pending').length,
+    s2_director: pipelineRows.filter(r => r.current_stage === 'director_pending').length,
     finance: pipelineRows.filter(r => r.current_stage === 's3_pending').length,
     financeAmount: pipelineRows.filter(r => r.current_stage === 's3_pending').reduce((s, r) => s + parseFloat(r.amount_requested || 0), 0),
   };

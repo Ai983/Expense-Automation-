@@ -115,8 +115,7 @@ router.get('/overview', async (req, res, next) => {
       supabaseAdmin
         .from('imprest_requests')
         .select('id', { count: 'exact', head: true })
-        .eq('current_stage', 's2_pending')
-        .eq('founder_review_status', 'pending'),
+        .eq('current_stage', 'director_pending'),
 
       supabaseAdmin
         .from('imprest_requests')
@@ -126,7 +125,7 @@ router.get('/overview', async (req, res, next) => {
 
       supabaseAdmin
         .from('po_payments')
-        .select('total_amount')
+        .select('paid_amount, total_amount')
         .eq('status', 'paid')
         .gte('paid_at', weekAgo),
 
@@ -169,7 +168,7 @@ router.get('/overview', async (req, res, next) => {
 
     const paidThisWeek =
       (imprestPaidWeekRes.data || []).reduce((s, r) => s + parseFloat(r.paid_amount || 0), 0) +
-      (poPaidWeekRes.data || []).reduce((s, r) => s + parseFloat(r.total_amount || 0), 0);
+      (poPaidWeekRes.data || []).reduce((s, r) => s + parseFloat(r.paid_amount ?? r.total_amount ?? 0), 0);
 
     let avgApproveHours = null;
     const approvedItems = avgApproveRes.data || [];

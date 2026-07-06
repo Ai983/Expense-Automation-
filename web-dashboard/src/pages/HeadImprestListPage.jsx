@@ -11,26 +11,36 @@ const STAGE_LABELS = {
   s2_pending: 'S2 Pending',
   s2_approved: 'S2 Approved',
   s2_rejected: 'S2 Rejected',
+  director_pending: 'Director Pending',
   s3_pending: 'Finance Pending',
   s3_approved: 'Finance Approved',
   s3_rejected: 'Finance Rejected',
   director_rejected: 'Director Rejected',
+  founder_review_pending: 'Founder Pending',
+  founder_approved: 'Founder Approved',
+  founder_rejected: 'Founder Rejected',
+  withdrawn: 'Withdrawn',
   paid: 'Paid',
 };
 
 const STAGE_STYLES = {
   s1_pending: 'bg-yellow-100 text-yellow-800',
   s2_pending: 'bg-orange-100 text-orange-800',
+  director_pending: 'bg-indigo-100 text-indigo-800',
   s3_pending: 'bg-blue-100 text-blue-800',
   s3_approved: 'bg-teal-100 text-teal-800',
+  founder_review_pending: 'bg-purple-100 text-purple-800',
+  founder_approved: 'bg-emerald-100 text-emerald-800',
   paid: 'bg-green-100 text-green-800',
   s1_rejected: 'bg-red-100 text-red-800',
   s2_rejected: 'bg-red-100 text-red-800',
   s3_rejected: 'bg-red-100 text-red-800',
   director_rejected: 'bg-red-100 text-red-800',
+  founder_rejected: 'bg-red-100 text-red-800',
+  withdrawn: 'bg-gray-200 text-gray-700',
 };
 
-const ACTIVE_STAGES = ['s1_pending', 's2_pending', 's3_pending', 's3_approved'];
+const ACTIVE_STAGES = ['s1_pending', 's2_pending', 'director_pending', 's3_pending', 's3_approved', 'founder_review_pending', 'founder_approved'];
 
 export default function HeadImprestListPage() {
   const [requests, setRequests] = useState([]);
@@ -43,7 +53,7 @@ export default function HeadImprestListPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page, limit: 50 });
+      const params = new URLSearchParams({ page, limit: 50, allStages: 'true' });
       if (stageFilter) params.set('stage', stageFilter);
       if (siteFilter) params.set('site', siteFilter);
       const res = await api.get(`/api/imprest/finance/queue?${params}`);
