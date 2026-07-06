@@ -21,6 +21,48 @@ import { triggerSubmissionConfirmation, triggerFounderApproval, triggerFounderGa
 
 const router = Router();
 
+// Auto-clear an employee's imprest block once they have no outstanding (overdue)
+// reminders left. The block is set when a reminder expires; it must lift again when
+// the employee makes good, otherwise they stay silently blocked with no dashboard trace.
+// Only lifts a block that exists AND has no other still-overdue reminder holding it.
+async function maybeClearImprestBlock(employeeId, actorUserId = null, ip = null) {
+  if (!employeeId) return;
+
+  const { data: emp } = await supabaseAdmin
+    .from('employees')
+    .select('imprest_blocked')
+    .eq('id', employeeId)
+    .single();
+  if (!emp?.imprest_blocked) return; // nothing to clear
+
+  const { data: openReminders } = await supabaseAdmin
+    .from('imprest_expense_reminders')
+    .select('status, deadline')
+    .eq('employee_id', employeeId)
+    .in('status', ['pending', 'expired']);
+
+  const now = Date.now();
+  const stillOverdue = (openReminders || []).some(
+    (r) => r.status === 'expired' || (r.status === 'pending' && new Date(r.deadline).getTime() <= now)
+  );
+  if (stillOverdue) return; // another overdue reminder keeps the block in place
+
+  const { error } = await supabaseAdmin
+    .from('employees')
+    .update({ imprest_blocked: false, imprest_blocked_reason: null, imprest_blocked_at: null })
+    .eq('id', employeeId);
+  if (error) return;
+
+  await logAudit({
+    userId: actorUserId,
+    action: 'auto_unblock_employee_imprest',
+    entityType: 'employee',
+    entityId: employeeId,
+    newValue: { imprest_blocked: false, reason: 'All imprest reminders fulfilled' },
+    ipAddress: ip,
+  });
+}
+
 // Monday 00:00 of the calendar week containing `date` (server time).
 function getWeekStart(date = new Date()) {
   const d = new Date(date);
@@ -534,6 +576,8 @@ router.get('/my-reminders/:employeeId', authMiddleware, async (req, res, next) =
         .from('imprest_expense_reminders')
         .update({ status: 'fulfilled' })
         .in('id', autoSettledIds);
+      // Employee just covered these — lift any block if nothing else is overdue.
+      await maybeClearImprestBlock(employeeId, req.user.id, req.ip);
     }
 
     const reminders = allReminders
@@ -581,6 +625,11 @@ router.post('/reminders/:reminderId/fulfill', authMiddleware, async (req, res, n
         fulfilled_amount: totalFulfilled,
       })
       .eq('id', req.params.reminderId);
+
+    // Covering the reminder should lift the block if nothing else is overdue.
+    if (isFullyFulfilled) {
+      await maybeClearImprestBlock(reminder.employee_id, req.user.id, req.ip);
+    }
 
     const remainingBalance = Math.max(0, approvedAmount - totalFulfilled);
 
