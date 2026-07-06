@@ -14,7 +14,7 @@ router.use(authMiddleware);
 // GET /api/dashboard/metrics — key headline numbers (finance only)
 router.get('/metrics', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
-    const [totalRes, pendingRes, autoVerifiedRes, totalAmountRes] = await Promise.all([
+    const [totalRes, pendingRes, autoVerifiedRes, amountRows] = await Promise.all([
       supabaseAdmin.from('expenses').select('id', { count: 'exact', head: true }),
       supabaseAdmin
         .from('expenses')
@@ -24,13 +24,13 @@ router.get('/metrics', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => 
         .from('expenses')
         .select('id', { count: 'exact', head: true })
         .eq('status', 'verified'),
-      supabaseAdmin.from('expenses').select('amount').neq('status', 'rejected').neq('status', 'blocked'),
+      fetchAllRows((f, t) => supabaseAdmin.from('expenses').select('amount').neq('status', 'rejected').neq('status', 'blocked').range(f, t)),
     ]);
 
     const total = totalRes.count || 0;
     const pending = pendingRes.count || 0;
     const autoVerified = autoVerifiedRes.count || 0;
-    const totalAmount = (totalAmountRes.data || []).reduce((sum, e) => sum + parseFloat(e.amount), 0);
+    const totalAmount = (amountRows || []).reduce((sum, e) => sum + parseFloat(e.amount), 0);
     const autoVerifyRate = total > 0 ? Math.round((autoVerified / total) * 100) : 0;
 
     return ok(res, {
@@ -48,11 +48,10 @@ router.get('/metrics', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => 
 // GET /api/dashboard/by-site — expense counts and amounts grouped by site
 router.get('/by-site', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
-    const { data, error } = await supabaseAdmin
+    const data = await fetchAllRows((f, t) => supabaseAdmin
       .from('expenses')
-      .select('site, amount, status');
-
-    if (error) throw error;
+      .select('site, amount, status')
+      .range(f, t));
 
     const siteMap = {};
     for (const exp of data) {
@@ -75,13 +74,12 @@ router.get('/by-site', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => 
 // GET /api/dashboard/by-category
 router.get('/by-category', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
-    const { data, error } = await supabaseAdmin
+    const data = await fetchAllRows((f, t) => supabaseAdmin
       .from('expenses')
       .select('category, amount')
       .neq('status', 'rejected')
-      .neq('status', 'blocked');
-
-    if (error) throw error;
+      .neq('status', 'blocked')
+      .range(f, t));
 
     const catMap = {};
     for (const exp of data) {
@@ -104,11 +102,10 @@ router.get('/by-category', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next)
 // GET /api/dashboard/by-status
 router.get('/by-status', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
-    const { data, error } = await supabaseAdmin
+    const data = await fetchAllRows((f, t) => supabaseAdmin
       .from('expenses')
-      .select('status, amount');
-
-    if (error) throw error;
+      .select('status, amount')
+      .range(f, t));
 
     const statusMap = {};
     for (const exp of data) {
@@ -334,13 +331,13 @@ router.get('/employee/:id/detail', roleGuard(ALL_DASHBOARD_ROLES), async (req, r
 // GET /api/dashboard/imprest/metrics — headline numbers for imprest
 router.get('/imprest/metrics', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
   try {
-    const [totalRes, pendingRes, approvedRes, rejectedRes, partialRes, totalAmountRes] = await Promise.all([
+    const [totalRes, pendingRes, approvedRes, rejectedRes, partialRes, amountRows] = await Promise.all([
       supabaseAdmin.from('imprest_requests').select('id', { count: 'exact', head: true }),
       supabaseAdmin.from('imprest_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
       supabaseAdmin.from('imprest_requests').select('id', { count: 'exact', head: true }).eq('status', 'approved'),
       supabaseAdmin.from('imprest_requests').select('id', { count: 'exact', head: true }).eq('status', 'rejected'),
       supabaseAdmin.from('imprest_requests').select('id', { count: 'exact', head: true }).eq('status', 'partially_approved'),
-      supabaseAdmin.from('imprest_requests').select('amount_requested, approved_amount, status'),
+      fetchAllRows((f, t) => supabaseAdmin.from('imprest_requests').select('amount_requested, approved_amount, status').range(f, t)),
     ]);
 
     const total = totalRes.count || 0;
@@ -349,7 +346,7 @@ router.get('/imprest/metrics', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, 
     const rejected = rejectedRes.count || 0;
     const partiallyApproved = partialRes.count || 0;
 
-    const rows = totalAmountRes.data || [];
+    const rows = amountRows || [];
     const totalRequested = rows.reduce((s, r) => s + parseFloat(r.amount_requested || 0), 0);
     const totalApproved = rows
       .filter((r) => r.status === 'approved' || r.status === 'partially_approved')
@@ -371,9 +368,8 @@ router.get('/imprest/metrics', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, 
 // GET /api/dashboard/imprest/by-site — imprest counts and amounts by site
 router.get('/imprest/by-site', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
   try {
-    const { data, error } = await supabaseAdmin
-      .from('imprest_requests').select('site, amount_requested, approved_amount, status');
-    if (error) throw error;
+    const data = await fetchAllRows((f, t) => supabaseAdmin
+      .from('imprest_requests').select('site, amount_requested, approved_amount, status').range(f, t));
 
     const siteMap = {};
     for (const r of data) {
@@ -396,9 +392,8 @@ router.get('/imprest/by-site', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, 
 // GET /api/dashboard/imprest/by-category — imprest counts and amounts by category
 router.get('/imprest/by-category', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
   try {
-    const { data, error } = await supabaseAdmin
-      .from('imprest_requests').select('category, amount_requested, status');
-    if (error) throw error;
+    const data = await fetchAllRows((f, t) => supabaseAdmin
+      .from('imprest_requests').select('category, amount_requested, status').range(f, t));
 
     const catMap = {};
     for (const r of data) {
@@ -417,9 +412,8 @@ router.get('/imprest/by-category', roleGuard(ALL_DASHBOARD_ROLES), async (req, r
 // GET /api/dashboard/imprest/by-status — imprest counts by status
 router.get('/imprest/by-status', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
   try {
-    const { data, error } = await supabaseAdmin
-      .from('imprest_requests').select('status, amount_requested');
-    if (error) throw error;
+    const data = await fetchAllRows((f, t) => supabaseAdmin
+      .from('imprest_requests').select('status, amount_requested').range(f, t));
 
     const statusMap = {};
     for (const r of data) {
@@ -532,11 +526,11 @@ router.get('/imprest/employee-balance', roleGuard(ALL_DASHBOARD_ROLES), async (r
 // GET /api/dashboard/by-site/:site/details — employee breakdown for expense site
 router.get('/by-site/:site/details', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
-    const { data, error } = await supabaseAdmin
+    const data = await fetchAllRows((f, t) => supabaseAdmin
       .from('expenses')
       .select('amount, status, employee:employee_id (name, email, site)')
-      .eq('site', req.params.site);
-    if (error) throw error;
+      .eq('site', req.params.site)
+      .range(f, t));
 
     const empMap = {};
     for (const e of (data || [])) {
@@ -553,11 +547,11 @@ router.get('/by-site/:site/details', roleGuard(FINANCE_HEAD_ROLES), async (req, 
 // GET /api/dashboard/by-category/:category/details
 router.get('/by-category/:category/details', roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
   try {
-    const { data, error } = await supabaseAdmin
+    const data = await fetchAllRows((f, t) => supabaseAdmin
       .from('expenses')
       .select('amount, status, employee:employee_id (name, email, site)')
-      .eq('category', req.params.category);
-    if (error) throw error;
+      .eq('category', req.params.category)
+      .range(f, t));
 
     const empMap = {};
     for (const e of (data || [])) {
@@ -573,11 +567,11 @@ router.get('/by-category/:category/details', roleGuard(FINANCE_HEAD_ROLES), asyn
 // GET /api/dashboard/imprest/by-site/:site/details
 router.get('/imprest/by-site/:site/details', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
   try {
-    const { data, error } = await supabaseAdmin
+    const data = await fetchAllRows((f, t) => supabaseAdmin
       .from('imprest_requests')
       .select('amount_requested, approved_amount, status, category, employee:employee_id (name, email)')
-      .eq('site', req.params.site);
-    if (error) throw error;
+      .eq('site', req.params.site)
+      .range(f, t));
 
     const empMap = {};
     for (const r of (data || [])) {
@@ -601,11 +595,11 @@ router.get('/imprest/by-site/:site/details', roleGuard(ALL_DASHBOARD_ROLES), asy
 // GET /api/dashboard/imprest/by-category/:category/details
 router.get('/imprest/by-category/:category/details', roleGuard(ALL_DASHBOARD_ROLES), async (req, res, next) => {
   try {
-    const { data, error } = await supabaseAdmin
+    const data = await fetchAllRows((f, t) => supabaseAdmin
       .from('imprest_requests')
       .select('amount_requested, approved_amount, status, site, employee:employee_id (name, email)')
-      .eq('category', req.params.category);
-    if (error) throw error;
+      .eq('category', req.params.category)
+      .range(f, t));
 
     const empMap = {};
     for (const r of (data || [])) {
