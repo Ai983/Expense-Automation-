@@ -9,7 +9,7 @@
         "gradleCommand": ":app:assembleRelease"
       },
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://YOUR-RAILWAY-URL.railway.app"
+        "EXPO_PUBLIC_API_BASE_URL": "https://expense-automation-mobile.vercel.app"
       }
     },
     "production": {
@@ -17,7 +17,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://YOUR-RAILWAY-URL.railway.app"
+        "EXPO_PUBLIC_API_BASE_URL": "https://expense-automation-mobile.vercel.app"
       }
     }
   }

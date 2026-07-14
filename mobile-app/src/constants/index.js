@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+
 export const SITES = [
   'Head Office',
   'Andritz',
@@ -43,7 +45,17 @@ export const CATEGORIES = [
   'Porter Expenses',
 ];
 
-export const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+// Deployed web/PWA builds MUST use same-origin requests ('' → '/api/...'):
+// Jio and some Indian ISPs block *.up.railway.app entirely, so the phone can
+// never call the Railway backend directly. Same-origin requests ride through
+// this app's own Vercel domain, and vercel.json rewrites /api/* to the backend
+// server-side (Vercel's edge is not blocked). Do NOT replace this with an
+// empty EXPO_PUBLIC_API_BASE_URL env var — '' is falsy and would silently
+// fall back to localhost:4000.
+export const API_BASE_URL =
+  Platform.OS === 'web' && !__DEV__
+    ? ''
+    : process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
 export const IMPREST_SITES = [
   'MAX Hospital, Saket Delhi',
