@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { supabaseAdmin } from '../config/supabase.js';
 import { STORAGE_BUCKET, SIGNED_URL_EXPIRY_SECONDS } from '../config/constants.js';
+import { resolveMimeType, extensionForMime } from '../utils/fileType.js';
 
 // Legacy client — reads old Finance project storage for the 850 pre-migration screenshots.
 // New uploads always go to Hub. This client is read-only (used only for getSignedUrl fallback).
@@ -21,13 +22,20 @@ const STORAGE_CUTOVER_DATE = new Date(process.env.STORAGE_CUTOVER_DATE ?? '2026-
  * Returns the storage path (not a public URL — use getSignedUrl to access).
  */
 export async function uploadScreenshot(buffer, mimeType, employeeId, refId) {
-  const ext = mimeType.split('/')[1].replace('jpeg', 'jpg');
+  if (!buffer?.length) {
+    throw new Error('Screenshot upload failed: file is empty');
+  }
+
+  // The bytes decide the type — a mislabelled file must not be stored under a
+  // misleading extension or Content-Type (see utils/fileType.js).
+  const actualType = resolveMimeType(buffer, mimeType);
+  const ext = extensionForMime(actualType);
   const storagePath = `${employeeId}/${refId}.${ext}`;
 
   const { error } = await supabaseAdmin.storage
     .from(STORAGE_BUCKET)
     .upload(storagePath, buffer, {
-      contentType: mimeType,
+      contentType: actualType,
       upsert: true,
     });
 
@@ -74,13 +82,18 @@ export async function getSignedUrl(storagePath, createdAt) {
  * Uploads a payment receipt to Supabase Storage.
  */
 export async function uploadPaymentReceipt(buffer, mimeType, refId) {
-  const ext = mimeType.split('/')[1].replace('jpeg', 'jpg');
+  if (!buffer?.length) {
+    throw new Error('Payment receipt upload failed: file is empty');
+  }
+
+  const actualType = resolveMimeType(buffer, mimeType);
+  const ext = extensionForMime(actualType);
   const storagePath = `payment-receipts/${refId}.${ext}`;
 
   const { error } = await supabaseAdmin.storage
     .from(STORAGE_BUCKET)
     .upload(storagePath, buffer, {
-      contentType: mimeType,
+      contentType: actualType,
       upsert: true,
     });
 

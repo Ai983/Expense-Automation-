@@ -122,7 +122,11 @@ export default function SubmitExpenseScreen() {
       });
       if (!res.canceled && res.assets?.[0]) {
         const asset = res.assets[0];
-        setImages((prev) => [...prev, { uri: asset.uri, mimeType: 'application/pdf', name: asset.name }]);
+        // Trust the picker's reported type, not the filter — Android SAF
+        // providers routinely return files outside `type`, and hardcoding
+        // application/pdf here stored images that no PDF viewer could open.
+        const mimeType = asset.mimeType || 'application/pdf';
+        setImages((prev) => [...prev, { uri: asset.uri, mimeType, name: asset.name }]);
         setResult(null);
       }
     } catch {

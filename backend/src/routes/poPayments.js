@@ -7,6 +7,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { roleGuard } from '../middleware/roleGuard.js';
 import { ok, fail } from '../utils/responseHelper.js';
 import { logAudit } from '../services/auditService.js';
+import { resolveMimeType, extensionForMime } from '../utils/fileType.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -36,11 +37,14 @@ async function syncPaymentToCPS(cpsPoId, paidAmount, financeStatus, balanceDue, 
 
 // ── Receipt upload helper ──────────────────────────────────────────────────
 async function uploadPaymentReceipt(file, storagePath) {
-  const ext = file.mimetype.split('/')[1].replace('jpeg', 'jpg');
-  const fullPath = `${storagePath}.${ext}`;
+  if (!file.buffer?.length) throw new Error('Receipt upload failed: file is empty');
+
+  // Derive the type from the bytes, not the client's claim (see utils/fileType.js).
+  const actualType = resolveMimeType(file.buffer, file.mimetype);
+  const fullPath = `${storagePath}.${extensionForMime(actualType)}`;
   const { error } = await supabaseAdmin.storage
     .from('po-receipts')
-    .upload(fullPath, file.buffer, { contentType: file.mimetype, upsert: true });
+    .upload(fullPath, file.buffer, { contentType: actualType, upsert: true });
   if (error) throw new Error(`Receipt upload failed: ${error.message}`);
   return fullPath;
 }

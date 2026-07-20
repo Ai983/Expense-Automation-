@@ -9,6 +9,7 @@ import { checkDuplicates } from '../services/duplicateService.js';
 import { logAudit } from '../services/auditService.js';
 import { generateRefId } from '../utils/refIdGenerator.js';
 import { ok, fail } from '../utils/responseHelper.js';
+import { resolveMimeType } from '../utils/fileType.js';
 import { CATEGORIES, FINANCE_ROLES, FINANCE_HEAD_ROLES } from '../config/constants.js';
 import { isValidSite } from '../config/sites.js';
 import { broadcastNewExpense } from '../index.js';
@@ -30,6 +31,13 @@ router.post(
         ...(req.files?.screenshots || []),
         ...(req.files?.screenshot || []),
       ];
+
+      // Clients can mislabel a file's type (the mobile PDF picker used to tag
+      // every pick as application/pdf). Correct it from the bytes once, here,
+      // so storage, OCR routing and attachmentType all agree downstream.
+      for (const file of files) {
+        file.mimetype = resolveMimeType(file.buffer, file.mimetype);
+      }
 
       // Validation
       if (!site || !amount || !category) {

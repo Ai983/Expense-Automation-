@@ -10,7 +10,7 @@ function fileFilter(req, file, cb) {
   if (ALLOWED_TYPES.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error(`Invalid file type: ${file.mimetype}. Allowed: JPEG, PNG, WebP`), false);
+    cb(new Error(`Invalid file type: ${file.mimetype}. Allowed: JPEG, PNG, WebP, PDF`), false);
   }
 }
 
