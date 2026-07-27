@@ -523,7 +523,7 @@ router.get('/my-reminders/:employeeId', authMiddleware, async (req, res, next) =
     for (const imp of orphanedPaid || []) {
       if (reminderImprestIds.has(imp.id)) continue; // already has a reminder (any status)
       // Auto-create the missing reminder so it shows in the app
-      const deadline = new Date((imp.paid_at ? new Date(imp.paid_at) : new Date()).getTime() + 3 * 24 * 60 * 60 * 1000).toISOString();
+      const deadline = new Date((imp.paid_at ? new Date(imp.paid_at) : new Date()).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
       try {
         const { data: inserted } = await supabaseAdmin.from('imprest_expense_reminders').insert({
           imprest_id: imp.id, employee_id: employeeId,
@@ -809,7 +809,7 @@ router.get('/finance/reminders', authMiddleware, roleGuard(FINANCE_HEAD_ROLES), 
         await supabaseAdmin.from('employees').update({
           imprest_blocked: true,
           imprest_blocked_at: now,
-          imprest_blocked_reason: 'Expense not submitted within 3 days of imprest approval',
+          imprest_blocked_reason: 'Expense not submitted within 7 days of imprest approval',
         }).eq('id', empId);
       }
     }
@@ -1574,7 +1574,7 @@ router.post('/:id/resend-director', authMiddleware, roleGuard(S1_ROLES), async (
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// PAY: Finance marks imprest as paid — starts 3-day reminder
+// PAY: Finance marks imprest as paid — starts 7-day reminder
 // ════════════════════════════════════════════════════════════════════════════
 
 router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single('receipt'), async (req, res, next) => {
@@ -1611,8 +1611,8 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
 
     await supabaseAdmin.from('imprest_requests').update(updateFields).eq('id', req.params.id);
 
-    // NOW start the 3-day expense reminder
-    const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+    // NOW start the 7-day expense reminder
+    const deadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     try {
       await supabaseAdmin.from('imprest_expense_reminders').insert({
         imprest_id: imp.id,

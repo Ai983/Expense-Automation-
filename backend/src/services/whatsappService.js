@@ -122,7 +122,7 @@ export async function sendImprestApprovalReminder({ name, phone, refId, approved
     (paymentRemark ? `📝 *Finance Note:* ${paymentRemark}\n` : '') +
     `\n⏰ *Please submit your expenses by: ${deadlineStr}*\n\n` +
     `Open the HagerStone app → My Imprest to view this update.\n\n` +
-    `_Expense submission required within 3 days or your imprest access will be blocked._`;
+    `_Expense submission required within 7 days or your imprest access will be blocked._`;
 
   try {
     await sendWhatsApp(phone, message);
