@@ -13,6 +13,7 @@ import S2QueuePage from './pages/S2QueuePage';
 import ResetPassword from './pages/ResetPassword';
 import FeedbackPage from './pages/FeedbackPage';
 import ProcurementQueuePage from './pages/ProcurementQueuePage';
+import PaymentRequestQueuePage from './pages/PaymentRequestQueuePage';
 import AdjustmentSettlementsPage from './pages/AdjustmentSettlementsPage';
 import WeeklyOverridesPage from './pages/WeeklyOverridesPage';
 import HeadDashboardPage from './pages/HeadDashboardPage';
@@ -89,6 +90,8 @@ function AppRoutes() {
       <Route path="/imprest-board" element={<ProtectedLayout><S2QueuePage /></ProtectedLayout>} />
       <Route path="/feedback" element={<ProtectedLayout><FeedbackPage /></ProtectedLayout>} />
       <Route path="/procurement-queue" element={<ProtectedLayout><ProcurementQueuePage /></ProtectedLayout>} />
+      {/* Phase 5 — compliance-cleared payment requests from CPS */}
+      <Route path="/payment-requests" element={<ProtectedLayout><PaymentRequestQueuePage /></ProtectedLayout>} />
       <Route path="/head" element={<ProtectedLayout><HeadDashboardPage /></ProtectedLayout>} />
       <Route path="/head/kanban" element={<ProtectedLayout><HeadKanbanPage /></ProtectedLayout>} />
       <Route path="/head/projects" element={<ProtectedLayout><HeadProjectSpendPage /></ProtectedLayout>} />

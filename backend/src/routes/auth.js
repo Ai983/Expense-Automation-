@@ -3,7 +3,7 @@ import { supabaseAdmin, supabaseAnon } from '../config/supabase.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { logAudit } from '../services/auditService.js';
 import { ok, fail } from '../utils/responseHelper.js';
-import { ROLES } from '../config/constants.js';
+import { ROLES, permissionsForRole } from '../config/constants.js';
 import { isValidSite } from '../config/sites.js';
 
 const router = Router();
@@ -133,7 +133,14 @@ router.post('/login', async (req, res, next) => {
       accessToken: session.session.access_token,
       refreshToken: session.session.refresh_token,
       expiresAt: session.session.expires_at,
-      employee: { id: employee.id, name: employee.name, email: employee.email, role: employee.role, site: employee.site },
+      employee: {
+        id: employee.id,
+        name: employee.name,
+        email: employee.email,
+        role: employee.role,
+        site: employee.site,
+        permissions: permissionsForRole(employee.role),
+      },
     });
   } catch (err) {
     next(err);
@@ -164,6 +171,7 @@ router.get('/me', authMiddleware, async (req, res) => {
     email: req.user.email,
     role: req.user.role,
     site: req.user.site,
+    permissions: permissionsForRole(req.user.role),
   });
 });
 

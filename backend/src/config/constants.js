@@ -60,6 +60,31 @@ export const HEAD_ROLES = ['head', 'admin'];
 // Finance roles + head (for read-only GET routes that finance views)
 export const FINANCE_HEAD_ROLES = ['finance', 'manager', 'admin', 'head'];
 
+// ── Payment Requests (PRQ) — the compliance-gated queue from CPS ──────────────
+// These are deliberately built from roles that EXIST in finance.employees.
+// The wider lists above still name manager/admin/head/procurement_finance, none
+// of which any live employee holds — guarding PRQ with those made the feature
+// reachable by exactly one person.
+//
+// SINGLE SOURCE OF TRUTH. The API guards in routes/prqPayments.js and the
+// dashboard sidebar both derive from these two arrays — the sidebar via the
+// `permissions` object below, handed to the client by /api/auth/me and
+// /api/auth/login. Do not restate these role names anywhere else; a second
+// hand-maintained list is what let the nav offer a link the API then refused.
+export const PRQ_VIEWER_ROLES = ['finance', 'founder', 'approver_s1', 'approver_s2'];
+export const PRQ_FINANCE_ROLES = ['finance', 'founder'];
+
+/**
+ * Capability flags for a role, derived from the role arrays above.
+ * Sent to the client so the UI never hard-codes a role list of its own.
+ */
+export function permissionsForRole(role) {
+  return {
+    canViewPaymentRequests: PRQ_VIEWER_ROLES.includes(role),
+    canActionPaymentRequests: PRQ_FINANCE_ROLES.includes(role),
+  };
+}
+
 // Sites that always go through Ritu (not Bhaskar) regardless of amount
 export const RITU_ALWAYS_SITES = ['Head Office', 'Bangalore Office'];
 

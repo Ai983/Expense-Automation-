@@ -1,7 +1,19 @@
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
-function getNavItems(role) {
+// The "Payment Requests" link is NOT listed per-role below. Visibility comes from
+// user.permissions.canViewPaymentRequests, which the backend derives from
+// PRQ_VIEWER_ROLES in config/constants.js — the same array the API guard uses.
+// Keeping a role list here too is what made the nav offer a link the API refused.
+function getNavItems(role, permissions) {
+  const items = baseNavItems(role);
+  if (permissions?.canViewPaymentRequests) {
+    items.push({ to: '/payment-requests', label: 'Payment Requests', icon: '🧾' });
+  }
+  return items;
+}
+
+function baseNavItems(role) {
   switch (role) {
     case 'head':
       return [
@@ -45,7 +57,7 @@ function getNavItems(role) {
 
 export default function Sidebar() {
   const { user, logout } = useAuth();
-  const navItems = getNavItems(user?.role);
+  const navItems = getNavItems(user?.role, user?.permissions);
 
   return (
     <aside className="w-64 bg-gray-900 text-white flex flex-col h-screen fixed left-0 top-0">
