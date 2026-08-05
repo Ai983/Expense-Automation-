@@ -91,6 +91,10 @@ export const RITU_ALWAYS_SITES = ['Head Office', 'Bangalore Office'];
 // Amount threshold for director approval
 export const DIRECTOR_APPROVAL_THRESHOLD = 9999;
 
+// A site may raise only one imprest above this amount per calendar week
+// (Head Office is exempt). Finance can grant a one-week override per site.
+export const WEEKLY_EMERGENCY_THRESHOLD = 20000;
+
 export const EXPENSE_STATUSES = [
   'pending',
   'verified',

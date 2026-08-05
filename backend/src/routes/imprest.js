@@ -14,7 +14,7 @@ import { extractRideFare } from '../services/visionService.js';
 import { generateImprestRefId } from '../utils/refIdGenerator.js';
 import { resolveImprestRouting } from '../utils/imprestRouting.js';
 import { ok, fail } from '../utils/responseHelper.js';
-import { FINANCE_ROLES, FINANCE_HEAD_ROLES, S1_ROLES, S2_ROLES, FOUNDER_ROLES, DIRECTOR_APPROVAL_THRESHOLD } from '../config/constants.js';
+import { FINANCE_ROLES, FINANCE_HEAD_ROLES, S1_ROLES, S2_ROLES, FOUNDER_ROLES, DIRECTOR_APPROVAL_THRESHOLD, WEEKLY_EMERGENCY_THRESHOLD } from '../config/constants.js';
 import { broadcastNewImprest } from '../index.js';
 import { sendImprestApprovalReminder, notifyS1, notifyS2, notifyFinance } from '../services/whatsappService.js';
 import { triggerSubmissionConfirmation, triggerFounderApproval, triggerFounderGate } from '../services/n8nService.js';
@@ -88,7 +88,7 @@ router.get('/weekly-overrides', authMiddleware, roleGuard(FINANCE_HEAD_ROLES), a
 });
 
 // GET /api/imprest/weekly-overrides/at-limit-sites — sites that have hit the
-// weekly >₹10,000 limit this week (exact site strings from real data), with
+// weekly >₹20,000 limit this week (exact site strings from real data), with
 // whether an override is already active. Drives the dashboard so Finance grants
 // against the exact site string the engineer used (site names are free-text).
 router.get('/weekly-overrides/at-limit-sites', authMiddleware, roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
@@ -99,7 +99,7 @@ router.get('/weekly-overrides/at-limit-sites', authMiddleware, roleGuard(FINANCE
     const { data: bigReqs, error } = await supabaseAdmin
       .from('imprest_requests')
       .select('site')
-      .gt('amount_requested', 10000)
+      .gt('amount_requested', WEEKLY_EMERGENCY_THRESHOLD)
       .gte('submitted_at', weekStart.toISOString())
       .not('current_stage', 'in', '("s1_rejected","s2_rejected","s3_rejected","director_rejected")')
       .neq('status', 'rejected');
@@ -295,9 +295,9 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       return fail(res, 'site, category, peopleCount, and amountRequested are required');
     }
 
-    // Weekly site emergency limit: only one imprest > ₹10,000 per site per calendar week
+    // Weekly site emergency limit: only one imprest > ₹20,000 per site per calendar week
     // Head Office is exempt — no upper limit applies there
-    if (parseFloat(amountRequested) > 10000 && site !== 'Head Office') {
+    if (parseFloat(amountRequested) > WEEKLY_EMERGENCY_THRESHOLD && site !== 'Head Office') {
       const weekStart = getWeekStart();
       const weekStartDate = weekStart.toISOString().slice(0, 10);
 
@@ -305,7 +305,7 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
         .from('imprest_requests')
         .select('id, ref_id')
         .eq('site', site)
-        .gt('amount_requested', 10000)
+        .gt('amount_requested', WEEKLY_EMERGENCY_THRESHOLD)
         .gte('submitted_at', weekStart.toISOString())
         .not('current_stage', 'in', '("s1_rejected","s2_rejected","s3_rejected","director_rejected")')
         .neq('status', 'rejected')
@@ -323,7 +323,7 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
         if (!override?.length) {
           return fail(
             res,
-            'WEEKLY_LIMIT: Your site\'s weekly emergency advance (>₹10,000) has already been raised this week. Please submit the expense for that advance first, and you can raise a new emergency advance after this week.',
+            'WEEKLY_LIMIT: Your site\'s weekly emergency advance (>₹20,000) has already been raised this week. Please submit the expense for that advance first, and you can raise a new emergency advance after this week.',
             429
           );
         }

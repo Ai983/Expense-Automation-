@@ -29,7 +29,7 @@ export default function WeeklyOverridesPage() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const grant = async (site) => {
-    const reason = window.prompt(`Allow another emergency advance (>₹10,000) for "${site}" this week?\n\nOptional reason:`, '');
+    const reason = window.prompt(`Allow another emergency advance (>₹20,000) for "${site}" this week?\n\nOptional reason:`, '');
     if (reason === null) return; // cancelled
     setBusy((b) => ({ ...b, [site]: true }));
     try {
@@ -61,7 +61,7 @@ export default function WeeklyOverridesPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Weekly Emergency Overrides</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Each site may raise only one emergency advance (&gt;₹10,000) per week. Sites that have already used
+          Each site may raise only one emergency advance (&gt;₹20,000) per week. Sites that have already used
           their slot this week are listed below — grant an override to let them raise another. Overrides apply
           only to the current week (Mon–Sun) and expire automatically.
         </p>
@@ -85,7 +85,7 @@ export default function WeeklyOverridesPage() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Site</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">&gt;₹10k this week</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">&gt;₹20k this week</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Granted By</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Action</th>
