@@ -141,7 +141,6 @@ export default function ImprestScreen() {
   // Common fields
   const [site, setSite] = useState(IMPREST_SITES[0]);
   const sites = useSites();
-  const [customSite, setCustomSite] = useState(''); // used when site === 'Others'
   const [category, setCategory] = useState(IMPREST_CATEGORIES[0]);
   const [peopleCount, setPeopleCount] = useState('1');
   const [amountRequested, setAmountRequested] = useState('');
@@ -153,7 +152,6 @@ export default function ImprestScreen() {
   const [foodRate, setFoodRate] = useState(null);
   const [foodRateLoading, setFoodRateLoading] = useState(false);
   const [foodRateError, setFoodRateError] = useState('');
-  const [customFoodRate, setCustomFoodRate] = useState('');
 
   // Travelling
   const [travelSubtype, setTravelSubtype] = useState(TRAVEL_SUBTYPES[0]);
@@ -189,11 +187,6 @@ export default function ImprestScreen() {
 
   // ── Food rate loader ─────────────────────────────────────────────────────────
   const loadFoodRate = useCallback(async (selectedSite, currentDateFrom, currentDateTo, currentPeopleCount) => {
-    if (selectedSite === 'Others') {
-      setFoodRate(null);
-      setFoodRateError('');
-      return;
-    }
     setFoodRateLoading(true);
     setFoodRateError('');
     setFoodRate(null);
@@ -214,14 +207,6 @@ export default function ImprestScreen() {
     } finally {
       setFoodRateLoading(false);
     }
-  }, []);
-
-  // Recalculate food amount when rate, people, or dates change
-  const recalcFoodAmount = useCallback((rate, people, from, to) => {
-    const r = parseFloat(rate) || 0;
-    const p = parseInt(people) || 1;
-    const days = daysBetween(from, to);
-    if (r > 0 && days > 0) setAmountRequested(String(r * p * days));
   }, []);
 
   // ── Travel estimate ──────────────────────────────────────────────────────────
@@ -315,7 +300,6 @@ export default function ImprestScreen() {
     switch (currentStep) {
       case 'site':
         if (!site) { showAlert('Zaroori', 'Ek site chunein.'); return false; }
-        if (site === 'Others' && !customSite.trim()) { showAlert('Zaroori', 'Site ka naam likhein.'); return false; }
         return true;
       case 'category':
         if (!category) { showAlert('Zaroori', 'Ek category chunein.'); return false; }
@@ -331,11 +315,6 @@ export default function ImprestScreen() {
         return true;
       case 'food_amount':
         if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Zaroori', 'Rashi zaroori hai.'); return false; }
-        if (site === 'Others') {
-          const r = parseFloat(customFoodRate);
-          if (!r || r <= 0) { showAlert('Zaroori', 'Per person roz ka rate bharein.'); return false; }
-          if (r > 600) { showAlert('Seema Se Zyada', 'Rate \u20B9600 se zyada nahi ho sakta (per person per day).'); return false; }
-        }
         return true;
       case 'amount':
         if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Zaroori', 'Rashi zaroori hai.'); return false; }
@@ -396,25 +375,23 @@ export default function ImprestScreen() {
 
   // ── Submit ───────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
-    const systemLockedFood = category === 'Food Expense' && foodRate && site !== 'Others' && !canOverrideFoodRate;
+    const systemLockedFood = category === 'Food Expense' && foodRate && !canOverrideFoodRate;
     if (!systemLockedFood && (!amountRequested || parseAmt(amountRequested) <= 0)) {
       return showAlert('Galat Rashi', 'Sahi rashi bharein.');
     }
     setSubmitting(true);
     try {
-      const effectiveFoodRate = site === 'Others'
-        ? parseFloat(customFoodRate) || null
-        : foodRate;
+      const effectiveFoodRate = foodRate;
 
       // For system-locked food rates, compute final amount from rate * people * days
       // EA (Ritu) can override the amount even for configured sites
-      const foodLocked = category === 'Food Expense' && effectiveFoodRate && site !== 'Others' && !canOverrideFoodRate;
+      const foodLocked = category === 'Food Expense' && effectiveFoodRate && !canOverrideFoodRate;
       const finalAmount = foodLocked
         ? effectiveFoodRate * (parseInt(peopleCount) || 1) * daysBetween(dateFrom, dateTo)
         : parseAmt(amountRequested);
 
       const payload = {
-        site: site === 'Others' ? customSite.trim() : site,
+        site,
         category,
         peopleCount: parseInt(peopleCount) || 1,
         amountRequested: finalAmount,
@@ -451,7 +428,7 @@ export default function ImprestScreen() {
       if (e?.response?.status === 429 || errMsg.startsWith('WEEKLY_LIMIT:')) {
         showAlert(
           'Weekly Emergency Limit / साप्ताहिक सीमा',
-          'Your site\'s weekly emergency advance (>₹10,000) has already been raised this week. First fill the expense against it and then you will get the amount after this week. / इस सप्ताह आपकी साइट का आपातकालीन अग्रिम पहले ही लिया जा चुका है। पहले उस खर्च को जमा करें।'
+          'Your site\'s weekly emergency advance (>₹20,000) has already been raised this week. First fill the expense against it and then you will get the amount after this week. / इस सप्ताह आपकी साइट का आपातकालीन अग्रिम पहले ही लिया जा चुका है। पहले उस खर्च को जमा करें।'
         );
       } else {
         showAlert('Submission failed / जमा विफल', errMsg || 'Please try again. / कृपया पुनः प्रयास करें।');
@@ -466,13 +443,12 @@ export default function ImprestScreen() {
     setStepIndex(0);
     setResult(null);
     setSite(IMPREST_SITES[0]);
-    setCustomSite('');
     setCategory(IMPREST_CATEGORIES[0]);
     setPeopleCount('1');
     setAmountRequested('');
     setPurpose('');
     setDateFrom(''); setDateTo('');
-    setFoodRate(null); setFoodRateError(''); setCustomFoodRate('');
+    setFoodRate(null); setFoodRateError('');
     setTravelSubtype(TRAVEL_SUBTYPES[0]);
     setTravelFrom(''); setTravelTo(''); setTravelDate('');
     setAiEstimate(null); setUserEditedAmount(false); setEstimating(false);
@@ -541,27 +517,13 @@ export default function ImprestScreen() {
             <View style={styles.pickerWrapper}>
               <Picker
                 selectedValue={site}
-                onValueChange={(v) => { setSite(v); setCustomSite(''); }}
+                onValueChange={(v) => setSite(v)}
                 style={styles.picker}
                 dropdownIconColor="#e8a24a"
               >
                 {sites.map((s) => <Picker.Item key={s} label={s} value={s} />)}
               </Picker>
             </View>
-            {site === 'Others' && (
-              <View>
-                <Text style={styles.label}>{'Site Ka Naam Likhein *'}</Text>
-                <TextInput
-                  style={styles.input}
-                  value={customSite}
-                  onChangeText={setCustomSite}
-                  placeholder="Type your site name..."
-                  placeholderTextColor="#9ca3af"
-                  autoCapitalize="words"
-                  autoFocus
-                />
-              </View>
-            )}
           </View>
         );
 
@@ -638,11 +600,11 @@ export default function ImprestScreen() {
         );
 
       case 'food_amount': {
-        const isOtherSite = site === 'Others';
-        const rateToUse = isOtherSite ? (parseFloat(customFoodRate) || 0) : (foodRate || 0);
+        const rateToUse = foodRate || 0;
+        const hasRate = rateToUse > 0;
         const days = daysBetween(dateFrom, dateTo);
         const people = parseInt(peopleCount) || 1;
-        const computed = rateToUse > 0 ? rateToUse * people * days : 0;
+        const computed = hasRate ? rateToUse * people * days : 0;
 
         return (
           <View style={styles.stepContent}>
@@ -651,30 +613,7 @@ export default function ImprestScreen() {
             {foodRateLoading && <ActivityIndicator color="#e8a24a" style={{ marginVertical: 16 }} />}
             {foodRateError ? <Text style={styles.errorText}>{foodRateError}</Text> : null}
 
-            {isOtherSite && (
-              <View>
-                <Text style={styles.label}>Per Person Daily Rate ({'\u20B9'}) / {'\u092A\u094D\u0930\u0924\u093F \u0935\u094D\u092F\u0915\u094D\u0924\u093F \u0926\u0948\u0928\u093F\u0915 \u0926\u0930'} — max {'\u20B9'}600 *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={customFoodRate}
-                  onChangeText={(v) => {
-                    const clean = v.replace(/,/g, '');
-                    setCustomFoodRate(clean);
-                    const r = parseFloat(clean) || 0;
-                    if (r > 0) recalcFoodAmount(r, peopleCount, dateFrom, dateTo);
-                    else setAmountRequested('');
-                  }}
-                  keyboardType="numeric"
-                  placeholder="e.g. 300"
-                  placeholderTextColor="#9ca3af"
-                />
-                {parseFloat(customFoodRate) > 600 && (
-                  <Text style={styles.errorText}>Rate cannot exceed {'\u20B9'}600 per person per day / {'\u0926\u0930 \u20B9600 \u092A\u094D\u0930\u0924\u093F \u0935\u094D\u092F\u0915\u094D\u0924\u093F \u092A\u094D\u0930\u0924\u093F \u0926\u093F\u0928 \u0938\u0947 \u0905\u0927\u093F\u0915 \u0928\u0939\u0940\u0902 \u0939\u094B \u0938\u0915\u0924\u0940'}</Text>
-                )}
-              </View>
-            )}
-
-            {!isOtherSite && rateToUse > 0 && canOverrideFoodRate && (
+            {hasRate && canOverrideFoodRate && (
               <View>
                 <View style={styles.infoBox}>
                   <Text style={styles.infoText}>
@@ -692,7 +631,7 @@ export default function ImprestScreen() {
                 />
               </View>
             )}
-            {!isOtherSite && rateToUse > 0 && !canOverrideFoodRate && (
+            {hasRate && !canOverrideFoodRate && (
               <View style={styles.infoBox}>
                 <Text style={styles.infoText}>
                   {'\u20B9'}{rateToUse}/person {'\u00D7'} {people} people {'\u00D7'} {days} day(s) = {'\u20B9'}{computed}
@@ -703,9 +642,9 @@ export default function ImprestScreen() {
 
             <Text style={styles.label}>Total Amount ({'\u20B9'}) / {'\u0915\u0941\u0932 \u0930\u093E\u0936\u093F'} *</Text>
             <TextInput
-              style={[styles.input, !isOtherSite && rateToUse > 0 ? styles.inputLocked : null]}
-              value={!isOtherSite && computed > 0 ? String(computed) : amountRequested}
-              editable={isOtherSite && !rateToUse}
+              style={[styles.input, hasRate ? styles.inputLocked : null]}
+              value={hasRate && computed > 0 ? String(computed) : amountRequested}
+              editable={!hasRate}
               onChangeText={setAmountRequested}
               keyboardType="numeric"
               placeholder="0"
@@ -1105,12 +1044,12 @@ export default function ImprestScreen() {
 
       // ── Review & Submit ──────────────────────────────────────────────────────
       case 'review': {
-        const effectiveRate = site === 'Others' ? parseFloat(customFoodRate) || 0 : foodRate;
+        const effectiveRate = foodRate;
         return (
           <View style={styles.stepContent}>
             <Text style={styles.stepTitle}>Review / {'\u0938\u092E\u0940\u0915\u094D\u0937\u093E'}</Text>
             <View style={styles.summaryCard}>
-              <SummaryRow label={'Site / साइट'} value={site === 'Others' ? customSite.trim() : site} />
+              <SummaryRow label={'Site / साइट'} value={site} />
               <SummaryRow label={'Category / श्रेणी'} value={category} />
               {category !== 'Conveyance' && <SummaryRow label={'People / लोग'} value={peopleCount} />}
               {['Food Expense', 'Site Room Rent', 'Hotel Expense'].includes(category) && (dateFrom || dateTo) && (
