@@ -101,6 +101,7 @@ export default function PaymentRequestQueuePage() {
 
   const [holdCategory, setHoldCategory] = useState('');
   const [holdReason, setHoldReason] = useState('');
+  const [rejectReason, setRejectReason] = useState('');
   const [payAmount, setPayAmount] = useState('');
   const [payRef, setPayRef] = useState('');
   const [receipt, setReceipt] = useState(null);
@@ -119,7 +120,7 @@ export default function PaymentRequestQueuePage() {
 
   const openDetail = async (prq) => {
     setSelected(prq);
-    setHoldCategory(''); setHoldReason('');
+    setHoldCategory(''); setHoldReason(''); setRejectReason('');
     setPayAmount(String(prq.net_amount ?? '')); setPayRef(''); setReceipt(null);
     setDocsLoading(true);
     try {
@@ -143,6 +144,16 @@ export default function PaymentRequestQueuePage() {
     setBusy(true);
     try {
       await api.post(`/api/prq-payments/${selected.prq_id}/release`, {});
+      setSelected(null); await load();
+    } catch (e) { alert(e.response?.data?.error || e.message); } finally { setBusy(false); }
+  };
+
+  const doReject = async () => {
+    if (!rejectReason.trim()) { alert('A written reason is required.'); return; }
+    setBusy(true);
+    try {
+      await api.post(`/api/prq-payments/${selected.prq_id}/reject`,
+        { reject_reason: rejectReason.trim() });
       setSelected(null); await load();
     } catch (e) { alert(e.response?.data?.error || e.message); } finally { setBusy(false); }
   };
@@ -294,6 +305,15 @@ export default function PaymentRequestQueuePage() {
               </div>
             )}
 
+            {selected.gst_not_applicable && (
+              <div className="rounded border border-slate-200 bg-slate-50 p-2 text-xs">
+                <b>GST not applicable</b> (marked by Procurement): {selected.gst_exception_reason}
+                <span className="block text-slate-500 mt-0.5">
+                  The GST certificate is intentionally absent. If this reason doesn't hold up, reject it.
+                </span>
+              </div>
+            )}
+
             {/* Documents — viewable without leaving this dashboard */}
             <div>
               <h3 className="font-medium text-sm mb-1">Documents</h3>
@@ -376,6 +396,22 @@ export default function PaymentRequestQueuePage() {
                 </div>
               </>
             )}
+
+            {/* Reject — send back to Procurement. Shows on active AND held rows. */}
+            <div className="rounded border border-red-200 bg-red-50 p-3 space-y-2">
+              <h3 className="font-medium text-sm">Send back to Procurement</h3>
+              <p className="text-xs text-slate-500">
+                Use this when the request itself is wrong — a missing document, or a non-GST
+                reason that doesn't hold up. It returns to Procurement to fix and re-submit.
+              </p>
+              <textarea value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}
+                rows={2} placeholder="Why is this being sent back?"
+                className="border rounded px-2 py-1.5 text-sm w-full" />
+              <button onClick={doReject} disabled={busy || !rejectReason.trim()}
+                className="px-3 py-1.5 rounded bg-red-600 text-white text-sm disabled:opacity-50">
+                Reject &amp; send back
+              </button>
+            </div>
           </div>
         </div>
       )}

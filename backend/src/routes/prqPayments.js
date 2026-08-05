@@ -171,6 +171,31 @@ router.post('/:id/release', authMiddleware, roleGuard(FINANCE_ROLES), async (req
 });
 
 // ─────────────────────────────────────────────────────────────────────────
+// POST /api/prq-payments/:id/reject   { reject_reason }
+// Sends a wrong request back to Procurement (status -> under_verification).
+// Reason mandatory; a paid PRQ cannot be rejected (also enforced in the RPC).
+// ─────────────────────────────────────────────────────────────────────────
+router.post('/:id/reject', authMiddleware, roleGuard(FINANCE_ROLES), async (req, res, next) => {
+  try {
+    if (!cpsSupabase) return fail(res, 'CPS connection not configured', 500);
+    const { reject_reason } = req.body;
+    if (!reject_reason || !String(reject_reason).trim()) {
+      return fail(res, 'reject_reason is required — a reject with no stated reason cannot be sent back', 400);
+    }
+    const { data, error } = await cpsSupabase.rpc('cps_sync_prq_from_finance', {
+      p_prq_id: req.params.id,
+      p_action: 'reject',
+      p_reject_reason: String(reject_reason).trim(),
+      p_actor_name: req.user?.name ?? null,
+      p_actor_email: req.user?.email ?? null,
+    });
+    if (error) throw error;
+    if (data?.success === false) return fail(res, data.error, 400);
+    return ok(res, data);
+  } catch (err) { next(err); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
 // GET /api/prq-payments/holds-by-category — discretionary vs real failures.
 // ─────────────────────────────────────────────────────────────────────────
 router.get('/holds-by-category', authMiddleware, roleGuard(VIEWER_ROLES), async (req, res, next) => {
