@@ -6,7 +6,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useAuth } from '../../src/context/AuthContext';
-import { submitExpense, getMyAdjustments } from '../../src/services/expenseService';
+import { submitExpense, getMyAdjustments, waitForAuditHint } from '../../src/services/expenseService';
 import { getMyReminders, fulfillReminder } from '../../src/services/imprestService';
 import { Picker } from '@react-native-picker/picker';
 import { SITES, CATEGORIES, IMPREST_TO_EXPENSE_CATEGORY } from '../../src/constants';
@@ -179,6 +179,23 @@ export default function SubmitExpenseScreen() {
       clearImprest();
       fetchReminders();
       fetchAdjustments();
+
+      // The AI audit finishes a few seconds from now. If it finds something the
+      // employee can fix themselves, tell them straight away rather than letting
+      // it sit in the finance queue for days. Never blocks or fails the submit.
+      if (res?.expenseId) {
+        waitForAuditHint(res.expenseId)
+          .then((hint) => {
+            if (!hint) return;
+            const title = 'Please Re-send Your Receipt';
+            if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
+              window.alert(`${title}\n\n${hint}`);
+            } else {
+              Alert.alert(title, hint);
+            }
+          })
+          .catch(() => { /* advisory only */ });
+      }
     } catch (err) {
       const msg = err.response?.data?.error || 'Submission failed. Check your connection.';
       if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {

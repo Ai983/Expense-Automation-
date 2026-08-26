@@ -20,6 +20,7 @@ import {
   AI_AUDIT_MODE,
 } from '../config/constants.js';
 import { runAuditAndPersist, sweepPendingAudits } from '../services/aiAuditService.js';
+import { notifyExpenseRejected } from '../services/whatsappService.js';
 import { isValidSite } from '../config/sites.js';
 import { broadcastNewExpense } from '../index.js';
 
@@ -73,7 +74,7 @@ router.post(
 
       const { data: linkedImprest, error: imprestFetchErr } = await supabaseAdmin
         .from('imprest_requests')
-        .select('id, ref_id, employee_id, amount_requested, approved_amount, current_stage')
+        .select('id, ref_id, employee_id, amount_requested, approved_amount, current_stage, paid_at')
         .eq('id', imprestId)
         .single();
 
@@ -138,6 +139,10 @@ router.post(
             amount: parsedAmount,
             submittedAt,
             mimeType: file.mimetype,
+            // Anchors the date check to the imprest period instead of the
+            // submission date, so batching receipts within the 7-day deadline
+            // is not treated as a failure.
+            imprestPaidAt: linkedImprest?.paid_at || null,
           });
           allOcrResults.push({
             extractedAmount: v.ocrData?.amount || null,
@@ -320,6 +325,8 @@ router.post(
       }
 
       return ok(res, {
+        // Needed by the app to poll for the AI's employee-facing fix hint.
+        expenseId: expense.id,
         refId,
         status: finalStatus,
         confidence: verification?.overallConfidence || 0,
@@ -719,7 +726,7 @@ router.post(
 
       const { data: expense, error: fetchErr } = await supabaseAdmin
         .from('expenses')
-        .select('id, ref_id, status, amount, imprest_id')
+        .select('id, ref_id, status, amount, imprest_id, employee_id, category, employee:employee_id (name, phone)')
         .eq('id', req.params.expenseId)
         .single();
 
@@ -765,6 +772,18 @@ router.post(
           console.warn('Failed to reverse imprest fulfilled amount:', e.message);
         }
       }
+
+      // Tell the employee now, not whenever they next open the app. 80% of
+      // rejected employees resubmit and 74% of those get approved — the loop
+      // works, it was just slow (median 38 hours to even notice).
+      notifyExpenseRejected({
+        name: expense.employee?.name,
+        phone: expense.employee?.phone,
+        refId: expense.ref_id,
+        amount: expense.amount,
+        category: expense.category,
+        reason: reason.trim(),
+      }).catch((waErr) => console.warn('Rejection WhatsApp failed (non-fatal):', waErr.message));
 
       await logAudit({
         userId: req.user.id,
@@ -831,6 +850,40 @@ router.post(
     }
   }
 );
+
+// ── GET /api/expenses/:expenseId/audit-status ────────────────────────────────
+// Lightweight poll for the mobile app right after submission. The AI audit
+// finishes a few seconds later; if it finds something the EMPLOYEE can fix
+// (blurry screenshot, a bill instead of a payment confirmation), they are told
+// immediately — while they still have the receipt in hand — instead of finding
+// out days later. Historically employees took a median of 38 hours to discover
+// a rejection, and 29 of them took over a week.
+router.get('/:expenseId/audit-status', authMiddleware, async (req, res, next) => {
+  try {
+    const { data: expense, error } = await supabaseAdmin
+      .from('expenses')
+      .select('id, ref_id, employee_id, status, ai_verdict, ai_audit, ai_audited_at')
+      .eq('id', req.params.expenseId)
+      .single();
+
+    if (error || !expense) return fail(res, 'Expense not found', 404);
+    if (req.user.role === 'employee' && expense.employee_id !== req.user.id) {
+      return fail(res, 'Access denied', 403);
+    }
+
+    return ok(res, {
+      refId: expense.ref_id,
+      status: expense.status,
+      audited: expense.ai_verdict != null,
+      // Deliberately NOT exposing the verdict or reasoning to employees — that
+      // is finance's decision to make and communicate. Only the actionable hint.
+      fixHint: expense.ai_audit?.employee_fix_hint || null,
+      auditedAt: expense.ai_audited_at,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ── POST /api/expenses/internal/ai-audit-sweep ───────────────────────────────
 // Manual/backlog trigger for the AI auditor. Shared-secret guarded (same

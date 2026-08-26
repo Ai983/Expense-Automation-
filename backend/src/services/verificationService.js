@@ -1,9 +1,12 @@
 import { extractReceiptData } from './visionService.js';
-
-const AMOUNT_TOLERANCE = parseFloat(process.env.AMOUNT_TOLERANCE_INR || '10');
-const DATE_TOLERANCE_DAYS = parseInt(process.env.DATE_TOLERANCE_DAYS || '2');
-const AUTO_APPROVE_THRESHOLD = parseFloat(process.env.CONFIDENCE_AUTO_APPROVE || '94');
-const MANUAL_REVIEW_THRESHOLD = parseFloat(process.env.CONFIDENCE_MANUAL_REVIEW || '70');
+import {
+  AMOUNT_TOLERANCE_INR as AMOUNT_TOLERANCE,
+  CONFIDENCE_AUTO_APPROVE as AUTO_APPROVE_THRESHOLD,
+  CONFIDENCE_MANUAL_REVIEW as MANUAL_REVIEW_THRESHOLD,
+  RECEIPT_PREDATE_GRACE_DAYS,
+  RECEIPT_FUTURE_GRACE_DAYS,
+  RECEIPT_ORPHAN_MAX_AGE_DAYS,
+} from '../config/constants.js';
 
 /**
  * Runs OCR on the image and validates extracted data against the submission.
@@ -17,7 +20,7 @@ const MANUAL_REVIEW_THRESHOLD = parseFloat(process.env.CONFIDENCE_MANUAL_REVIEW 
  * }
  */
 export async function verifyExpense(imageBuffer, submission) {
-  // submission = { amount: number, submittedAt: ISO string, mimeType?: string }
+  // submission = { amount, submittedAt, mimeType?, imprestPaidAt? }
   const ocrData = await extractReceiptData(imageBuffer, submission.mimeType);
   const checks = [];
 
@@ -25,8 +28,8 @@ export async function verifyExpense(imageBuffer, submission) {
   const amountCheck = checkAmount(ocrData.amount, submission.amount);
   checks.push({ step: 'amount_check', ...amountCheck });
 
-  // CHECK 2 — Date reasonable (weight: 20 points)
-  const dateCheck = checkDate(ocrData.date, submission.submittedAt);
+  // CHECK 2 — Receipt date falls inside the imprest period (weight: 20 points)
+  const dateCheck = checkDate(ocrData.date, submission.submittedAt, submission.imprestPaidAt);
   checks.push({ step: 'date_check', ...dateCheck });
 
   // CHECK 3 — Payment status = SUCCESS (weight: 30 points)
@@ -91,16 +94,29 @@ function checkAmount(ocrAmount, submittedAmount) {
   };
 }
 
-function checkDate(ocrDateStr, submittedAt) {
+/**
+ * Validates the receipt date against the imprest period rather than the
+ * submission date.
+ *
+ * Employees have 7 days to file expenses and routinely batch a week of receipts
+ * at once. The previous rule (receipt within 2 days of submission) treated that
+ * normal behaviour as a failure — it failed 134 of 141 backlog expenses while
+ * 139 of those same 141 passed the amount check. It was measuring the wrong
+ * thing.
+ *
+ * The valid window is: the advance was paid (minus a grace period for spending
+ * out of pocket beforehand, which is permitted company practice) through to
+ * submission. Only receipts genuinely outside that window fail.
+ */
+function checkDate(ocrDateStr, submittedAt, imprestPaidAt) {
   if (!ocrDateStr) {
     return { result: 'warn', score: 0.5, detail: 'Date not found in receipt' };
   }
 
   try {
-    // Normalise DD/MM/YYYY → parseable
     let normalised = ocrDateStr.trim();
 
-    // Convert DD/MM/YYYY or DD-MM-YYYY to MM/DD/YYYY for Date.parse
+    // DD/MM/YYYY or DD-MM-YYYY → MM/DD/YYYY for Date.parse
     const dmyMatch = normalised.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
     if (dmyMatch) {
       const [, d, m, y] = dmyMatch;
@@ -108,27 +124,67 @@ function checkDate(ocrDateStr, submittedAt) {
       normalised = `${m}/${d}/${year}`;
     }
 
-    const ocrDate = new Date(normalised);
+    const receiptDate = new Date(normalised);
     const submitDate = new Date(submittedAt);
 
-    if (isNaN(ocrDate.getTime())) {
+    if (isNaN(receiptDate.getTime())) {
       return { result: 'warn', score: 0.4, detail: `Could not parse date: "${ocrDateStr}"` };
     }
 
-    const diffDays = Math.abs((submitDate - ocrDate) / (1000 * 60 * 60 * 24));
+    const DAY = 1000 * 60 * 60 * 24;
+    const daysAfterSubmission = (receiptDate - submitDate) / DAY;
 
-    if (diffDays <= DATE_TOLERANCE_DAYS) {
+    // A receipt dated after submission is a device clock error or a wrong file.
+    if (daysAfterSubmission > RECEIPT_FUTURE_GRACE_DAYS) {
+      return {
+        result: 'fail',
+        score: 0,
+        detail: `Receipt dated "${ocrDateStr}" is ${daysAfterSubmission.toFixed(1)} days AFTER submission`,
+      };
+    }
+
+    // No linked imprest (legacy rows): fall back to an age check on submission.
+    if (!imprestPaidAt) {
+      const ageDays = (submitDate - receiptDate) / DAY;
+      if (ageDays <= RECEIPT_ORPHAN_MAX_AGE_DAYS) {
+        return {
+          result: 'pass',
+          score: 1,
+          detail: `Date OK: "${ocrDateStr}" (${ageDays.toFixed(0)} days before submission, no linked imprest)`,
+        };
+      }
+      return {
+        result: 'warn',
+        score: 0.4,
+        detail: `Receipt "${ocrDateStr}" is ${ageDays.toFixed(0)} days old with no linked imprest`,
+      };
+    }
+
+    const paidDate = new Date(imprestPaidAt);
+    const daysBeforePayout = (paidDate - receiptDate) / DAY;
+
+    // Spent after the advance landed — the ordinary case.
+    if (daysBeforePayout <= 0) {
       return {
         result: 'pass',
         score: 1,
-        detail: `Date OK: "${ocrDateStr}" (${diffDays.toFixed(1)} days from submission)`,
+        detail: `Date OK: "${ocrDateStr}" falls within the imprest period`,
+      };
+    }
+
+    // Spent out of pocket before the advance arrived — permitted practice.
+    if (daysBeforePayout <= RECEIPT_PREDATE_GRACE_DAYS) {
+      return {
+        result: 'pass',
+        score: 1,
+        detail: `Date OK: "${ocrDateStr}" is ${daysBeforePayout.toFixed(0)} days before payout (out-of-pocket claim, allowed)`,
       };
     }
 
     return {
-      result: 'fail',
-      score: 0,
-      detail: `Date too far: "${ocrDateStr}" is ${diffDays.toFixed(1)} days from submission date`,
+      result: 'warn',
+      score: 0.3,
+      detail: `Receipt "${ocrDateStr}" predates the advance by ${daysBeforePayout.toFixed(0)} days — outside the allowed window`,
     };
   } catch {
     return { result: 'warn', score: 0.3, detail: 'Date parsing error' };

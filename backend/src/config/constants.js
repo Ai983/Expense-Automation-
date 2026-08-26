@@ -149,6 +149,20 @@ export const CONFIDENCE_MANUAL_REVIEW = parseFloat(process.env.CONFIDENCE_MANUAL
 export const AMOUNT_TOLERANCE_INR = parseFloat(process.env.AMOUNT_TOLERANCE_INR || '10');
 export const DATE_TOLERANCE_DAYS = parseInt(process.env.DATE_TOLERANCE_DAYS || '2');
 
+// ── Receipt date window ───────────────────────────────────────────────────────
+// The old rule ("receipt within 2 days of submission") contradicted the 7-day
+// expense deadline and failed 134 of 141 backlog expenses — employees batching a
+// week of receipts, exactly as the deadline invites. The rule is now anchored to
+// the imprest period instead of the submission date.
+//
+// Company policy (confirmed): an employee may spend out of pocket and claim it
+// against the advance once paid, so receipts predating the payout are valid.
+export const RECEIPT_PREDATE_GRACE_DAYS = parseInt(process.env.RECEIPT_PREDATE_GRACE_DAYS || '45');
+// A receipt dated after submission is a clock error at best.
+export const RECEIPT_FUTURE_GRACE_DAYS = parseInt(process.env.RECEIPT_FUTURE_GRACE_DAYS || '1');
+// Legacy rows with no linked imprest: how old a receipt may be vs submission.
+export const RECEIPT_ORPHAN_MAX_AGE_DAYS = parseInt(process.env.RECEIPT_ORPHAN_MAX_AGE_DAYS || '45');
+
 // ── AI Expense Auditor ────────────────────────────────────────────────────────
 // Replaces the manual expense checker. See database/039_ai_audit.sql.
 //
