@@ -139,3 +139,47 @@ export const IMPREST_CATEGORIES = [
 export const STORAGE_BUCKET = 'expense-screenshots';
 
 export const SIGNED_URL_EXPIRY_SECONDS = 3600; // 1 hour
+
+// ── Deterministic verification thresholds ─────────────────────────────────────
+// Single source of truth. These were previously re-read from process.env in
+// verificationService.js and again in routes/expenses.js, and hardcoded a third
+// time in the dashboard — three copies that could drift apart.
+export const CONFIDENCE_AUTO_APPROVE = parseFloat(process.env.CONFIDENCE_AUTO_APPROVE || '94');
+export const CONFIDENCE_MANUAL_REVIEW = parseFloat(process.env.CONFIDENCE_MANUAL_REVIEW || '70');
+export const AMOUNT_TOLERANCE_INR = parseFloat(process.env.AMOUNT_TOLERANCE_INR || '10');
+export const DATE_TOLERANCE_DAYS = parseInt(process.env.DATE_TOLERANCE_DAYS || '2');
+
+// ── AI Expense Auditor ────────────────────────────────────────────────────────
+// Replaces the manual expense checker. See database/039_ai_audit.sql.
+//
+// AI_AUDIT_MODE is the kill switch — no redeploy needed to change it:
+//   'auto'      — clean expenses are auto-approved (all rails must pass)
+//   'recommend' — the AI only records a verdict; a human confirms everything
+//   'off'       — no auditing at all
+// The AI NEVER auto-rejects in any mode; a reject verdict routes to a human.
+export const AI_AUDIT_MODE = process.env.AI_AUDIT_MODE || 'recommend';
+export const AI_AUDIT_MODEL = process.env.AI_AUDIT_MODEL || 'claude-opus-5';
+export const AI_AUDIT_EFFORT = process.env.AI_AUDIT_EFFORT || 'high';
+export const AI_AUDIT_MAX_TOKENS = parseInt(process.env.AI_AUDIT_MAX_TOKENS || '16000');
+
+// Fixed system employee inserted by migration 039 — used as approved_by so the
+// existing FK and every "approved by" join keeps working.
+export const AI_AUDITOR_EMPLOYEE_ID = '00000000-0000-4000-a000-000000000a1a';
+
+// Auto-approve safety rails. AI_AUTO_APPROVE_MAX_INR is uncapped by default;
+// set it to impose a rupee ceiling without a code change.
+export const AI_AUTO_APPROVE_MAX_INR = parseFloat(process.env.AI_AUTO_APPROVE_MAX_INR || 'Infinity');
+export const AI_AUTO_APPROVE_MIN_CONFIDENCE = parseFloat(process.env.AI_AUTO_APPROVE_MIN_CONFIDENCE || '85');
+
+// Reconciliation tolerance when an expense settles an imprest (₹).
+export const AI_RECONCILE_TOLERANCE_INR = parseFloat(process.env.AI_RECONCILE_TOLERANCE_INR || '50');
+
+// Background sweeper — retries anything the inline audit missed.
+export const AI_AUDIT_SWEEP_INTERVAL_MS = parseInt(process.env.AI_AUDIT_SWEEP_INTERVAL_MS || String(10 * 60 * 1000));
+export const AI_AUDIT_SWEEP_BATCH = parseInt(process.env.AI_AUDIT_SWEEP_BATCH || '5');
+// Generous window: the existing backlog reaches back to April.
+export const AI_AUDIT_MAX_AGE_DAYS = parseInt(process.env.AI_AUDIT_MAX_AGE_DAYS || '180');
+
+// Statuses the AI is allowed to touch. A human decision (approved/rejected) is
+// never overwritten; 'blocked' is audited for reasoning but never re-statused.
+export const AI_AUDITABLE_STATUSES = ['pending', 'verified', 'manual_review'];

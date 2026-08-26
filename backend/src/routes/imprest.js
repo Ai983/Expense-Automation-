@@ -611,9 +611,30 @@ router.post('/reminders/:reminderId/fulfill', authMiddleware, async (req, res, n
       .single();
 
     const approvedAmount = parseFloat(imprest?.approved_amount || imprest?.amount_requested || 0);
+
+    // Recompute from the expenses table rather than trusting the client's
+    // asserted amount. The caller used to be able to send any number here, and
+    // a wrong value silently settles (or fails to settle) the reminder — which
+    // decides whether the employee stays blocked from raising a new imprest.
+    const { data: linkedExpenses } = await supabaseAdmin
+      .from('expenses')
+      .select('amount')
+      .eq('imprest_id', reminder.imprest_id)
+      .not('status', 'in', '(rejected,blocked)');
+
+    const totalFulfilled = (linkedExpenses || []).reduce(
+      (sum, e) => sum + parseFloat(e.amount || 0),
+      0
+    );
+
     const previousFulfilled = parseFloat(reminder.fulfilled_amount || 0);
     const newExpenseAmount = parseFloat(expenseAmount || 0);
-    const totalFulfilled = previousFulfilled + newExpenseAmount;
+    const clientAsserted = previousFulfilled + newExpenseAmount;
+    if (Math.abs(clientAsserted - totalFulfilled) > 1) {
+      console.warn(
+        `[fulfill] client asserted ₹${clientAsserted} for imprest ${reminder.imprest_id}, actual linked expenses total ₹${totalFulfilled} — using the recomputed figure`
+      );
+    }
 
     // If total expenses cover the approved amount, mark as fulfilled; otherwise keep pending
     const isFullyFulfilled = totalFulfilled >= approvedAmount;

@@ -1,7 +1,8 @@
 import api from './api';
 
-export async function getExpenseQueue({ status = 'all', site = 'all', employeeId = 'all', dateFrom, dateTo, page = 1, limit = 50 } = {}) {
+export async function getExpenseQueue({ status = 'all', site = 'all', employeeId = 'all', aiVerdict = 'all', dateFrom, dateTo, page = 1, limit = 50 } = {}) {
   const params = { status, site, employeeId, page, limit };
+  if (aiVerdict && aiVerdict !== 'all') params.aiVerdict = aiVerdict;
   if (dateFrom) params.dateFrom = dateFrom;
   if (dateTo) params.dateTo = dateTo;
   const { data } = await api.get('/api/expenses/finance/queue', { params });
@@ -13,8 +14,10 @@ export async function getExpenseDetails(expenseId) {
   return data.data;
 }
 
-export async function approveExpense(expenseId, adjustedAmount) {
+export async function approveExpense(expenseId, adjustedAmount, source) {
   const body = adjustedAmount != null ? { adjustedAmount } : {};
+  // Recorded in the audit trail so AI/human agreement can be measured later.
+  if (source) body.source = source;
   const { data } = await api.post(`/api/expenses/${expenseId}/approve`, body);
   return data.data;
 }

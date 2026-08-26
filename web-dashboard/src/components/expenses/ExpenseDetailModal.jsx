@@ -19,11 +19,15 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
       .finally(() => setLoading(false));
   }, [expenseId]);
 
-  async function handleApprove() {
+  async function handleApprove(source, amountOverride) {
     setActing(true);
     try {
-      const adj = adjustedAmount.trim() ? parseFloat(adjustedAmount) : null;
-      await approveExpense(expenseId, adj);
+      // amountOverride is passed explicitly by the AI one-click path: a
+      // setState above would not have applied by the time we read state here.
+      const adj = amountOverride != null
+        ? amountOverride
+        : adjustedAmount.trim() ? parseFloat(adjustedAmount) : null;
+      await approveExpense(expenseId, adj, source);
       showToast('Expense approved', 'success');
       onAction?.('approved');
       onClose();
@@ -32,6 +36,25 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
     } finally {
       setActing(false);
     }
+  }
+
+  /**
+   * One-click handling of the AI's recommendation.
+   * An approve recommendation is applied directly (with the AI's suggested
+   * amount when it proposed one). A reject recommendation deliberately does
+   * NOT reject — it opens the reject form with the AI's reason pre-filled so a
+   * human still makes and confirms that call.
+   */
+  function acceptAiRecommendation() {
+    const ai = expense?.ai_audit || {};
+    if (expense?.ai_verdict === 'approve') {
+      const suggested = ai.suggested_adjusted_amount;
+      if (suggested != null) setAdjustedAmount(String(suggested));
+      handleApprove('ai_recommendation', suggested != null ? Number(suggested) : null);
+      return;
+    }
+    setRejectReason(ai.rejection_reason_draft || ai.reasoning || '');
+    setRejecting(true);
   }
 
   async function handleReject() {
@@ -108,9 +131,12 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
               </div>
             )}
 
+            {/* AI Auditor — the review that replaced the manual expense check */}
+            {expense.ai_verdict && <AiAuditPanel expense={expense} />}
+
             {/* OCR / AI Verification Data */}
             <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">AI Verification</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">OCR Extraction</h3>
               {meta.attachmentType === 'pdf' && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mb-3 text-xs text-blue-800">
                   📄 <strong>PDF attachment</strong> — Standard payment receipt checks (transaction ID, payment status) do not apply to document uploads. Finance review required.
@@ -228,6 +254,25 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
             {/* Actions */}
             {canAct && (
               <div className="border-t pt-5 space-y-3">
+                {/* Accept the AI's recommendation in one click. For a reject
+                    recommendation this only opens the reject form pre-filled —
+                    a human still confirms. */}
+                {['approve', 'reject', 'needs_human'].includes(expense.ai_verdict) && !rejecting && (
+                  <button
+                    className="w-full px-4 py-2.5 rounded-lg font-semibold text-sm bg-indigo-600 hover:bg-indigo-700 text-white transition disabled:opacity-50"
+                    disabled={acting}
+                    onClick={acceptAiRecommendation}
+                  >
+                    {expense.ai_verdict === 'approve'
+                      ? `🤖 Accept AI recommendation — Approve${
+                          expense.ai_audit?.suggested_adjusted_amount != null
+                            ? ` ₹${Number(expense.ai_audit.suggested_adjusted_amount).toLocaleString('en-IN')}`
+                            : ''
+                        }`
+                      : '🤖 Use AI reasoning to reject (you confirm)'}
+                  </button>
+                )}
+
                 {/* Amount Adjustment */}
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
                   <label className="block text-sm font-semibold text-amber-800 mb-2">
@@ -269,7 +314,7 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
 
                 {!rejecting ? (
                   <div className="flex gap-3">
-                    <button className="btn-primary flex-1" disabled={acting} onClick={handleApprove}>
+                    <button className="btn-primary flex-1" disabled={acting} onClick={() => handleApprove()}>
                       {acting ? 'Processing...' : adjustedAmount.trim() ? `✓ Approve ₹${Number(adjustedAmount).toLocaleString('en-IN')}` : '✓ Approve'}
                     </button>
                     <button className="btn-danger flex-1" disabled={acting} onClick={() => setRejecting(true)}>
@@ -301,6 +346,99 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
       </div>
     </div>,
     document.body
+  );
+}
+
+export const AI_VERDICT_STYLES = {
+  approve: { label: 'Approve', chip: 'bg-green-100 text-green-800', box: 'bg-green-50 border-green-200', icon: '✓' },
+  needs_human: { label: 'Needs Human Review', chip: 'bg-amber-100 text-amber-800', box: 'bg-amber-50 border-amber-200', icon: '⚠' },
+  reject: { label: 'Reject Recommended', chip: 'bg-red-100 text-red-800', box: 'bg-red-50 border-red-200', icon: '✗' },
+  error: { label: 'Audit Failed', chip: 'bg-gray-200 text-gray-700', box: 'bg-gray-50 border-gray-200', icon: '—' },
+};
+
+function AiAuditPanel({ expense }) {
+  const ai = expense.ai_audit || {};
+  const style = AI_VERDICT_STYLES[expense.ai_verdict] || AI_VERDICT_STYLES.error;
+  const signals = Array.isArray(ai.fraud_signals) ? ai.fraud_signals : [];
+
+  return (
+    <div className={`border rounded-lg p-4 ${style.box}`}>
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <h3 className="text-sm font-semibold text-gray-800">🤖 AI Auditor</h3>
+        <div className="flex items-center gap-2">
+          {expense.ai_auto_approved && (
+            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">
+              Auto-approved
+            </span>
+          )}
+          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${style.chip}`}>
+            {style.icon} {style.label}
+          </span>
+          {expense.ai_confidence != null && (
+            <span className="text-xs text-gray-600">{expense.ai_confidence}% confident</span>
+          )}
+        </div>
+      </div>
+
+      {expense.ai_verdict === 'error' ? (
+        <p className="text-sm text-gray-600">
+          The AI could not audit this expense{ai.error ? ` (${ai.error})` : ''}. Review it manually — it will be retried automatically.
+        </p>
+      ) : (
+        <>
+          {ai.reasoning && <p className="text-sm text-gray-800 leading-relaxed">{ai.reasoning}</p>}
+
+          {signals.length > 0 && (
+            <div className="mt-3">
+              <p className="text-xs font-semibold text-red-800 mb-1">Concerns raised</p>
+              <div className="flex flex-wrap gap-1.5">
+                {signals.map((s, i) => (
+                  <span key={i} className="px-2 py-0.5 rounded text-xs bg-red-100 text-red-800 border border-red-200">
+                    {s}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-2 mt-3 text-xs">
+            {[
+              ['Category', ai.category_match],
+              ['Purpose', ai.purpose_match],
+              ['Attachment', ai.attachment_quality?.replace(/_/g, ' ')],
+            ].filter(([, v]) => v).map(([label, value]) => (
+              <div key={label} className="bg-white/70 rounded px-2 py-1 border border-gray-200">
+                <span className="text-gray-500">{label}: </span>
+                <span className="font-medium text-gray-800">{value}</span>
+              </div>
+            ))}
+          </div>
+
+          {ai.suggested_adjusted_amount != null && (
+            <p className="text-sm text-amber-900 mt-3 bg-amber-100 border border-amber-200 rounded px-3 py-2">
+              Receipt only supports <strong>₹{Number(ai.suggested_adjusted_amount).toLocaleString('en-IN')}</strong> of
+              the ₹{Number(expense.amount).toLocaleString('en-IN')} claimed.
+            </p>
+          )}
+
+          {ai.reconciliation_note && (
+            <p className="text-xs text-gray-700 mt-2 italic">{ai.reconciliation_note}</p>
+          )}
+
+          {ai.rejection_reason_draft && (
+            <p className="text-xs text-gray-600 mt-2">
+              Suggested reason: <strong>{ai.rejection_reason_draft}</strong>
+            </p>
+          )}
+        </>
+      )}
+
+      <p className="text-[11px] text-gray-400 mt-3">
+        {expense.ai_model}
+        {expense.ai_audited_at ? ` · ${new Date(expense.ai_audited_at).toLocaleString()}` : ''}
+        {' · the AI never rejects on its own — a person confirms every rejection'}
+      </p>
+    </div>
   );
 }
 

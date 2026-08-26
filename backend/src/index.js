@@ -18,44 +18,37 @@ import prqPaymentsRoutes from './routes/prqPayments.js';
 import headRoutes from './routes/head.js';
 import projectRoutes from './routes/projects.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { sweepPendingAudits } from './services/aiAuditService.js';
+import {
+  registerClient,
+  unregisterClient,
+  broadcastNewExpense,
+  broadcastNewImprest,
+  broadcastAiAudit,
+} from './services/wsHub.js';
+import { AI_AUDIT_MODE, AI_AUDIT_MODEL, AI_AUDIT_SWEEP_INTERVAL_MS } from './config/constants.js';
 
 const app = express();
 const server = http.createServer(app);
 
 // ── WebSocket server for real-time finance dashboard updates ──────────────────
+// The client registry and broadcasters live in services/wsHub.js so services
+// and scripts can broadcast without importing this file (which would start a
+// second HTTP server as a side effect).
 const wss = new WebSocketServer({ server, path: '/ws' });
-const financeClients = new Set();
 
 wss.on('connection', (ws) => {
-  financeClients.add(ws);
-  ws.on('close', () => financeClients.delete(ws));
+  registerClient(ws);
+  ws.on('close', () => unregisterClient(ws));
   ws.on('error', (err) => {
     console.error('WebSocket client error:', err.message);
-    financeClients.delete(ws);
+    unregisterClient(ws);
   });
-  // Send heartbeat every 30s to keep connection alive
   ws.send(JSON.stringify({ type: 'CONNECTED', message: 'HagerStone live updates active' }));
 });
 
-/** Broadcast a new expense event to all connected finance dashboard clients */
-export function broadcastNewExpense(expenseData) {
-  const message = JSON.stringify({ type: 'NEW_EXPENSE', data: expenseData });
-  for (const ws of financeClients) {
-    if (ws.readyState === 1) {
-      ws.send(message);
-    }
-  }
-}
-
-/** Broadcast a new imprest request event to all connected finance dashboard clients */
-export function broadcastNewImprest(data) {
-  const payload = JSON.stringify({ type: 'new_imprest', data });
-  for (const ws of financeClients) {
-    if (ws.readyState === 1) {
-      ws.send(payload);
-    }
-  }
-}
+// Re-exported for the existing importers in routes/.
+export { broadcastNewExpense, broadcastNewImprest, broadcastAiAudit };
 
 // ── Express middleware ────────────────────────────────────────────────────────
 const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
@@ -126,5 +119,17 @@ server.listen(PORT, () => {
   console.log(`\n🚀 HagerStone Expense API running on port ${PORT}`);
   console.log(`   Health: http://localhost:${PORT}/health`);
   console.log(`   WebSocket: ws://localhost:${PORT}/ws`);
-  console.log(`   Environment: ${process.env.NODE_ENV || 'development'}\n`);
+  console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`   AI expense audit: ${AI_AUDIT_MODE}${AI_AUDIT_MODE !== 'off' ? ` (${AI_AUDIT_MODEL})` : ''}\n`);
+
+  // Background sweeper — audits anything the inline pass missed (API outage,
+  // restart mid-submission) and works through the existing backlog. This is a
+  // single long-running process, so an interval is sufficient; the shared-secret
+  // endpoint POST /api/expenses/internal/ai-audit-sweep is the manual fallback.
+  if (AI_AUDIT_MODE !== 'off') {
+    const timer = setInterval(() => {
+      sweepPendingAudits().catch((err) => console.warn('AI audit sweep failed:', err.message));
+    }, AI_AUDIT_SWEEP_INTERVAL_MS);
+    timer.unref?.();
+  }
 });

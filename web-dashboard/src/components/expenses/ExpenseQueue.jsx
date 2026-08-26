@@ -210,8 +210,41 @@ function VerificationBadge({ expense }) {
   return <span className="text-xs text-gray-400">—</span>;
 }
 
+/**
+ * The AI auditor's verdict. A 'reject' verdict is only ever a recommendation —
+ * the expense is still sitting in manual_review waiting for a person.
+ */
+function AiVerdictBadge({ expense }) {
+  if (expense.ai_auto_approved) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800" title="Approved automatically by the AI auditor">
+        🤖 Auto-approved
+      </span>
+    );
+  }
+
+  const map = {
+    approve: ['bg-green-100 text-green-700', '✓ Approve', 'AI recommends approval'],
+    needs_human: ['bg-amber-100 text-amber-800', '⚠ Needs review', 'AI could not clear this on its own'],
+    reject: ['bg-red-100 text-red-700', '✗ Reject rec.', 'AI recommends rejection — a person must confirm'],
+    error: ['bg-gray-200 text-gray-600', '— Audit failed', 'The AI could not audit this; it will be retried'],
+  };
+  const entry = map[expense.ai_verdict];
+  if (!entry) return <span className="text-xs text-gray-300" title="Not audited yet">pending</span>;
+
+  const [cls, label, title] = entry;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${cls}`} title={title}>
+      {label}
+      {expense.ai_confidence != null && expense.ai_verdict !== 'error' && (
+        <span className="opacity-70">({expense.ai_confidence}%)</span>
+      )}
+    </span>
+  );
+}
+
 function downloadCSV(expenses) {
-  const headers = ['Ref ID', 'Employee', 'Site', 'Amount', 'Category', 'Status', 'OCR Confidence', 'Duplicate', 'Description', 'Submitted'];
+  const headers = ['Ref ID', 'Employee', 'Site', 'Amount', 'Category', 'Status', 'OCR Confidence', 'AI Verdict', 'AI Confidence', 'AI Auto-approved', 'AI Reasoning', 'Duplicate', 'Description', 'Submitted'];
   const rows = expenses.map((e) => [
     e.ref_id,
     e.employee?.name || '',
@@ -220,6 +253,10 @@ function downloadCSV(expenses) {
     e.category,
     e.status,
     e.screenshot_metadata?.confidence ?? '',
+    e.ai_verdict || '',
+    e.ai_confidence ?? '',
+    e.ai_auto_approved ? 'Yes' : 'No',
+    (e.ai_audit?.reasoning || '').replace(/"/g, '""'),
     e.duplicate_flag ? 'Yes' : 'No',
     (e.description || '').replace(/"/g, '""'),
     new Date(e.submitted_at).toLocaleDateString('en-IN'),
@@ -238,7 +275,7 @@ export default function ExpenseQueue() {
   const [expenses, setExpenses] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ status: 'all', site: 'all', employeeId: 'all', dateFrom: '', dateTo: '', search: '' });
+  const [filters, setFilters] = useState({ status: 'all', site: 'all', employeeId: 'all', aiVerdict: 'all', dateFrom: '', dateTo: '', search: '' });
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState(new Set());
   const [detailId, setDetailId] = useState(null);
@@ -268,7 +305,26 @@ export default function ExpenseQueue() {
   const handleNewExpense = useCallback(() => {
     setLiveCount((c) => c + 1);
   }, []);
-  useWebSocket(handleNewExpense);
+
+  // The AI audit lands a few seconds after submission — patch the row in place
+  // so the verdict appears without the reviewer having to refresh.
+  const handleAiAudit = useCallback((data) => {
+    setExpenses((prev) =>
+      prev.map((e) =>
+        e.id === data.expenseId
+          ? {
+              ...e,
+              ai_verdict: data.verdict,
+              ai_confidence: data.confidence,
+              ai_auto_approved: data.autoApproved,
+              status: data.status || e.status,
+            }
+          : e
+      )
+    );
+  }, []);
+
+  useWebSocket(handleNewExpense, undefined, handleAiAudit);
 
   function toggleSelect(id) {
     setSelected((prev) => {
@@ -332,6 +388,31 @@ export default function ExpenseQueue() {
 
       <FilterBar filters={filters} onChange={(f) => { setFilters(f); setPage(1); }} />
 
+      {/* AI auditor view switcher — "Needs human review" is the working queue */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <span className="text-xs text-gray-500 font-medium">AI audit:</span>
+        {[
+          ['all', 'All'],
+          ['needs_attention', '⚠ Needs human review'],
+          ['approve', '✓ AI approved'],
+          ['reject', '✗ Reject recommended'],
+          ['error', '— Audit failed'],
+          ['unaudited', 'Not audited yet'],
+        ].map(([value, label]) => (
+          <button
+            key={value}
+            onClick={() => { setFilters((f) => ({ ...f, aiVerdict: value })); setPage(1); }}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition ${
+              filters.aiVerdict === value
+                ? 'bg-brand-600 text-white border-brand-600'
+                : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="flex items-center justify-between mb-4">
         <p className="text-xs text-gray-400">
           {searchQuery ? `${displayedExpenses.length} of ${total}` : total} expense{total !== 1 ? 's' : ''} found
@@ -388,6 +469,7 @@ export default function ExpenseQueue() {
                 <th className="text-right px-4 py-3 text-gray-600 font-medium">Amount</th>
                 <th className="text-left px-4 py-3 text-gray-600 font-medium">Category</th>
                 <th className="text-left px-4 py-3 text-gray-600 font-medium">OCR Verification</th>
+                <th className="text-left px-4 py-3 text-gray-600 font-medium">AI Audit</th>
                 <th className="text-left px-4 py-3 text-gray-600 font-medium">Status</th>
                 <th className="text-left px-4 py-3 text-gray-600 font-medium">Submitted</th>
                 <th className="w-16 px-4 py-3"></th>
@@ -395,9 +477,9 @@ export default function ExpenseQueue() {
             </thead>
             <tbody className="divide-y divide-gray-50">
               {loading ? (
-                <tr><td colSpan={10} className="text-center py-12 text-gray-400">Loading expenses...</td></tr>
+                <tr><td colSpan={11} className="text-center py-12 text-gray-400">Loading expenses...</td></tr>
               ) : displayedExpenses.length === 0 ? (
-                <tr><td colSpan={10} className="text-center py-12 text-gray-400">No expenses found</td></tr>
+                <tr><td colSpan={11} className="text-center py-12 text-gray-400">No expenses found</td></tr>
               ) : (
                 displayedExpenses.map((exp) => {
                   const canSelect = ['pending', 'verified', 'manual_review'].includes(exp.status);
@@ -437,6 +519,9 @@ export default function ExpenseQueue() {
                       <td className="px-4 py-3 text-gray-600">{exp.category}</td>
                       <td className="px-4 py-3">
                         <VerificationBadge expense={exp} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <AiVerdictBadge expense={exp} />
                       </td>
                       <td className="px-4 py-3"><StatusBadge status={exp.status} /></td>
                       <td className="px-4 py-3 text-gray-500 text-xs">

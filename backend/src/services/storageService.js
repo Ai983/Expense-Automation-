@@ -79,6 +79,42 @@ export async function getSignedUrl(storagePath, createdAt) {
 }
 
 /**
+ * Downloads a stored screenshot as a Buffer.
+ *
+ * Used by the AI auditor when it re-audits an expense outside the submit
+ * request (sweeper / backlog), where the original upload buffers are long gone.
+ * Mirrors getSignedUrl's legacy-bucket fallback so pre-cutover files still
+ * resolve. Returns null rather than throwing — a missing file must degrade the
+ * audit to human review, not crash the sweeper.
+ */
+export async function downloadScreenshot(storagePath, createdAt) {
+  if (!storagePath) return null;
+
+  const isLegacy = legacyStorageClient && createdAt && new Date(createdAt) < STORAGE_CUTOVER_DATE;
+
+  const attempts = isLegacy
+    ? [[legacyStorageClient, LEGACY_BUCKET]]
+    : [[supabaseAdmin, STORAGE_BUCKET], ...(legacyStorageClient ? [[legacyStorageClient, LEGACY_BUCKET]] : [])];
+
+  const failures = [];
+  for (const [client, bucket] of attempts) {
+    try {
+      const { data, error } = await client.storage.from(bucket).download(storagePath);
+      if (error || !data) {
+        failures.push(`${bucket}: ${error?.message || 'empty response'}`);
+        continue;
+      }
+      return Buffer.from(await data.arrayBuffer());
+    } catch (err) {
+      failures.push(`${bucket}: ${err.message}`);
+    }
+  }
+
+  console.warn(`Could not download ${storagePath} — ${failures.join(' | ')}`);
+  return null;
+}
+
+/**
  * Uploads a payment receipt to Supabase Storage.
  */
 export async function uploadPaymentReceipt(buffer, mimeType, refId) {

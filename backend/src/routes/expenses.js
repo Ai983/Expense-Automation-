@@ -10,7 +10,16 @@ import { logAudit } from '../services/auditService.js';
 import { generateRefId } from '../utils/refIdGenerator.js';
 import { ok, fail } from '../utils/responseHelper.js';
 import { resolveMimeType } from '../utils/fileType.js';
-import { CATEGORIES, FINANCE_ROLES, FINANCE_HEAD_ROLES } from '../config/constants.js';
+import {
+  CATEGORIES,
+  FINANCE_ROLES,
+  FINANCE_HEAD_ROLES,
+  CONFIDENCE_AUTO_APPROVE,
+  CONFIDENCE_MANUAL_REVIEW,
+  AMOUNT_TOLERANCE_INR,
+  AI_AUDIT_MODE,
+} from '../config/constants.js';
+import { runAuditAndPersist, sweepPendingAudits } from '../services/aiAuditService.js';
 import { isValidSite } from '../config/sites.js';
 import { broadcastNewExpense } from '../index.js';
 
@@ -157,7 +166,7 @@ router.post(
       // For multiple screenshots, re-verify using TOTAL extracted amount
       if (files.length > 1 && totalExtractedAmount > 0 && verification) {
         const totalDiff = Math.abs(totalExtractedAmount - parsedAmount);
-        const tolerance = parseFloat(process.env.AMOUNT_TOLERANCE_INR || '10');
+        const tolerance = AMOUNT_TOLERANCE_INR;
         // Override the amount check with total from all screenshots
         const amountIdx = verificationChecks.findIndex((c) => c.step === 'amount_check');
         if (amountIdx >= 0) {
@@ -175,10 +184,8 @@ router.post(
         const ocrConf = verification.ocrData?.ocrConfidence || 50;
         const newConfidence = Math.round(weightedScore * 0.7 + ocrConf * 0.3);
         verification.overallConfidence = newConfidence;
-        const autoApprove = parseFloat(process.env.CONFIDENCE_AUTO_APPROVE || '94');
-        const manualReview = parseFloat(process.env.CONFIDENCE_MANUAL_REVIEW || '70');
-        if (newConfidence >= autoApprove) autoAction = 'auto_verified';
-        else if (newConfidence >= manualReview) autoAction = 'manual_review';
+        if (newConfidence >= CONFIDENCE_AUTO_APPROVE) autoAction = 'auto_verified';
+        else if (newConfidence >= CONFIDENCE_MANUAL_REVIEW) autoAction = 'manual_review';
         else autoAction = 'blocked';
       }
 
@@ -299,6 +306,17 @@ router.post(
         });
       } catch (wsErr) {
         console.warn('WebSocket broadcast failed (non-fatal):', wsErr.message);
+      }
+
+      // 11. AI audit — replaces the manual expense check.
+      // Deliberately NOT awaited: the employee gets their confirmation now, and
+      // the verdict lands for finance a few seconds later over WebSocket. A
+      // failure here can never affect the submission (see runAuditAndPersist,
+      // which never throws), and the sweeper retries anything missed.
+      if (AI_AUDIT_MODE !== 'off') {
+        runAuditAndPersist(expense.id, { files }).catch((auditErr) =>
+          console.warn('AI audit dispatch failed (non-fatal):', auditErr.message)
+        );
       }
 
       return ok(res, {
@@ -440,7 +458,7 @@ router.get(
   roleGuard(FINANCE_HEAD_ROLES),
   async (req, res, next) => {
     try {
-      const { status, site, dateFrom, dateTo, employeeId, page = 1, limit = 50 } = req.query;
+      const { status, site, dateFrom, dateTo, employeeId, aiVerdict, page = 1, limit = 50 } = req.query;
       const offset = (parseInt(page) - 1) * parseInt(limit);
 
       let query = supabaseAdmin
@@ -449,6 +467,7 @@ router.get(
           id, ref_id, site, amount, category, description, status,
           duplicate_flag, duplicate_ref, submitted_at, verified_at, imprest_id,
           approved_at, rejection_reason, screenshot_metadata, overspend_amount,
+          ai_verdict, ai_confidence, ai_audit, ai_audited_at, ai_model, ai_auto_approved,
           employee:employee_id (id, name, email, phone, site),
           approver:approved_by (id, name)
         `, { count: 'exact' })
@@ -460,6 +479,14 @@ router.get(
       if (employeeId && employeeId !== 'all') query = query.eq('employee_id', employeeId);
       if (dateFrom) query = query.gte('submitted_at', dateFrom);
       if (dateTo) query = query.lte('submitted_at', dateTo + 'T23:59:59Z');
+
+      // AI auditor filters. 'needs_attention' is the queue a human works:
+      // everything the AI would not clear on its own.
+      if (aiVerdict && aiVerdict !== 'all') {
+        if (aiVerdict === 'needs_attention') query = query.in('ai_verdict', ['reject', 'needs_human']);
+        else if (aiVerdict === 'unaudited') query = query.is('ai_verdict', null);
+        else query = query.eq('ai_verdict', aiVerdict);
+      }
 
       const { data: expenses, error, count } = await query;
       if (error) throw error;
@@ -596,7 +623,7 @@ router.post(
   roleGuard(FINANCE_ROLES),
   async (req, res, next) => {
     try {
-      const { adjustedAmount } = req.body || {};
+      const { adjustedAmount, source } = req.body || {};
       const { data: expense, error: fetchErr } = await supabaseAdmin
         .from('expenses')
         .select('id, ref_id, status, amount, original_amount, employee_id')
@@ -661,7 +688,13 @@ router.post(
         entityType: 'expense',
         entityId: expense.id,
         oldValue: { status: expense.status, amount: expense.amount },
-        newValue: { status: 'approved', amount: approvedAmt },
+        newValue: {
+          status: 'approved',
+          amount: approvedAmt,
+          // Records whether the reviewer accepted the AI recommendation or
+          // decided independently — needed to measure AI/human agreement.
+          ...(source === 'ai_recommendation' ? { source: 'ai_recommendation' } : {}),
+        },
         ipAddress: req.ip,
       });
 
@@ -798,6 +831,25 @@ router.post(
     }
   }
 );
+
+// ── POST /api/expenses/internal/ai-audit-sweep ───────────────────────────────
+// Manual/backlog trigger for the AI auditor. Shared-secret guarded (same
+// pattern as the n8n founder-review callback) so it can be fired from a script
+// or a scheduled job without a user session.
+router.post('/internal/ai-audit-sweep', async (req, res, next) => {
+  try {
+    const secret = req.get('x-n8n-secret');
+    if (!process.env.N8N_INTERNAL_SECRET || secret !== process.env.N8N_INTERNAL_SECRET) {
+      return fail(res, 'Unauthorized', 401);
+    }
+
+    const limit = Math.min(parseInt(req.body?.limit || '5'), 50);
+    const result = await sweepPendingAudits({ limit });
+    return ok(res, result);
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -7,9 +7,10 @@ const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:4000';
  * Maintains a WebSocket connection to the backend.
  * Calls onNewExpense(data) whenever a NEW_EXPENSE event arrives.
  * Calls onNewImprest(data) whenever a new_imprest event arrives.
+ * Calls onAiAudit(data) whenever the AI auditor finishes an expense.
  * Automatically reconnects with exponential backoff.
  */
-export function useWebSocket(onNewExpense, onNewImprest) {
+export function useWebSocket(onNewExpense, onNewImprest, onAiAudit) {
   const wsRef = useRef(null);
   const reconnectTimerRef = useRef(null);
   const reconnectDelay = useRef(1000);
@@ -39,6 +40,9 @@ export function useWebSocket(onNewExpense, onNewImprest) {
           if (msg.type === 'new_imprest' && onNewImprest) {
             onNewImprest(msg.data);
           }
+          if (msg.type === 'ai_audit_complete' && onAiAudit) {
+            onAiAudit(msg.data);
+          }
         } catch {
           // ignore malformed messages
         }
@@ -64,5 +68,5 @@ export function useWebSocket(onNewExpense, onNewImprest) {
       clearTimeout(reconnectTimerRef.current);
       wsRef.current?.close();
     };
-  }, [onNewExpense, onNewImprest]);
+  }, [onNewExpense, onNewImprest, onAiAudit]);
 }
