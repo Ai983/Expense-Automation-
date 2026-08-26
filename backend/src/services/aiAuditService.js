@@ -439,7 +439,7 @@ export function decideAction(audit, ctx, mode = AI_AUDIT_MODE) {
 async function loadContext(expenseId, providedFiles) {
   const { data: expense, error } = await supabaseAdmin
     .from('expenses')
-    .select('id, ref_id, employee_id, site, amount, category, description, status, submitted_at, screenshot_url, screenshot_metadata, imprest_id, overspend_amount, duplicate_flag, duplicate_ref')
+    .select('id, ref_id, employee_id, site, amount, category, description, status, submitted_at, screenshot_url, screenshot_metadata, imprest_id, overspend_amount, duplicate_flag, duplicate_ref, employee:employee_id (status)')
     .eq('id', expenseId)
     .single();
 
@@ -540,6 +540,7 @@ async function loadContext(expenseId, providedFiles) {
       site: expense.site,
       description: expense.description,
       status: expense.status,
+      employeeStatus: expense.employee?.status ?? null,
       submittedAt: expense.submitted_at,
       imprestId: expense.imprest_id,
       attachmentType: meta.attachmentType || 'image',
@@ -589,6 +590,11 @@ export async function runAuditAndPersist(expenseId, { files = null } = {}) {
     // A human decision is final — never re-audit over it.
     if (!AI_AUDITABLE_STATUSES.includes(ctx.expense.status) && ctx.expense.status !== 'blocked') {
       return { skipped: true, reason: `status ${ctx.expense.status}` };
+    }
+
+    // Nobody is left to fix or answer for a departed employee's expense.
+    if (ctx.expense.employeeStatus && ctx.expense.employeeStatus !== 'active') {
+      return { skipped: true, reason: 'employee is no longer active' };
     }
 
     const audit = await auditExpense(ctx);
@@ -712,11 +718,15 @@ export async function sweepPendingAudits({ limit = AI_AUDIT_SWEEP_BATCH } = {}) 
 
   const cutoff = new Date(Date.now() - AI_AUDIT_MAX_AGE_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
+  // Expenses belonging to people who have left are not audited. Their rows stay
+  // exactly as they are — nothing is written off — they simply stop consuming
+  // audit spend and review time. !inner makes the employee filter a real join.
   const { data: rows, error } = await supabaseAdmin
     .from('expenses')
-    .select('id')
+    .select('id, employee:employee_id!inner(status)')
     .is('ai_verdict', null)
     .in('status', AI_AUDITABLE_STATUSES)
+    .eq('employee.status', 'active')
     .gte('submitted_at', cutoff)
     .order('submitted_at', { ascending: false })
     .limit(limit);
