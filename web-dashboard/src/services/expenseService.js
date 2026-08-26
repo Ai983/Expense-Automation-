@@ -1,8 +1,11 @@
 import api from './api';
 
-export async function getExpenseQueue({ status = 'all', site = 'all', employeeId = 'all', aiVerdict = 'all', dateFrom, dateTo, page = 1, limit = 50 } = {}) {
+export async function getExpenseQueue({ status = 'all', site = 'all', employeeId = 'all', aiVerdict = 'all', stage, dateFrom, dateTo, page = 1, limit = 50 } = {}) {
   const params = { status, site, employeeId, page, limit };
   if (aiVerdict && aiVerdict !== 'all') params.aiVerdict = aiVerdict;
+  // Expenses waiting on an employee correction are excluded by default — they
+  // are not finance's to action yet — but remain viewable via this filter.
+  if (stage) params.stage = stage;
   if (dateFrom) params.dateFrom = dateFrom;
   if (dateTo) params.dateTo = dateTo;
   const { data } = await api.get('/api/expenses/finance/queue', { params });

@@ -401,9 +401,9 @@ export default function ExpenseQueue() {
         ].map(([value, label]) => (
           <button
             key={value}
-            onClick={() => { setFilters((f) => ({ ...f, aiVerdict: value })); setPage(1); }}
+            onClick={() => { setFilters((f) => ({ ...f, aiVerdict: value, stage: undefined })); setPage(1); }}
             className={`px-3 py-1 rounded-full text-xs font-medium border transition ${
-              filters.aiVerdict === value
+              filters.aiVerdict === value && !filters.stage
                 ? 'bg-brand-600 text-white border-brand-600'
                 : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
             }`}
@@ -411,6 +411,20 @@ export default function ExpenseQueue() {
             {label}
           </button>
         ))}
+
+        {/* Not finance's to action — the employee is correcting it. Visible so a
+            wrong AI defect call can never quietly disappear. */}
+        <button
+          onClick={() => { setFilters((f) => ({ ...f, aiVerdict: 'all', stage: 'awaiting_fix' })); setPage(1); }}
+          className={`px-3 py-1 rounded-full text-xs font-medium border transition ${
+            filters.stage === 'awaiting_fix'
+              ? 'bg-amber-500 text-white border-amber-500'
+              : 'bg-white text-amber-700 border-amber-300 hover:bg-amber-50'
+          }`}
+          title="With the employee for correction — not in your queue"
+        >
+          📸 Awaiting employee fix
+        </button>
       </div>
 
       <div className="flex items-center justify-between mb-4">

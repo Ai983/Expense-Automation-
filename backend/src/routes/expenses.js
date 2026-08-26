@@ -18,6 +18,7 @@ import {
   CONFIDENCE_MANUAL_REVIEW,
   AMOUNT_TOLERANCE_INR,
   AI_AUDIT_MODE,
+  MAX_FIX_ATTEMPTS,
 } from '../config/constants.js';
 import { runAuditAndPersist, sweepPendingAudits } from '../services/aiAuditService.js';
 import { notifyExpenseRejected } from '../services/whatsappService.js';
@@ -465,7 +466,7 @@ router.get(
   roleGuard(FINANCE_HEAD_ROLES),
   async (req, res, next) => {
     try {
-      const { status, site, dateFrom, dateTo, employeeId, aiVerdict, page = 1, limit = 50 } = req.query;
+      const { status, site, dateFrom, dateTo, employeeId, aiVerdict, stage, page = 1, limit = 50 } = req.query;
       const offset = (parseInt(page) - 1) * parseInt(limit);
 
       let query = supabaseAdmin
@@ -475,6 +476,7 @@ router.get(
           duplicate_flag, duplicate_ref, submitted_at, verified_at, imprest_id,
           approved_at, rejection_reason, screenshot_metadata, overspend_amount,
           ai_verdict, ai_confidence, ai_audit, ai_audited_at, ai_model, ai_auto_approved,
+          awaiting_fix_until, fix_requested_at, fix_request_reason, fix_attempt_count,
           employee:employee_id (id, name, email, phone, site),
           approver:approved_by (id, name)
         `, { count: 'exact' })
@@ -486,6 +488,16 @@ router.get(
       if (employeeId && employeeId !== 'all') query = query.eq('employee_id', employeeId);
       if (dateFrom) query = query.gte('submitted_at', dateFrom);
       if (dateTo) query = query.lte('submitted_at', dateTo + 'T23:59:59Z');
+
+      // Ownership: an expense is either the employee's or finance's, never both.
+      // Rows waiting on an employee correction are excluded from the review
+      // queue by default — they are not finance's problem yet — but remain
+      // reachable via stage=awaiting_fix so nothing is ever invisible.
+      if (stage === 'awaiting_fix') {
+        query = query.not('awaiting_fix_until', 'is', null).gt('awaiting_fix_until', new Date().toISOString());
+      } else if (stage !== 'all') {
+        query = query.or(`awaiting_fix_until.is.null,awaiting_fix_until.lte.${new Date().toISOString()}`);
+      }
 
       // AI auditor filters. 'needs_attention' is the queue a human works:
       // everything the AI would not clear on its own.
@@ -567,7 +579,7 @@ router.get('/my-expenses/:employeeId', authMiddleware, async (req, res, next) =>
 
     const { data: expenses, error, count } = await supabaseAdmin
       .from('expenses')
-      .select('id, ref_id, site, amount, original_amount, category, description, status, submitted_at, verified_at, approved_at, rejection_reason, duplicate_flag, screenshot_metadata', { count: 'exact' })
+      .select('id, ref_id, site, amount, original_amount, category, description, status, submitted_at, verified_at, approved_at, rejection_reason, duplicate_flag, screenshot_metadata, awaiting_fix_until, fix_request_reason, fix_attempt_count', { count: 'exact' })
       .eq('employee_id', req.params.employeeId)
       .order('submitted_at', { ascending: false })
       .range(offset, offset + parseInt(limit) - 1);
@@ -844,6 +856,107 @@ router.post(
         approved: updatedExpenses.length,
         refIds: updatedExpenses.map((e) => e.ref_id),
         message: `${updatedExpenses.length} expenses approved`,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// ── POST /api/expenses/:expenseId/fix ────────────────────────────────────────
+// The employee replaces the receipt on an expense the AI handed back to them.
+//
+// This updates the SAME row. Without it the only way to correct a mistake is to
+// file a second expense, which leaves the bad one in the queue, trips a false
+// duplicate flag on the corrected one, and double-counts the imprest balance —
+// all of which has already happened in production.
+//
+// One attempt only. The re-audit decides where it goes next: approved, or to
+// finance flagged as already attempted.
+router.post(
+  '/:expenseId/fix',
+  authMiddleware,
+  upload.fields([{ name: 'screenshots', maxCount: 5 }, { name: 'screenshot', maxCount: 1 }]),
+  async (req, res, next) => {
+    try {
+      const files = [...(req.files?.screenshots || []), ...(req.files?.screenshot || [])];
+      if (files.length === 0) return fail(res, 'At least one payment screenshot is required');
+      for (const file of files) file.mimetype = resolveMimeType(file.buffer, file.mimetype);
+
+      const { data: expense, error: fetchErr } = await supabaseAdmin
+        .from('expenses')
+        .select('id, ref_id, employee_id, status, amount, awaiting_fix_until, fix_attempt_count, screenshot_metadata')
+        .eq('id', req.params.expenseId)
+        .single();
+
+      if (fetchErr || !expense) return fail(res, 'Expense not found', 404);
+      if (expense.employee_id !== req.user.id) return fail(res, 'You can only correct your own expenses', 403);
+      if (!expense.awaiting_fix_until) {
+        return fail(res, 'This expense is not waiting for a correction. It is already with the finance team.');
+      }
+      if (!['pending', 'verified', 'manual_review'].includes(expense.status)) {
+        return fail(res, `This expense can no longer be changed (status: ${expense.status})`);
+      }
+      if ((expense.fix_attempt_count || 0) >= MAX_FIX_ATTEMPTS) {
+        return fail(res, 'You have already corrected this expense once. It is now with the finance team.');
+      }
+
+      // Upload the replacements alongside the originals — the old files are kept
+      // so finance can still see what was first submitted.
+      const newPaths = [];
+      for (let i = 0; i < files.length; i++) {
+        const suffix = `-fix${(expense.fix_attempt_count || 0) + 1}${files.length > 1 ? `-${i + 1}` : ''}`;
+        newPaths.push(await uploadScreenshot(files[i].buffer, files[i].mimetype, req.user.id, `${expense.ref_id}${suffix}`));
+      }
+
+      const prevMeta = expense.screenshot_metadata || {};
+      const attemptNo = (expense.fix_attempt_count || 0) + 1;
+
+      const { error: updateErr } = await supabaseAdmin
+        .from('expenses')
+        .update({
+          screenshot_url: newPaths[0],
+          screenshot_metadata: {
+            ...prevMeta,
+            attachmentType: files[0].mimetype === 'application/pdf' ? 'pdf' : 'image',
+            screenshotCount: newPaths.length,
+            screenshots: newPaths,
+            supersededScreenshots: prevMeta.screenshots || [],
+            fixAttempt: attemptNo,
+          },
+          fix_attempt_count: attemptNo,
+          fixed_at: new Date().toISOString(),
+          // Back out of the employee's stage — the re-audit decides what happens.
+          awaiting_fix_until: null,
+          // Clear the verdict so this is judged on the new evidence, not the old.
+          ai_verdict: null,
+          ai_confidence: null,
+          ai_audit: null,
+        })
+        .eq('id', expense.id);
+
+      if (updateErr) throw updateErr;
+
+      await logAudit({
+        userId: req.user.id,
+        action: 'fix_expense',
+        entityType: 'expense',
+        entityId: expense.id,
+        newValue: { attempt: attemptNo, screenshots: newPaths.length },
+        ipAddress: req.ip,
+      });
+
+      // Re-audit against the new receipt straight away.
+      if (AI_AUDIT_MODE !== 'off') {
+        runAuditAndPersist(expense.id, { files }).catch((err) =>
+          console.warn('Re-audit after fix failed (non-fatal):', err.message)
+        );
+      }
+
+      return ok(res, {
+        expenseId: expense.id,
+        refId: expense.ref_id,
+        message: 'Thank you — your corrected receipt is being checked.',
       });
     } catch (err) {
       next(err);

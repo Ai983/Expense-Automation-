@@ -16,7 +16,12 @@ import {
   AI_AUDIT_SWEEP_BATCH,
   AI_AUDIT_MAX_AGE_DAYS,
   AI_AUDITABLE_STATUSES,
+  FIX_WINDOW_DAYS,
+  MAX_FIX_ATTEMPTS,
+  FIX_NOTIFY_MAX_PER_EMPLOYEE_DAY,
+  FIX_NOTIFY_MAX_PER_DAY,
 } from '../config/constants.js';
+import { notifyExpenseNeedsFix } from './whatsappService.js';
 
 let anthropicClient;
 
@@ -424,6 +429,32 @@ export function decideAction(audit, ctx, mode = AI_AUDIT_MODE) {
     return { newStatus: null, autoApproved: false, logResult: 'pass', blockedRails };
   }
 
+  // Fixable defect → the EMPLOYEE's stage, not finance's.
+  //
+  // Ownership is exclusive: while awaiting a fix the expense is hidden from the
+  // finance queue, because it is not finance's problem yet. They replace the
+  // receipt on the same row, which is what stops the duplicate-row mess that
+  // resubmission causes today.
+  //
+  // One attempt only. A second failure goes to finance flagged as already
+  // attempted — someone needs to phone them, and a third automated message
+  // would not teach what the first two did not.
+  if (
+    audit.employee_fix_hint &&
+    audit.verdict !== 'approve' &&
+    ctx.expense.fixAttemptCount < MAX_FIX_ATTEMPTS &&
+    AI_AUDITABLE_STATUSES.includes(status)
+  ) {
+    return {
+      newStatus: null,
+      autoApproved: false,
+      logResult: 'warn',
+      blockedRails,
+      sendToEmployee: true,
+      fixHint: audit.employee_fix_hint,
+    };
+  }
+
   // reject / needs_human — escalate to a human, never decide against the employee.
   const logResult = audit.verdict === 'reject' ? 'block' : 'warn';
 
@@ -439,7 +470,7 @@ export function decideAction(audit, ctx, mode = AI_AUDIT_MODE) {
 async function loadContext(expenseId, providedFiles) {
   const { data: expense, error } = await supabaseAdmin
     .from('expenses')
-    .select('id, ref_id, employee_id, site, amount, category, description, status, submitted_at, screenshot_url, screenshot_metadata, imprest_id, overspend_amount, duplicate_flag, duplicate_ref, employee:employee_id (status)')
+    .select('id, ref_id, employee_id, site, amount, category, description, status, submitted_at, screenshot_url, screenshot_metadata, imprest_id, overspend_amount, duplicate_flag, duplicate_ref, fix_attempt_count, fix_notified_at, employee:employee_id (status, name, phone)')
     .eq('id', expenseId)
     .single();
 
@@ -541,6 +572,10 @@ async function loadContext(expenseId, providedFiles) {
       description: expense.description,
       status: expense.status,
       employeeStatus: expense.employee?.status ?? null,
+      employeeName: expense.employee?.name ?? null,
+      employeePhone: expense.employee?.phone ?? null,
+      fixAttemptCount: expense.fix_attempt_count ?? 0,
+      fixNotifiedAt: expense.fix_notified_at ?? null,
       submittedAt: expense.submitted_at,
       imprestId: expense.imprest_id,
       attachmentType: meta.attachmentType || 'image',
@@ -573,6 +608,68 @@ async function loadContext(expenseId, providedFiles) {
     },
     employeeHistory: history || [],
   };
+}
+
+/** The imprest's own expense deadline, which the fix window must never exceed. */
+async function getImprestDeadline(imprestId) {
+  if (!imprestId) return null;
+  const { data } = await supabaseAdmin
+    .from('imprest_expense_reminders')
+    .select('deadline')
+    .eq('imprest_id', imprestId)
+    .order('deadline', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.deadline ? new Date(data.deadline) : null;
+}
+
+/**
+ * Sends the single fix-request WhatsApp for an expense.
+ *
+ * One message per expense, ever — fix_notified_at is stamped on send and its
+ * presence blocks any repeat, so a second failed attempt never messages again.
+ * Two daily caps sit behind that as circuit breakers: a bug must not be able to
+ * turn into a message flood and a banned number.
+ */
+async function sendFixRequest(ctx, fixHint, expenseId) {
+  if (ctx.expense.fixNotifiedAt) return; // already told them once
+  if (!ctx.expense.employeePhone) return;
+
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  const { count: employeeToday } = await supabaseAdmin
+    .from('expenses')
+    .select('id', { count: 'exact', head: true })
+    .eq('employee_id', ctx.expense.employeeId)
+    .gte('fix_notified_at', since);
+
+  if ((employeeToday ?? 0) >= FIX_NOTIFY_MAX_PER_EMPLOYEE_DAY) {
+    console.warn(`[fix-request] per-employee daily cap reached for ${ctx.expense.employeeId}`);
+    return;
+  }
+
+  const { count: globalToday } = await supabaseAdmin
+    .from('expenses')
+    .select('id', { count: 'exact', head: true })
+    .gte('fix_notified_at', since);
+
+  if ((globalToday ?? 0) >= FIX_NOTIFY_MAX_PER_DAY) {
+    console.warn('[fix-request] global daily cap reached — not sending');
+    return;
+  }
+
+  await notifyExpenseNeedsFix({
+    name: ctx.expense.employeeName,
+    phone: ctx.expense.employeePhone,
+    refId: ctx.expense.refId,
+    amount: ctx.expense.amount,
+    fixHint,
+  });
+
+  await supabaseAdmin
+    .from('expenses')
+    .update({ fix_notified_at: new Date().toISOString() })
+    .eq('id', expenseId);
 }
 
 /**
@@ -625,6 +722,19 @@ export async function runAuditAndPersist(expenseId, { files = null } = {}) {
       update.approved_at = now;
     }
 
+    // Hand the expense to the employee. The fix window never runs past the
+    // imprest expense deadline — otherwise a deliberately bad receipt filed on
+    // day 6 would buy an extra week of holding company cash.
+    if (decision.sendToEmployee) {
+      const windowEnd = new Date(Date.now() + FIX_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+      const imprestDeadline = await getImprestDeadline(ctx.expense.imprestId);
+      const deadline = imprestDeadline && imprestDeadline < windowEnd ? imprestDeadline : windowEnd;
+
+      update.awaiting_fix_until = deadline.toISOString();
+      update.fix_requested_at = now;
+      update.fix_request_reason = decision.fixHint;
+    }
+
     // Guarded write: if a human decided this row while the audit was running,
     // the status filter makes the update a no-op and their decision stands.
     const { data: updated, error: updateErr } = await supabaseAdmin
@@ -658,6 +768,13 @@ export async function runAuditAndPersist(expenseId, { files = null } = {}) {
         model: audit.model,
       },
     });
+
+    // Tell the employee once, after the row is safely written.
+    if (decision.sendToEmployee) {
+      await sendFixRequest(ctx, decision.fixHint, expenseId).catch((err) =>
+        console.warn('[fix-request] send failed (non-fatal):', err.message)
+      );
+    }
 
     if (decision.autoApproved) {
       await logAudit({
@@ -709,12 +826,105 @@ export async function runAuditAndPersist(expenseId, { files = null } = {}) {
 }
 
 /**
+ * Rejects expenses the employee was asked to correct and never did.
+ *
+ * This is the one automatic rejection in the system, and it is deliberately
+ * different from the AI rejecting on judgement: it rejects on non-response.
+ * The employee was told exactly what to fix, in the app and on WhatsApp, and
+ * had until the deadline. That is a fact, not an opinion.
+ *
+ * The reason is distinct so these are auditable as a group — if the same
+ * complaint keeps appearing, the AI is misjudging and you can see it.
+ */
+export async function expireUnfixedExpenses() {
+  const nowIso = new Date().toISOString();
+
+  const { data: overdue, error } = await supabaseAdmin
+    .from('expenses')
+    .select('id, ref_id, amount, imprest_id, fix_request_reason')
+    .not('awaiting_fix_until', 'is', null)
+    .lt('awaiting_fix_until', nowIso)
+    .in('status', AI_AUDITABLE_STATUSES)
+    .limit(50);
+
+  if (error) {
+    console.warn('[fix-timeout] query failed:', error.message);
+    return { expired: 0 };
+  }
+  if (!overdue?.length) return { expired: 0 };
+
+  let expired = 0;
+  for (const exp of overdue) {
+    const reason = `Not corrected within the allowed time. Requested: ${exp.fix_request_reason || 'corrected payment proof'}`;
+
+    const { error: updErr } = await supabaseAdmin
+      .from('expenses')
+      .update({
+        status: 'rejected',
+        rejection_reason: reason,
+        approved_by: AI_AUDITOR_EMPLOYEE_ID,
+        approved_at: nowIso,
+        awaiting_fix_until: null,
+      })
+      .eq('id', exp.id)
+      .in('status', AI_AUDITABLE_STATUSES);
+
+    if (updErr) {
+      console.warn(`[fix-timeout] could not expire ${exp.ref_id}:`, updErr.message);
+      continue;
+    }
+
+    // Mirror the manual rejection path: the imprest is no longer covered by
+    // this expense, so the reminder must reopen.
+    if (exp.imprest_id) {
+      try {
+        const { data: reminder } = await supabaseAdmin
+          .from('imprest_expense_reminders')
+          .select('id, fulfilled_amount')
+          .eq('imprest_id', exp.imprest_id)
+          .maybeSingle();
+        if (reminder) {
+          await supabaseAdmin
+            .from('imprest_expense_reminders')
+            .update({
+              fulfilled_amount: Math.max(0, parseFloat(reminder.fulfilled_amount || 0) - parseFloat(exp.amount || 0)),
+              status: 'pending',
+            })
+            .eq('id', reminder.id);
+        }
+      } catch (e) {
+        console.warn('[fix-timeout] reminder reversal failed:', e.message);
+      }
+    }
+
+    await logAudit({
+      userId: AI_AUDITOR_EMPLOYEE_ID,
+      action: 'auto_reject_unfixed',
+      entityType: 'expense',
+      entityId: exp.id,
+      newValue: { status: 'rejected', reason },
+    });
+
+    expired += 1;
+    console.log(`[fix-timeout] ${exp.ref_id} rejected — never corrected`);
+  }
+
+  return { expired };
+}
+
+/**
  * Audits un-audited expenses. Backstop for API outages, restarts and the
  * existing backlog. Errors are retried on a later sweep only if ai_verdict is
  * cleared — 'error' rows are deliberately not retried forever.
  */
 export async function sweepPendingAudits({ limit = AI_AUDIT_SWEEP_BATCH } = {}) {
   if (AI_AUDIT_MODE === 'off') return { processed: 0, skipped: 'mode off' };
+
+  // Clear out anything whose correction window has closed before auditing more.
+  const timeouts = await expireUnfixedExpenses().catch((e) => {
+    console.warn('[fix-timeout] sweep failed:', e.message);
+    return { expired: 0 };
+  });
 
   const cutoff = new Date(Date.now() - AI_AUDIT_MAX_AGE_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
@@ -725,6 +935,9 @@ export async function sweepPendingAudits({ limit = AI_AUDIT_SWEEP_BATCH } = {}) 
     .from('expenses')
     .select('id, employee:employee_id!inner(status)')
     .is('ai_verdict', null)
+    // Waiting on the employee — not ours to judge until they fix it or run out
+    // of time.
+    .is('awaiting_fix_until', null)
     .in('status', AI_AUDITABLE_STATUSES)
     .eq('employee.status', 'active')
     .gte('submitted_at', cutoff)
@@ -735,7 +948,7 @@ export async function sweepPendingAudits({ limit = AI_AUDIT_SWEEP_BATCH } = {}) 
     console.warn('[ai-audit] sweep query failed:', error.message);
     return { processed: 0, error: error.message };
   }
-  if (!rows?.length) return { processed: 0 };
+  if (!rows?.length) return { processed: 0, expired: timeouts.expired };
 
   let processed = 0;
   let errors = 0;
@@ -745,6 +958,6 @@ export async function sweepPendingAudits({ limit = AI_AUDIT_SWEEP_BATCH } = {}) 
     else processed += 1;
   }
 
-  console.log(`[ai-audit] sweep complete: ${processed} audited, ${errors} errored`);
-  return { processed, errors, remainingHint: rows.length === limit };
+  console.log(`[ai-audit] sweep complete: ${processed} audited, ${errors} errored, ${timeouts.expired} expired`);
+  return { processed, errors, expired: timeouts.expired, remainingHint: rows.length === limit };
 }

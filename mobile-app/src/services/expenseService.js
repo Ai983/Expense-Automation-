@@ -46,6 +46,34 @@ export async function submitExpense({ site, amount, category, description, image
 }
 
 /**
+ * Replaces the receipt on an expense the auditor handed back for correction.
+ *
+ * This updates the SAME expense — it does not create a new one. Filing a second
+ * expense instead leaves the bad row in the finance queue, trips a false
+ * duplicate flag on the corrected one, and double-counts the imprest balance.
+ */
+export async function fixExpense(expenseId, images) {
+  const formData = new FormData();
+
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i];
+    const mimeType = img.mimeType || 'image/jpeg';
+    const ext = mimeType.split('/').pop() || 'jpg';
+    const filename = images.length > 1 ? `fix-${i + 1}.${ext}` : `fix.${ext}`;
+
+    if (Platform.OS === 'web') {
+      const blob = await (await fetch(img.uri)).blob();
+      formData.append('screenshots', new File([blob], filename, { type: mimeType }));
+    } else {
+      formData.append('screenshots', { uri: img.uri, name: filename, type: mimeType });
+    }
+  }
+
+  const { data } = await api.post(`/api/expenses/${expenseId}/fix`, formData, { timeout: 120000 });
+  return data.data;
+}
+
+/**
  * Polls for the AI auditor's employee-facing hint after a submission.
  *
  * The audit runs in the background and finishes a few seconds after submit. If

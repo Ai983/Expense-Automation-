@@ -56,6 +56,39 @@ export async function sendWhatsApp(phone, message) {
 }
 
 /**
+ * Asks an employee to correct their own expense.
+ *
+ * Sent ONCE per expense and never repeated — a second failed attempt goes to
+ * finance instead, because a third automated message teaches nothing that the
+ * first two did not. Real volume is roughly 20-35 of these a month.
+ *
+ * The expense is NOT rejected at this point: it is sitting in the employee's
+ * hands, and they fix the original rather than filing a second one.
+ */
+export async function notifyExpenseNeedsFix({ name, phone, refId, amount, fixHint, deadline }) {
+  if (!phone) {
+    console.warn(`[WhatsApp] No phone for ${name || 'employee'} — cannot send fix request`);
+    return;
+  }
+
+  const by = deadline
+    ? new Date(deadline).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+    : null;
+
+  const msg =
+    `📸 *Please Correct Your Expense*\n\n` +
+    `Hi ${name || 'there'}, we could not accept your expense yet.\n\n` +
+    `Ref: ${refId}\n` +
+    `Amount: Rs.${Number(amount).toLocaleString('en-IN')}\n\n` +
+    `*What to do:* ${fixHint}\n\n` +
+    `Open the app and update this same expense — please do NOT submit a new one.` +
+    (by ? `\nPlease do it by ${by}.` : '') +
+    `\n\nऐप में इसी एक्सपेंस को अपडेट करें, नया मत भेजें।`;
+
+  await sendWhatsApp(phone, msg);
+}
+
+/**
  * Tells an employee their expense was rejected, and what to do about it.
  *
  * Sent the moment finance confirms a rejection. Without it employees only found

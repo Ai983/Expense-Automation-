@@ -199,6 +199,18 @@ export const AI_AUDIT_SWEEP_BATCH = parseInt(process.env.AI_AUDIT_SWEEP_BATCH ||
 // Generous window: the existing backlog reaches back to April.
 export const AI_AUDIT_MAX_AGE_DAYS = parseInt(process.env.AI_AUDIT_MAX_AGE_DAYS || '180');
 
+// ── Fix-in-place ──────────────────────────────────────────────────────────────
+// When the AI finds a defect the employee can correct, the expense goes to
+// THEIR stage — out of the finance queue — and they replace the receipt on the
+// same row. One attempt only; a second failure belongs to finance.
+export const FIX_WINDOW_DAYS = parseInt(process.env.FIX_WINDOW_DAYS || '7');
+// Hard ceiling on fix attempts. Also caps re-audit spend per expense.
+export const MAX_FIX_ATTEMPTS = parseInt(process.env.MAX_FIX_ATTEMPTS || '1');
+// Circuit breakers so a bug can never turn into a message flood and a banned
+// WhatsApp number. Real volume is ~20-35 fix requests a month (about one a day).
+export const FIX_NOTIFY_MAX_PER_EMPLOYEE_DAY = parseInt(process.env.FIX_NOTIFY_MAX_PER_EMPLOYEE_DAY || '3');
+export const FIX_NOTIFY_MAX_PER_DAY = parseInt(process.env.FIX_NOTIFY_MAX_PER_DAY || '60');
+
 // Statuses the AI is allowed to touch. A human decision (approved/rejected) is
 // never overwritten; 'blocked' is audited for reasoning but never re-statused.
 export const AI_AUDITABLE_STATUSES = ['pending', 'verified', 'manual_review'];

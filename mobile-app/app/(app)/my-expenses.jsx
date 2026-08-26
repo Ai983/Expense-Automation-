@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator,
+  View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator, Alert, Platform,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../src/context/AuthContext';
-import { getMyExpenses } from '../../src/services/expenseService';
+import { getMyExpenses, fixExpense } from '../../src/services/expenseService';
 import ExpenseCard from '../../src/components/ExpenseCard';
 
 export default function MyExpensesScreen() {
@@ -11,6 +12,7 @@ export default function MyExpensesScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [total, setTotal] = useState(0);
+  const [fixingId, setFixingId] = useState(null);
   const { user } = useAuth();
 
   const fetchExpenses = useCallback(async (showRefresh = false) => {
@@ -34,6 +36,43 @@ export default function MyExpensesScreen() {
     fetchExpenses();
   }, [fetchExpenses]);
 
+  function notify(title, message) {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
+      window.alert(`${title}\n\n${message}`);
+    } else {
+      Alert.alert(title, message);
+    }
+  }
+
+  // Replaces the receipt on the SAME expense. Submitting a fresh one instead is
+  // what creates duplicate rows and blocks the corrected version.
+  const handleFix = useCallback(async (expense) => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') return notify('Permission', 'Gallery access is required');
+
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.85,
+        allowsEditing: false,
+        allowsMultipleSelection: true,
+      });
+      if (picked.canceled || !picked.assets?.length) return;
+
+      setFixingId(expense.id);
+      await fixExpense(
+        expense.id,
+        picked.assets.map((a) => ({ uri: a.uri, mimeType: a.mimeType || 'image/jpeg' }))
+      );
+      notify('Thank you', 'Your corrected receipt is being checked. You do not need to do anything else.');
+      fetchExpenses(true);
+    } catch (err) {
+      notify('Could Not Update', err.response?.data?.error || 'Please check your connection and try again.');
+    } finally {
+      setFixingId(null);
+    }
+  }, [fetchExpenses]);
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -48,7 +87,12 @@ export default function MyExpensesScreen() {
       <FlatList
         data={expenses}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <ExpenseCard expense={item} />}
+        renderItem={({ item }) => (
+          <ExpenseCard
+            expense={item}
+            onFix={fixingId === item.id ? null : handleFix}
+          />
+        )}
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl

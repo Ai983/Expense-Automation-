@@ -1,7 +1,11 @@
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import StatusBadge from './StatusBadge';
 
-export default function ExpenseCard({ expense }) {
+export default function ExpenseCard({ expense, onFix }) {
+  // The auditor handed this back to the employee to correct. It is deliberately
+  // NOT in the finance queue while this is set — it is theirs to fix.
+  const awaitingFix = expense.awaiting_fix_until
+    && new Date(expense.awaiting_fix_until) > new Date();
   const dateStr = new Date(expense.submitted_at).toLocaleDateString('en-IN', {
     day: 'numeric', month: 'short', year: 'numeric',
   });
@@ -32,11 +36,30 @@ export default function ExpenseCard({ expense }) {
         <Text style={styles.description} numberOfLines={1}>{expense.description}</Text>
       ) : null}
       <View style={styles.footer}>
-        <StatusBadge status={expense.status} />
-        {expense.duplicate_flag && (
+        {awaitingFix ? (
+          <View style={styles.fixBadge}><Text style={styles.fixBadgeText}>📸 Needs your correction</Text></View>
+        ) : (
+          <StatusBadge status={expense.status} />
+        )}
+        {expense.duplicate_flag && !awaitingFix && (
           <Text style={styles.dupWarning}>⚠ Duplicate flagged</Text>
         )}
       </View>
+
+      {awaitingFix && (
+        <View style={styles.fixBox}>
+          <Text style={styles.fixReason}>{expense.fix_request_reason}</Text>
+          <Text style={styles.fixDeadline}>
+            Please correct by {new Date(expense.awaiting_fix_until).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+          </Text>
+          {onFix && (
+            <TouchableOpacity style={styles.fixButton} onPress={() => onFix(expense)}>
+              <Text style={styles.fixButtonText}>Replace Receipt</Text>
+            </TouchableOpacity>
+          )}
+          <Text style={styles.fixHint}>Update this expense — do not submit a new one.</Text>
+        </View>
+      )}
       {isReduced && (
         <View style={styles.adjustmentBanner}>
           <Text style={styles.adjustmentTitle}>Amount adjusted by finance</Text>
@@ -95,4 +118,12 @@ const styles = StyleSheet.create({
   adjustmentDetail: { fontSize: 12, color: '#374151', marginBottom: 4 },
   adjustmentWarning: { fontSize: 12, color: '#b45309', fontWeight: '600' },
   rejectionReason: { fontSize: 12, color: '#ef4444', marginTop: 8, fontStyle: 'italic' },
+  fixBadge: { backgroundColor: '#fef3c7', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  fixBadgeText: { fontSize: 12, fontWeight: '700', color: '#92400e' },
+  fixBox: { marginTop: 10, backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a', borderRadius: 10, padding: 12 },
+  fixReason: { fontSize: 13, color: '#78350f', lineHeight: 19 },
+  fixDeadline: { fontSize: 12, color: '#b45309', marginTop: 6, fontWeight: '600' },
+  fixButton: { backgroundColor: '#e8a24a', borderRadius: 8, paddingVertical: 11, alignItems: 'center', marginTop: 10 },
+  fixButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  fixHint: { fontSize: 11, color: '#a16207', marginTop: 6, textAlign: 'center' },
 });
