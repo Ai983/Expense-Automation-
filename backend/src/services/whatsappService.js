@@ -1,5 +1,16 @@
 import axios from 'axios';
 
+// Hagerstone runs its own self-hosted WhatsApp gateway (Baileys on Railway),
+// which is deliberately Maytapi-compatible: same path shape, same x-maytapi-key
+// header, same body. Only the base URL differs, so pointing at it is a one-value
+// change rather than a rewrite.
+//
+//   own gateway : https://<host>/maytapi/:productId/:phoneId/sendMessage
+//   maytapi.com : https://api.maytapi.com/api/:productId/:phoneId/sendMessage
+//
+// With the gateway, phoneId is the SESSION id (e.g. 'hagerstone-biz') and the
+// token is the gateway's GATEWAY_SECRET.
+const WHATSAPP_API_BASE_URL = (process.env.WHATSAPP_API_BASE_URL || 'https://api.maytapi.com/api').replace(/\/+$/, '');
 const MAYTAPI_PRODUCT_ID = process.env.MAYTAPI_PRODUCT_ID;
 const MAYTAPI_PHONE_ID   = process.env.MAYTAPI_PHONE_ID;
 const MAYTAPI_API_TOKEN  = process.env.MAYTAPI_API_TOKEN;
@@ -27,14 +38,20 @@ export async function sendWhatsApp(phone, message) {
   const normalised = phone.replace(/[\s\-\+]/g, '');
   const to = normalised.startsWith('91') ? normalised : `91${normalised}`;
 
-  const url = `https://api.maytapi.com/api/${MAYTAPI_PRODUCT_ID}/${MAYTAPI_PHONE_ID}/sendMessage`;
+  const url = `${WHATSAPP_API_BASE_URL}/${MAYTAPI_PRODUCT_ID}/${MAYTAPI_PHONE_ID}/sendMessage`;
 
   console.log(`[WhatsApp] Sending to ${to}...`);
   const resp = await axios.post(
     url,
     { to_number: to, type: 'text', message },
-    { headers: { 'x-maytapi-key': MAYTAPI_API_TOKEN, 'Content-Type': 'application/json' } }
+    { headers: { 'x-maytapi-key': MAYTAPI_API_TOKEN, 'Content-Type': 'application/json' }, timeout: 20000 }
   );
+
+  // A 200 with success:false is a silent failure — the message did not go out.
+  // Historically this looked like a success in the logs and messages vanished.
+  if (resp.data?.success === false) {
+    throw new Error(`WhatsApp gateway rejected the message: ${JSON.stringify(resp.data).slice(0, 200)}`);
+  }
   console.log(`[WhatsApp] Sent to ${to} — status: ${resp.status}, success: ${resp.data?.success}`);
 }
 
