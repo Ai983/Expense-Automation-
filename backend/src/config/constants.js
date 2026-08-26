@@ -183,7 +183,12 @@ export const AI_AUDITOR_EMPLOYEE_ID = '00000000-0000-4000-a000-000000000a1a';
 // Auto-approve safety rails. AI_AUTO_APPROVE_MAX_INR is uncapped by default;
 // set it to impose a rupee ceiling without a code change.
 export const AI_AUTO_APPROVE_MAX_INR = parseFloat(process.env.AI_AUTO_APPROVE_MAX_INR || 'Infinity');
-export const AI_AUTO_APPROVE_MIN_CONFIDENCE = parseFloat(process.env.AI_AUTO_APPROVE_MIN_CONFIDENCE || '85');
+// 85 was an arbitrary starting guess and it blocked sound approvals: in testing
+// it held back two audits at 80% whose reasoning was clean (a matched ₹144 UPI
+// receipt and a matched ₹4,500 food payment). The AI's confidence on this task
+// clusters between 62 and 86, so 85 sat above almost everything it produces.
+// Revisit against backtest evidence rather than by feel.
+export const AI_AUTO_APPROVE_MIN_CONFIDENCE = parseFloat(process.env.AI_AUTO_APPROVE_MIN_CONFIDENCE || '80');
 
 // Reconciliation tolerance when an expense settles an imprest (₹).
 export const AI_RECONCILE_TOLERANCE_INR = parseFloat(process.env.AI_RECONCILE_TOLERANCE_INR || '50');
