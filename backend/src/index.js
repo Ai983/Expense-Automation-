@@ -26,7 +26,7 @@ import {
   broadcastNewImprest,
   broadcastAiAudit,
 } from './services/wsHub.js';
-import { AI_AUDIT_MODE, AI_AUDIT_MODEL, AI_AUDIT_SWEEP_INTERVAL_MS } from './config/constants.js';
+import { AI_AUDIT_MODE, AI_AUDIT_SWEEP_INTERVAL_MS, LLM_PROVIDER, modelFor } from './config/constants.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -120,7 +120,8 @@ server.listen(PORT, () => {
   console.log(`   Health: http://localhost:${PORT}/health`);
   console.log(`   WebSocket: ws://localhost:${PORT}/ws`);
   console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`   AI expense audit: ${AI_AUDIT_MODE}${AI_AUDIT_MODE !== 'off' ? ` (${AI_AUDIT_MODEL})` : ''}\n`);
+  console.log(`   LLM provider: ${LLM_PROVIDER} (OCR: ${modelFor('ocr')})`);
+  console.log(`   AI expense audit: ${AI_AUDIT_MODE}${AI_AUDIT_MODE !== 'off' ? ` (${modelFor('audit')})` : ''}\n`);
 
   // Background sweeper — audits anything the inline pass missed (API outage,
   // restart mid-submission) and works through the existing backlog. This is a

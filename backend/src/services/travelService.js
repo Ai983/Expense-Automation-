@@ -1,5 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { completeJSON } from './llmClient.js';
 
 const MAPS_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
@@ -33,7 +33,6 @@ async function searchWebForFare(query) {
 }
 
 export async function estimatePublicTransportCost({ from, to, mode, travelDate, peopleCount = 1 }) {
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const dateStr = travelDate || new Date().toISOString().split('T')[0];
   const peopleStr = peopleCount > 1 ? `\nNumber of people: ${peopleCount} (provide total for all)` : '';
 
@@ -75,15 +74,12 @@ Return ONLY this JSON:
 }`;
 
   try {
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 300,
-      messages: [{ role: 'user', content: prompt }],
+    const { data: parsed } = await completeJSON({
+      text: prompt,
+      maxTokens: 300,
+      purpose: 'ocr',
     });
-
-    const raw = response.content[0]?.text?.trim() || '{}';
-    const jsonStr = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-    const parsed = JSON.parse(jsonStr);
+    if (!parsed) throw new Error('no usable estimate returned');
 
     return {
       estimatedAmount: parsed.estimated_amount,
@@ -93,7 +89,7 @@ Return ONLY this JSON:
       reasoning: parsed.reasoning,
     };
   } catch (e) {
-    console.warn('Claude transport estimate failed:', e.message);
+    console.warn('Transport estimate failed:', e.message);
     return {
       estimatedAmount: 500 * peopleCount,
       perPersonAmount: 500,
@@ -110,9 +106,8 @@ async function getDistanceKmWithFallback(from, to) {
   const mapsResult = await getDistanceKm(from, to);
   if (mapsResult) return mapsResult;
 
-  // Fallback: ask Claude Haiku to estimate the distance
+  // Fallback: ask the model to estimate the distance
   try {
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const prompt = `Estimate the road distance in kilometres between these two locations in India:
 From: ${from}
 To: ${to}
@@ -120,17 +115,10 @@ To: ${to}
 Return ONLY a JSON object with no other text:
 {"distance_km": <integer>}`;
 
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 64,
-      messages: [{ role: 'user', content: prompt }],
-    });
-    const raw = response.content[0]?.text?.trim() || '{}';
-    const jsonStr = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-    const parsed = JSON.parse(jsonStr);
-    return parsed.distance_km ? Math.round(parsed.distance_km) : null;
+    const { data: parsed } = await completeJSON({ text: prompt, maxTokens: 64, purpose: 'ocr' });
+    return parsed?.distance_km ? Math.round(parsed.distance_km) : null;
   } catch (e) {
-    console.warn('Claude distance fallback failed:', e.message);
+    console.warn('Distance fallback failed:', e.message);
     return null;
   }
 }

@@ -1,15 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
-
-let anthropicClient;
-
-function getClient() {
-  if (!anthropicClient) {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set in environment variables');
-    anthropicClient = new Anthropic({ apiKey });
-  }
-  return anthropicClient;
-}
+import { completeJSON } from './llmClient.js';
 
 const EXTRACTION_PROMPT = `You are an OCR system for Indian payment receipts and payment app screenshots.
 Analyse this payment screenshot carefully and extract the following fields.
@@ -36,10 +25,6 @@ Rules:
  * Returns: { amount, confidence }
  */
 export async function extractRideFare(imageBuffer, mimeType = 'image/jpeg', { expectedFrom, expectedTo, expectedRideType } = {}) {
-  const client = getClient();
-  const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-  const mediaType = supportedTypes.includes(mimeType) ? mimeType : 'image/jpeg';
-
   const verifySection = (expectedFrom || expectedTo || expectedRideType)
     ? `\nAlso verify these details against the screenshot:
 - Expected pickup: "${expectedFrom || 'not provided'}"
@@ -73,37 +58,29 @@ Rules:
 - Return null if you cannot find a clear fare amount
 - Return ONLY the JSON, no other text${rideTypeHint}${verifySection}`;
 
-  const response = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 256,
-    messages: [{
-      role: 'user',
-      content: [
-        { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBuffer.toString('base64') } },
-        { type: 'text', text: prompt },
-      ],
-    }],
+  const { data: parsed } = await completeJSON({
+    text: prompt,
+    files: [{ buffer: imageBuffer, mimetype: mimeType }],
+    maxTokens: 256,
+    purpose: 'ocr',
   });
 
-  const raw = response.content[0]?.text?.trim() || '{}';
-  const jsonStr = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-
-  try {
-    const parsed = JSON.parse(jsonStr);
-    const amount = typeof parsed.amount === 'number' ? parsed.amount
-      : parsed.amount != null ? parseFloat(String(parsed.amount).replace(/,/g, '')) || null
-      : null;
-    return {
-      amount,
-      confidence: parsed.confidence || 'low',
-      locationMatch: parsed.locationMatch ?? null,
-      rideTypeMatch: parsed.rideTypeMatch ?? null,
-      screenshotPickup: parsed.screenshotPickup || null,
-      screenshotDrop: parsed.screenshotDrop || null,
-    };
-  } catch {
+  if (!parsed) {
     return { amount: null, confidence: 'low', locationMatch: null, rideTypeMatch: null };
   }
+
+  const amount = typeof parsed.amount === 'number' ? parsed.amount
+    : parsed.amount != null ? parseFloat(String(parsed.amount).replace(/,/g, '')) || null
+    : null;
+
+  return {
+    amount,
+    confidence: parsed.confidence || 'low',
+    locationMatch: parsed.locationMatch ?? null,
+    rideTypeMatch: parsed.rideTypeMatch ?? null,
+    screenshotPickup: parsed.screenshotPickup || null,
+    screenshotDrop: parsed.screenshotDrop || null,
+  };
 }
 
 /**
@@ -112,61 +89,19 @@ Rules:
  * Returns: { rawText, transactionId, amount, date, paymentStatus, ocrConfidence }
  */
 export async function extractReceiptData(imageBuffer, mimeType = 'image/jpeg') {
-  const client = getClient();
-
-  // Route PDFs to document block, images to image block
-  let contentBlock;
-  if (mimeType === 'application/pdf') {
-    contentBlock = {
-      type: 'document',
-      source: {
-        type: 'base64',
-        media_type: 'application/pdf',
-        data: imageBuffer.toString('base64'),
-      },
-    };
-  } else {
-    const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    const mediaType = supportedTypes.includes(mimeType) ? mimeType : 'image/jpeg';
-    contentBlock = {
-      type: 'image',
-      source: {
-        type: 'base64',
-        media_type: mediaType,
-        data: imageBuffer.toString('base64'),
-      },
-    };
-  }
-
-  const response = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 1024,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          contentBlock,
-          {
-            type: 'text',
-            text: EXTRACTION_PROMPT,
-          },
-        ],
-      },
-    ],
+  // PDFs and images are both handled by the provider layer, which routes each
+  // to the right attachment type for whichever vendor is configured.
+  const { data } = await completeJSON({
+    text: EXTRACTION_PROMPT,
+    files: [{ buffer: imageBuffer, mimetype: mimeType }],
+    maxTokens: 1024,
+    purpose: 'ocr',
   });
 
-  const raw = response.content[0]?.text?.trim() || '{}';
-
-  // Strip any markdown code fences Claude might add despite the prompt
-  const jsonStr = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-
-  let parsed;
-  try {
-    parsed = JSON.parse(jsonStr);
-  } catch {
-    console.warn('Claude Vision returned non-JSON:', raw);
-    parsed = {};
-  }
+  // An unreadable response is not fatal: every field comes back null, OCR
+  // confidence is 0, and the expense falls to manual review rather than failing
+  // the employee's submission.
+  const parsed = data || {};
 
   const amount = typeof parsed.amount === 'number' ? parsed.amount
     : parsed.amount != null ? parseFloat(String(parsed.amount).replace(/,/g, '')) || null

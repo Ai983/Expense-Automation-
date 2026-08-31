@@ -163,6 +163,27 @@ export const RECEIPT_FUTURE_GRACE_DAYS = parseInt(process.env.RECEIPT_FUTURE_GRA
 // Legacy rows with no linked imprest: how old a receipt may be vs submission.
 export const RECEIPT_ORPHAN_MAX_AGE_DAYS = parseInt(process.env.RECEIPT_ORPHAN_MAX_AGE_DAYS || '45');
 
+// ── LLM provider ──────────────────────────────────────────────────────────────
+// Every model call goes through services/llmClient.js so the system is not tied
+// to one vendor. When billing failed on one provider, receipt OCR, travel
+// estimates and the expense auditor all stopped together — switching is now a
+// single environment variable.
+export const LLM_PROVIDER = (process.env.LLM_PROVIDER || 'anthropic').toLowerCase();
+
+// Cheap, fast, vision-capable — receipt OCR, ride fares, travel estimates.
+export const OPENAI_OCR_MODEL = process.env.OPENAI_OCR_MODEL || 'gpt-4o-mini';
+// The expense auditor: reads receipts and decides whether money is released.
+export const OPENAI_AUDIT_MODEL = process.env.OPENAI_AUDIT_MODEL || 'gpt-4o';
+export const ANTHROPIC_OCR_MODEL = process.env.ANTHROPIC_OCR_MODEL || 'claude-haiku-4-5-20251001';
+
+/** The model to use for a given job on a given provider. */
+export function modelFor(purpose, provider = LLM_PROVIDER) {
+  if (provider === 'openai') {
+    return purpose === 'audit' ? OPENAI_AUDIT_MODEL : OPENAI_OCR_MODEL;
+  }
+  return purpose === 'audit' ? AI_AUDIT_MODEL : ANTHROPIC_OCR_MODEL;
+}
+
 // ── AI Expense Auditor ────────────────────────────────────────────────────────
 // Replaces the manual expense checker. See database/039_ai_audit.sql.
 //

@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { completeJSON } from './llmClient.js';
 import { supabaseAdmin } from '../config/supabase.js';
 import { downloadScreenshot } from './storageService.js';
 import { logAudit } from './auditService.js';
@@ -23,18 +23,7 @@ import {
 } from '../config/constants.js';
 import { notifyExpenseNeedsFix } from './whatsappService.js';
 
-let anthropicClient;
-
-function getClient() {
-  if (!anthropicClient) {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set in environment variables');
-    anthropicClient = new Anthropic({ apiKey });
-  }
-  return anthropicClient;
-}
-
-// Anthropic rejects oversized inline images; skip anything near the limit
+// Providers reject oversized inline images; skip anything near the limit
 // rather than failing the whole audit.
 const MAX_INLINE_FILE_BYTES = 4.5 * 1024 * 1024;
 const MAX_FILES_PER_AUDIT = 5;
@@ -254,8 +243,12 @@ function buildContextBlock(ctx) {
   return sections.join('\n\n');
 }
 
-function buildFileBlocks(files) {
-  const blocks = [];
+/**
+ * Selects the attachments to send: capped in count and size, and left in a
+ * provider-neutral shape for llmClient to encode.
+ */
+function buildAuditFiles(files) {
+  const usable = [];
   let skipped = 0;
 
   for (const file of (files || []).slice(0, MAX_FILES_PER_AUDIT)) {
@@ -264,99 +257,42 @@ function buildFileBlocks(files) {
       skipped += 1;
       continue;
     }
-    const mime = file.mimetype || 'image/jpeg';
-    if (mime === 'application/pdf') {
-      blocks.push({
-        type: 'document',
-        source: { type: 'base64', media_type: 'application/pdf', data: buffer.toString('base64') },
-      });
-    } else {
-      blocks.push({
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: SUPPORTED_IMAGE_TYPES.includes(mime) ? mime : 'image/jpeg',
-          data: buffer.toString('base64'),
-        },
-      });
-    }
+    usable.push({ buffer, mimetype: file.mimetype || 'image/jpeg' });
   }
 
-  return { blocks, skipped: skipped + Math.max(0, (files?.length || 0) - MAX_FILES_PER_AUDIT) };
+  return { files: usable, skipped: skipped + Math.max(0, (files?.length || 0) - MAX_FILES_PER_AUDIT) };
 }
 
-// ── The Claude call ───────────────────────────────────────────────────────────
-
-function extractAuditResult(response) {
-  const toolUse = response.content?.find((b) => b.type === 'tool_use' && b.name === 'record_audit');
-  if (toolUse?.input) return toolUse.input;
-
-  // Fallback: some responses may put JSON in text instead of a tool call.
-  const text = response.content?.filter((b) => b.type === 'text').map((b) => b.text).join('\n') || '';
-  const match = text.match(/\{[\s\S]*\}/);
-  if (match) {
-    try {
-      return JSON.parse(match[0]);
-    } catch {
-      /* fall through */
-    }
-  }
-  return null;
-}
+// ── The model call ────────────────────────────────────────────────────────────
 
 /**
- * Sends the expense, its receipts and its imprest context to Claude and returns
- * the structured audit. Throws on API failure or unparseable output — callers
- * degrade to human review.
+ * Sends the expense, its receipts and its imprest context to the configured
+ * model and returns the structured audit. Throws on API failure or unusable
+ * output — callers degrade to human review.
  */
 export async function auditExpense(ctx) {
-  const client = getClient();
-  const { blocks, skipped } = buildFileBlocks(ctx.files);
+  const { files, skipped } = buildAuditFiles(ctx.files);
 
-  if (blocks.length === 0) {
+  if (files.length === 0) {
     throw new Error('No readable attachments available for AI audit');
   }
 
-  const contextBlock = buildContextBlock({ ...ctx, fileBlockCount: blocks.length, skippedFiles: skipped });
+  const contextBlock = buildContextBlock({ ...ctx, fileBlockCount: files.length, skippedFiles: skipped });
 
-  const request = {
-    model: AI_AUDIT_MODEL,
-    max_tokens: AI_AUDIT_MAX_TOKENS,
+  const { data: parsed, refusal, usage, model } = await completeJSON({
     system: AUDIT_SYSTEM_PROMPT,
-    output_config: { effort: AI_AUDIT_EFFORT },
-    tools: [
-      {
-        name: 'record_audit',
-        description: 'Record the audit decision for this expense submission.',
-        strict: true,
-        input_schema: AUDIT_SCHEMA,
-      },
-    ],
-    tool_choice: { type: 'tool', name: 'record_audit' },
-    messages: [{ role: 'user', content: [...blocks, { type: 'text', text: contextBlock }] }],
-  };
-
-  let response;
-  try {
-    response = await client.messages.create(request);
-  } catch (err) {
-    // If this deployment's model rejects a forced tool choice, retry once
-    // without it — the single tool plus the system instruction is enough.
-    if (err?.status === 400) {
-      const retry = { ...request };
-      delete retry.tool_choice;
-      response = await client.messages.create(retry);
-    } else {
-      throw err;
-    }
-  }
+    text: contextBlock,
+    files,
+    schema: AUDIT_SCHEMA,
+    schemaName: 'record_audit',
+    maxTokens: AI_AUDIT_MAX_TOKENS,
+    purpose: 'audit',
+  });
 
   // A safety refusal is not an audit — send it to a human.
-  if (response.stop_reason === 'refusal') {
-    throw new Error('Model declined to audit this submission (safety refusal)');
+  if (refusal) {
+    throw new Error(`Model declined to audit this submission: ${refusal}`);
   }
-
-  const parsed = extractAuditResult(response);
   if (!parsed?.verdict) {
     throw new Error('AI audit returned no usable verdict');
   }
@@ -375,8 +311,8 @@ export async function auditExpense(ctx) {
       parsed.suggested_adjusted_amount == null ? null : Number(parsed.suggested_adjusted_amount),
     reconciliation_note: parsed.reconciliation_note ?? null,
     employee_fix_hint: parsed.employee_fix_hint ?? null,
-    model: AI_AUDIT_MODEL,
-    usage: response.usage ?? null,
+    model,
+    usage: usage ?? null,
   };
 }
 
