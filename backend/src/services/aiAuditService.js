@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { downloadScreenshot } from './storageService.js';
 import { logAudit } from './auditService.js';
 import { resolveMimeType } from '../utils/fileType.js';
+import { imprestSpendLimit, IMPREST_SPEND_LIMIT_COLUMNS } from '../utils/imprestSpendLimit.js';
 import { broadcastAiAudit } from './wsHub.js';
 import {
   AI_AUDIT_MODE,
@@ -177,7 +178,14 @@ function buildContextBlock(ctx) {
         `Imprest: ${imprest.refId}`,
         `Category: ${imprest.category} | Site: ${imprest.site}`,
         asData('Stated purpose', imprest.purpose),
-        `Requested: ${rupee(imprest.amountRequested)} | Approved: ${rupee(imprest.approvedAmount)} | Actually paid: ${rupee(imprest.paidAmount)}`,
+        `Requested: ${rupee(imprest.amountRequested)} | Approved on paper: ${rupee(imprest.approvedAmount)}`,
+        `CASH ACTUALLY IN THEIR HANDS: ${rupee(balance.paidAmount)} — this is the ceiling they may account for, not the approved figure.`,
+        imprest.oldBalanceDeducted > 0
+          ? `(of which ${rupee(imprest.oldBalanceDeducted)} was unspent cash carried over from an earlier advance, so only ${rupee(imprest.paidAmount)} was newly disbursed)`
+          : null,
+        imprest.founderAdjustedAmount != null
+          ? `NOTE: the founder reduced this payout to ${rupee(imprest.founderAdjustedAmount)}. Claims above that are not permitted.`
+          : null,
         `Paid on: ${imprest.paidAt || 'unknown'}`,
         imprest.peopleCount ? `Headcount: ${imprest.peopleCount} | Per-person rate: ${rupee(imprest.perPersonRate)}` : null,
         imprest.travelFrom || imprest.travelTo ? `Travel: ${imprest.travelFrom || '?'} → ${imprest.travelTo || '?'}` : null,
@@ -450,13 +458,15 @@ async function loadContext(expenseId, providedFiles) {
   if (expense.imprest_id) {
     const { data: imp } = await supabaseAdmin
       .from('imprest_requests')
-      .select('id, ref_id, site, category, purpose, amount_requested, approved_amount, paid_amount, paid_at, people_count, per_person_rate, travel_from, travel_to, date_from, date_to, s1_note, s2_note, s3_note, director_note')
+      .select(`id, ref_id, site, category, purpose, paid_at, people_count, per_person_rate, travel_from, travel_to, date_from, date_to, s1_note, s2_note, s3_note, director_note, ${IMPREST_SPEND_LIMIT_COLUMNS}`)
       .eq('id', expense.imprest_id)
       .single();
 
     if (imp) {
-      approvedAmount = parseFloat(imp.approved_amount ?? imp.amount_requested ?? 0);
-      paidAmount = parseFloat(imp.paid_amount ?? approvedAmount ?? 0);
+      // Both the balance and the settlement check use the cash actually
+      // released, so the auditor cannot clear a claim above it.
+      approvedAmount = imprestSpendLimit(imp);
+      paidAmount = approvedAmount;
       imprest = {
         refId: imp.ref_id,
         site: imp.site,
@@ -465,6 +475,8 @@ async function loadContext(expenseId, providedFiles) {
         amountRequested: imp.amount_requested,
         approvedAmount: imp.approved_amount,
         paidAmount: imp.paid_amount,
+        oldBalanceDeducted: parseFloat(imp.old_balance_deducted ?? 0) || 0,
+        founderAdjustedAmount: imp.founder_adjusted_amount,
         paidAt: imp.paid_at,
         peopleCount: imp.people_count,
         perPersonRate: imp.per_person_rate,

@@ -22,6 +22,7 @@ import {
 } from '../config/constants.js';
 import { runAuditAndPersist, sweepPendingAudits } from '../services/aiAuditService.js';
 import { notifyExpenseRejected } from '../services/whatsappService.js';
+import { imprestSpendLimit, IMPREST_SPEND_LIMIT_COLUMNS } from '../utils/imprestSpendLimit.js';
 import { isValidSite } from '../config/sites.js';
 import { broadcastNewExpense } from '../index.js';
 
@@ -75,7 +76,7 @@ router.post(
 
       const { data: linkedImprest, error: imprestFetchErr } = await supabaseAdmin
         .from('imprest_requests')
-        .select('id, ref_id, employee_id, amount_requested, approved_amount, current_stage, paid_at')
+        .select(`id, ref_id, employee_id, current_stage, paid_at, ${IMPREST_SPEND_LIMIT_COLUMNS}`)
         .eq('id', imprestId)
         .single();
 
@@ -97,7 +98,9 @@ router.post(
         .not('status', 'in', '(rejected,blocked)');
 
       const alreadySpent = (priorExpenses || []).reduce((sum, e) => sum + parseFloat(e.amount), 0);
-      const approvedAmt = parseFloat(linkedImprest.approved_amount || linkedImprest.amount_requested);
+      // The cash actually handed over — not the approved figure. A founder cut
+      // means they may only account for what was released.
+      const approvedAmt = imprestSpendLimit(linkedImprest);
       const remainingBalance = Math.max(0, approvedAmt - alreadySpent);
 
       // Track overspend but allow the submission — finance reconciles the balance

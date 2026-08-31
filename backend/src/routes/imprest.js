@@ -13,6 +13,7 @@ import {
 import { extractRideFare } from '../services/visionService.js';
 import { generateImprestRefId } from '../utils/refIdGenerator.js';
 import { resolveImprestRouting } from '../utils/imprestRouting.js';
+import { imprestSpendLimit, IMPREST_SPEND_LIMIT_COLUMNS } from '../utils/imprestSpendLimit.js';
 import { ok, fail } from '../utils/responseHelper.js';
 import { FINANCE_ROLES, FINANCE_HEAD_ROLES, S1_ROLES, S2_ROLES, FOUNDER_ROLES, DIRECTOR_APPROVAL_THRESHOLD, WEEKLY_EMERGENCY_THRESHOLD } from '../config/constants.js';
 import { broadcastNewImprest } from '../index.js';
@@ -496,7 +497,7 @@ router.get('/my-reminders/:employeeId', authMiddleware, async (req, res, next) =
       .from('imprest_expense_reminders')
       .select(`
         *,
-        imprest:imprest_id (id, ref_id, amount_requested, approved_amount, site, category, approved_at)
+        imprest:imprest_id (id, ref_id, site, category, approved_at, ${IMPREST_SPEND_LIMIT_COLUMNS})
       `)
       .eq('employee_id', employeeId)
       .in('status', ['pending', 'expired'])
@@ -513,7 +514,7 @@ router.get('/my-reminders/:employeeId', authMiddleware, async (req, res, next) =
 
     const { data: orphanedPaid } = await supabaseAdmin
       .from('imprest_requests')
-      .select('id, ref_id, amount_requested, approved_amount, net_approved_amount, site, category, paid_at')
+      .select(`id, ref_id, net_approved_amount, site, category, paid_at, ${IMPREST_SPEND_LIMIT_COLUMNS}`)
       .eq('employee_id', employeeId)
       .eq('paid', true)
       .eq('current_stage', 'paid')
@@ -564,7 +565,7 @@ router.get('/my-reminders/:employeeId', authMiddleware, async (req, res, next) =
     const allReminders = [...(data || []), ...healedReminders];
     for (const r of allReminders) {
       if (!r.imprest_id || r.id?.startsWith('virtual-')) continue;
-      const approvedAmt = parseFloat(r.imprest?.approved_amount || r.imprest?.amount_requested || 0);
+      const approvedAmt = imprestSpendLimit(r.imprest);
       const submitted = submittedMap[r.imprest_id] || 0;
       const fullySettled = approvedAmt > 0 && submitted >= approvedAmt && financeApprovedSet.has(r.imprest_id);
       if (fullySettled) {
@@ -606,11 +607,13 @@ router.post('/reminders/:reminderId/fulfill', authMiddleware, async (req, res, n
     // Get approved amount from imprest to check if fully fulfilled
     const { data: imprest } = await supabaseAdmin
       .from('imprest_requests')
-      .select('approved_amount, amount_requested')
+      .select(IMPREST_SPEND_LIMIT_COLUMNS)
       .eq('id', reminder.imprest_id)
       .single();
 
-    const approvedAmount = parseFloat(imprest?.approved_amount || imprest?.amount_requested || 0);
+    // Settlement is measured against the cash actually handed over, so a
+    // founder-reduced advance is considered settled at the reduced figure.
+    const approvedAmount = imprestSpendLimit(imprest);
 
     // Recompute from the expenses table rather than trusting the client's
     // asserted amount. The caller used to be able to send any number here, and
