@@ -1,8 +1,11 @@
 import { completeJSON } from './llmClient.js';
 
-const EXTRACTION_PROMPT = `You are an OCR system for Indian payment receipts and payment app screenshots.
+// Built per call: it embeds today's date, which must not freeze at the moment
+// the server started.
+const extractionPrompt = () => `You are an OCR system for Indian payment receipts and payment app screenshots.
 Analyse this payment screenshot carefully and extract the following fields.
 Return ONLY a valid JSON object with no extra text, markdown, or explanation.
+Today's date is ${new Date().toISOString().slice(0, 10)} — use it only to resolve a year the receipt does not print.
 
 {
   "amount": <number or null — the payment amount in rupees as a plain number, e.g. 5000, without commas or currency symbol>,
@@ -16,6 +19,7 @@ Rules:
 - amount: Look for ₹, Rs, INR symbols or words like "Amount", "Total", "Paid", "You paid", "Debited". Return the numeric value only.
 - transactionId: Look for "UTR", "UPI Ref", "Reference No", "Txn ID", "Transaction ID", "Order ID", "Payment ID". Include the alphanumeric code.
 - date: Convert any date format you find to DD/MM/YYYY. Look for transaction date, payment date.
+- IMPORTANT — when the receipt shows a day and month but NO year (very common on ride and UPI apps, e.g. "12 Aug", "5 September"), do NOT invent or guess a year. Assume the most recent year in which that date has already occurred: use the current year if that date has passed, otherwise the previous year. Never output a year more than 12 months in the past for a date with no printed year — a fabricated old year makes a normal receipt look like a two-year-old one.
 - paymentStatus: Use all context — success badges, status text, color descriptions are not available so focus on text like "Payment Successful", "Money Sent", "Paid", "Failed", "Reversed".
 - If a field is genuinely not visible/readable, return null for that field.
 - Return ONLY the JSON. No other text.`;
@@ -92,7 +96,7 @@ export async function extractReceiptData(imageBuffer, mimeType = 'image/jpeg') {
   // PDFs and images are both handled by the provider layer, which routes each
   // to the right attachment type for whichever vendor is configured.
   const { data } = await completeJSON({
-    text: EXTRACTION_PROMPT,
+    text: extractionPrompt(),
     files: [{ buffer: imageBuffer, mimetype: mimeType }],
     maxTokens: 1024,
     purpose: 'ocr',
