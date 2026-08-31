@@ -101,15 +101,16 @@ export async function notifyExpenseNeedsFix({ name, phone, refId, amount, fixHin
     ? new Date(deadline).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
     : null;
 
+  // Hinglish — Hindi in Roman script with everyday English words. This is how
+  // the site staff who receive these actually message.
   const msg =
-    `📸 *Please Correct Your Expense*\n\n` +
-    `Hi ${name || 'there'}, we could not accept your expense yet.\n\n` +
+    `📸 *Expense Sahi Karna Hai*\n\n` +
+    `Hi ${name || 'ji'}, aapka expense abhi accept nahi ho paya.\n\n` +
     `Ref: ${refId}\n` +
     `Amount: Rs.${Number(amount).toLocaleString('en-IN')}\n\n` +
-    `*What to do:* ${fixHint}\n\n` +
-    `Open the app and update this same expense — please do NOT submit a new one.` +
-    (by ? `\nPlease do it by ${by}.` : '') +
-    `\n\nऐप में इसी एक्सपेंस को अपडेट करें, नया मत भेजें।`;
+    `*Kya karna hai:* ${fixHint}\n\n` +
+    `App kholiye aur *isi expense* ko update kar dijiye — naya expense mat banaiye.` +
+    (by ? `\n\n⏰ ${by} tak kar dijiye, warna ye expense reject ho jayega.` : '');
 
   await sendWhatsApp(phone, msg);
 }
@@ -129,15 +130,14 @@ export async function notifyExpenseRejected({ name, phone, refId, amount, catego
   }
 
   const msg =
-    `❌ *Expense Not Accepted*\n\n` +
-    `Hi ${name || 'there'}, your expense could not be approved.\n\n` +
+    `❌ *Expense Reject Ho Gaya*\n\n` +
+    `Hi ${name || 'ji'}, aapka expense approve nahi ho paya.\n\n` +
     `Ref: ${refId}\n` +
     `Amount: Rs.${Number(amount).toLocaleString('en-IN')}\n` +
     `Category: ${category || '-'}\n\n` +
     `*Reason:* ${reason}\n\n` +
-    `Please submit it again with the correct payment screenshot from the app. ` +
-    `Your imprest stays open until the expense is accepted.\n\n` +
-    `कृपया सही पेमेंट स्क्रीनशॉट के साथ दोबारा भेजें।`;
+    `Kripya sahi payment screenshot ke saath app se dobara submit kijiye. ` +
+    `Jab tak expense accept nahi hota, aapka imprest open rahega aur naya imprest lene mein dikkat aa sakti hai.`;
 
   await sendWhatsApp(phone, msg);
 }
