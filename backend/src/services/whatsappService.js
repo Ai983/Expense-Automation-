@@ -10,16 +10,27 @@ import axios from 'axios';
 //
 // With the gateway, phoneId is the SESSION id (e.g. 'hagerstone-biz') and the
 // token is the gateway's GATEWAY_SECRET.
-const WHATSAPP_API_BASE_URL = (process.env.WHATSAPP_API_BASE_URL || 'https://api.maytapi.com/api').replace(/\/+$/, '');
+const WHATSAPP_API_BASE_URL = (
+  process.env.WHATSAPP_API_BASE_URL || 'https://wa-gateway-production-26c1.up.railway.app/maytapi'
+).replace(/\/+$/, '');
 // When set, EVERY outbound message goes here instead of the real recipient.
 // Unset it to go live.
 const WHATSAPP_TEST_NUMBER = process.env.WHATSAPP_TEST_NUMBER || '';
-const MAYTAPI_PRODUCT_ID = process.env.MAYTAPI_PRODUCT_ID;
-const MAYTAPI_PHONE_ID   = process.env.MAYTAPI_PHONE_ID;
-const MAYTAPI_API_TOKEN  = process.env.MAYTAPI_API_TOKEN;
+
+// We send through our own self-hosted gateway (Plumbline / hagerstone-wa-gateway),
+// not Maytapi. The gateway is deliberately Maytapi-COMPATIBLE — same path shape,
+// same x-maytapi-key header — which is why those names survive in the wire
+// protocol. The MAYTAPI_* env names are read only as a fallback for older
+// deployments; WHATSAPP_* is the correct set.
+//
+//   SESSION_ID     the gateway session, e.g. 'hagerstone-biz'
+//   GATEWAY_SECRET the gateway's GATEWAY_SECRET value
+const WHATSAPP_PRODUCT_ID = process.env.WHATSAPP_PRODUCT_ID || process.env.MAYTAPI_PRODUCT_ID || 'hagerstone';
+const WHATSAPP_SESSION_ID = process.env.WHATSAPP_SESSION_ID || process.env.MAYTAPI_PHONE_ID;
+const WHATSAPP_GATEWAY_SECRET = process.env.WHATSAPP_GATEWAY_SECRET || process.env.MAYTAPI_API_TOKEN;
 
 function isConfigured() {
-  return MAYTAPI_PRODUCT_ID && MAYTAPI_PHONE_ID && MAYTAPI_API_TOKEN;
+  return WHATSAPP_PRODUCT_ID && WHATSAPP_SESSION_ID && WHATSAPP_GATEWAY_SECRET;
 }
 
 /**
@@ -53,13 +64,13 @@ export async function sendWhatsApp(phone, message) {
     console.log(`[WhatsApp] TEST MODE: diverting message for ${realTo} → ${to}`);
   }
 
-  const url = `${WHATSAPP_API_BASE_URL}/${MAYTAPI_PRODUCT_ID}/${MAYTAPI_PHONE_ID}/sendMessage`;
+  const url = `${WHATSAPP_API_BASE_URL}/${WHATSAPP_PRODUCT_ID}/${WHATSAPP_SESSION_ID}/sendMessage`;
 
   console.log(`[WhatsApp] Sending to ${to}...`);
   const resp = await axios.post(
     url,
     { to_number: to, type: 'text', message },
-    { headers: { 'x-maytapi-key': MAYTAPI_API_TOKEN, 'Content-Type': 'application/json' }, timeout: 20000 }
+    { headers: { 'x-maytapi-key': WHATSAPP_GATEWAY_SECRET, 'Content-Type': 'application/json' }, timeout: 20000 }
   );
 
   // A 200 with success:false is a silent failure — the message did not go out.
