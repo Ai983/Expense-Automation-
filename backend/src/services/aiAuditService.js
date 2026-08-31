@@ -69,7 +69,7 @@ const AUDIT_SCHEMA = {
     fraud_signals: {
       type: 'array',
       items: { type: 'string' },
-      description: 'Short specific concerns. Empty array when there are none. Never invent one to seem thorough.',
+      description: 'ONLY evidence of dishonesty: an image that looks edited or tampered with, the same receipt or transaction id already claimed, or a merchant that cannot possibly relate to the stated purpose. A fraud signal BLOCKS automatic approval, so it must mean you suspect the person, not that something is untidy. NEVER put a date observation here — not "receipt predates the advance", not "date far from submission", not "old receipt". Dates belong in reasoning. Empty array is the normal case.',
     },
     reasoning: {
       type: 'string',
@@ -143,10 +143,10 @@ If your only complaint is timing, category, or tidiness, the answer is needs_hum
 3. **The attachment must prove a completed payment** — a UPI/bank/wallet screenshot showing amount, date and a success state. A bill, invoice, quote, menu or price list with no proof of payment is not enough; that is "Payment Attachment Required". Unreadable, cropped, or broken files are "Attachment Is Not Proper".
 4. **Dates.** Employees have 7 days to file and routinely submit a week of receipts at once, so a receipt older than the submission is normal. **Spending out of pocket before the advance arrived and claiming it afterwards is explicitly permitted here** — a receipt predating the payout is fine on its own and is NOT a reason to reject or to raise a fraud signal. Mention it in your reasoning if you like, then move on. The only date facts worth escalating are a receipt dated *after* submission, or one from a period so distant it cannot plausibly relate to this advance — and even then the verdict is needs_human, so a person can ask.
 5. **When the receipt proves less than the claim, do not reject — adjust.** Return needs_human with suggested_adjusted_amount set to what the receipt actually evidences. She did this 124 times (averaging about ₹1,000 reduced) rather than rejecting an otherwise honest submission.
-6. **Category and purpose must fit the imprest.** Food advances should show food; travel should match the stated route and dates. Where a per-person rate and headcount are given, check the arithmetic is plausible.
+6. **Category and purpose: judge the spend, not the label.** Site staff choose the nearest option from a fixed dropdown and frequently pick an imperfect one — a printer cartridge filed under "Site Expense", food under a conveyance advance. She let this go almost every time (3 rejections for wrong category in 2,028 decisions). **A category or purpose mismatch on its own is NOT a reason to withhold approval.** Record it as "mismatch" so finance can see it, note it in your reasoning, and still approve if the receipt proves a real business payment within the balance. Escalate only when the spend itself looks wrong — not when only the label is.
 7. **Small overspend is not fatal.** She approved 26 expenses that exceeded the remaining balance. Flag it in your reasoning; do not reject for it alone.
 8. **Legacy submissions with no linked imprest are not automatically wrong.** She approved 343 of them. Judge the receipt on its own merit.
-9. **Fraud signals worth raising:** signs of digital editing, a receipt reused from an earlier claim, a merchant that makes no sense for the stated purpose, a receipt predating the advance, or implausibly repetitive round numbers. Only raise a signal you can actually point at in the evidence.
+9. **Fraud signals mean you suspect dishonesty — nothing less.** Only three things qualify: an image that looks edited or tampered with, the same receipt or transaction id claimed before, or a merchant that cannot relate to the stated purpose. Raising one BLOCKS automatic approval and effectively accuses the employee, so do not raise one for anything merely untidy. **Dates are never a fraud signal** — not a receipt predating the advance, not one far from the submission date, not an old receipt. If a date genuinely troubles you, say so in your reasoning and pick needs_human; do not put it in the fraud signals list.
 10. **Escalate on a named defect, not on a general feeling of doubt.** She approved 88% of everything she decided. If the receipt is legible, proves a completed payment, matches the claimed amount, and fits the imprest's purpose, that is an approval — you do not need every detail to be perfect. Reserve needs_human for cases where you can state the specific problem in one sentence. Escalating everything ambiguous simply moves your job back to a person, which defeats the purpose.
 11. **Approving an expense does not release money.** The advance was already paid; your verdict reconciles it. So weigh the evidence in front of you sensibly rather than defensively.
 12. **Write employee_fix_hint whenever the employee could fix the problem themselves** — an unreadable screenshot, a bill instead of a payment confirmation, the wrong screenshot attached. Write it in **Hinglish** (simple Hindi in Roman script mixed with everyday English words), because that is how the site staff who read it actually communicate. One short sentence telling them exactly what to send instead. Leave it null when there is nothing for them to fix — everything else you write stays in English for the finance team.
@@ -776,9 +776,18 @@ export async function runAuditAndPersist(expenseId, { files = null } = {}) {
     // imprest expense deadline — otherwise a deliberately bad receipt filed on
     // day 6 would buy an extra week of holding company cash.
     if (decision.sendToEmployee) {
-      const windowEnd = new Date(Date.now() + FIX_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+      const now_ = new Date();
+      const windowEnd = new Date(now_.getTime() + FIX_WINDOW_DAYS * 24 * 60 * 60 * 1000);
       const imprestDeadline = await getImprestDeadline(ctx.expense.imprestId);
-      const deadline = imprestDeadline && imprestDeadline < windowEnd ? imprestDeadline : windowEnd;
+
+      // Cap the window at the imprest deadline ONLY while that deadline is
+      // still ahead — otherwise a deliberately bad receipt filed on day 6 buys
+      // another week. For an imprest whose deadline has already passed (all of
+      // the backlog), capping would set a window that expired before it opened:
+      // the employee gets no time at all and the timeout sweep rejects the
+      // expense on its next pass, having never given them a chance.
+      const capApplies = imprestDeadline && imprestDeadline > now_ && imprestDeadline < windowEnd;
+      const deadline = capApplies ? imprestDeadline : windowEnd;
 
       update.awaiting_fix_until = deadline.toISOString();
       update.fix_requested_at = now;
