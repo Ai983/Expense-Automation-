@@ -29,6 +29,32 @@ const WHATSAPP_PRODUCT_ID = process.env.WHATSAPP_PRODUCT_ID || process.env.MAYTA
 const WHATSAPP_SESSION_ID = process.env.WHATSAPP_SESSION_ID || process.env.MAYTAPI_PHONE_ID;
 const WHATSAPP_GATEWAY_SECRET = process.env.WHATSAPP_GATEWAY_SECRET || process.env.MAYTAPI_API_TOKEN;
 
+/**
+ * Turns a stored phone number into a deliverable Indian WhatsApp number.
+ *
+ * The employee table holds them in several shapes: "+91 9958524885",
+ * "+91 97954 07133", "+91-9000000001", and "09220908366" with a leading zero
+ * (the STD-dialling habit). The previous version stripped only spaces, dashes
+ * and plus signs, so the leading-zero form became 9109220908366 — thirteen
+ * digits, undeliverable, and silently so.
+ *
+ * Returns null when the number cannot be made sense of, so the caller skips
+ * the send rather than firing at a wrong number.
+ */
+export function normalisePhone(raw) {
+  if (!raw) return null;
+
+  let digits = String(raw).replace(/\D/g, '');
+  digits = digits.replace(/^0+/, ''); // 09220908366 → 9220908366
+
+  // Already carries the country code.
+  if (digits.length === 12 && digits.startsWith('91')) return digits;
+  // Plain 10-digit Indian mobile.
+  if (digits.length === 10) return `91${digits}`;
+
+  return null;
+}
+
 function isConfigured() {
   return WHATSAPP_PRODUCT_ID && WHATSAPP_SESSION_ID && WHATSAPP_GATEWAY_SECRET;
 }
@@ -48,18 +74,24 @@ export async function sendWhatsApp(phone, message) {
     return;
   }
 
-  // Normalise: strip spaces, dashes, +; ensure starts with 91 for India
-  const normalised = phone.replace(/[\s\-\+]/g, '');
-  let to = normalised.startsWith('91') ? normalised : `91${normalised}`;
+  let to = normalisePhone(phone);
+  if (!to) {
+    console.warn(`[WhatsApp] Unusable phone number "${phone}" — not sending`);
+    return;
+  }
 
   // Test mode: every message is diverted to one number, tagged with who it was
   // actually for. This exists so a test run can never message a real employee —
   // the messages tell people their expense was rejected, and an accidental
   // send during testing is not something an apology fixes.
   if (WHATSAPP_TEST_NUMBER) {
-    const testTo = WHATSAPP_TEST_NUMBER.replace(/[\s\-\+]/g, '');
+    const testTo = normalisePhone(WHATSAPP_TEST_NUMBER);
+    if (!testTo) {
+      console.warn(`[WhatsApp] TEST MODE set to an unusable number "${WHATSAPP_TEST_NUMBER}" — not sending`);
+      return;
+    }
     const realTo = to;
-    to = testTo.startsWith('91') ? testTo : `91${testTo}`;
+    to = testTo;
     message = `🧪 *TEST MODE* — this would have gone to ${realTo}\n\n${message}`;
     console.log(`[WhatsApp] TEST MODE: diverting message for ${realTo} → ${to}`);
   }
