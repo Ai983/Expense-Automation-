@@ -11,6 +11,9 @@ import axios from 'axios';
 // With the gateway, phoneId is the SESSION id (e.g. 'hagerstone-biz') and the
 // token is the gateway's GATEWAY_SECRET.
 const WHATSAPP_API_BASE_URL = (process.env.WHATSAPP_API_BASE_URL || 'https://api.maytapi.com/api').replace(/\/+$/, '');
+// When set, EVERY outbound message goes here instead of the real recipient.
+// Unset it to go live.
+const WHATSAPP_TEST_NUMBER = process.env.WHATSAPP_TEST_NUMBER || '';
 const MAYTAPI_PRODUCT_ID = process.env.MAYTAPI_PRODUCT_ID;
 const MAYTAPI_PHONE_ID   = process.env.MAYTAPI_PHONE_ID;
 const MAYTAPI_API_TOKEN  = process.env.MAYTAPI_API_TOKEN;
@@ -26,7 +29,7 @@ function isConfigured() {
  */
 export async function sendWhatsApp(phone, message) {
   if (!isConfigured()) {
-    console.warn('[WhatsApp] Maytapi credentials not set — skipping message');
+    console.warn('[WhatsApp] Gateway credentials not set — skipping message');
     return;
   }
   if (!phone) {
@@ -36,7 +39,19 @@ export async function sendWhatsApp(phone, message) {
 
   // Normalise: strip spaces, dashes, +; ensure starts with 91 for India
   const normalised = phone.replace(/[\s\-\+]/g, '');
-  const to = normalised.startsWith('91') ? normalised : `91${normalised}`;
+  let to = normalised.startsWith('91') ? normalised : `91${normalised}`;
+
+  // Test mode: every message is diverted to one number, tagged with who it was
+  // actually for. This exists so a test run can never message a real employee —
+  // the messages tell people their expense was rejected, and an accidental
+  // send during testing is not something an apology fixes.
+  if (WHATSAPP_TEST_NUMBER) {
+    const testTo = WHATSAPP_TEST_NUMBER.replace(/[\s\-\+]/g, '');
+    const realTo = to;
+    to = testTo.startsWith('91') ? testTo : `91${testTo}`;
+    message = `🧪 *TEST MODE* — this would have gone to ${realTo}\n\n${message}`;
+    console.log(`[WhatsApp] TEST MODE: diverting message for ${realTo} → ${to}`);
+  }
 
   const url = `${WHATSAPP_API_BASE_URL}/${MAYTAPI_PRODUCT_ID}/${MAYTAPI_PHONE_ID}/sendMessage`;
 

@@ -236,8 +236,17 @@ function buildContextBlock(ctx) {
     sections.push("## THIS EMPLOYEE'S RECENT SUBMISSIONS (last 90 days)\nNo recent history.");
   }
 
+  if (ctx.precedents?.length) {
+    sections.push(
+      `## HOW THE PREVIOUS REVIEWER DECIDED SIMILAR ${expense.category.toUpperCase()} CLAIMS\n` +
+      `Her real decisions on comparable expenses. Match this standard — note especially that she\n` +
+      `approved many with poor automated scores, and that her rejections name a specific defect.\n` +
+      ctx.precedents.map((p) => `- ${p}`).join('\n')
+    );
+  }
+
   sections.push(
-    'Audit the attached receipt image(s) against everything above, then call record_audit with your decision.'
+    'Audit the attached receipt image(s) against everything above, then return your decision.'
   );
 
   return sections.join('\n\n');
@@ -375,7 +384,11 @@ export function decideAction(audit, ctx, mode = AI_AUDIT_MODE) {
   // One attempt only. A second failure goes to finance flagged as already
   // attempted — someone needs to phone them, and a third automated message
   // would not teach what the first two did not.
+  // Only in 'auto' mode. Handing an expense to an employee and messaging them
+  // is an action, not a recommendation — 'recommend' mode must stay observation
+  // only, so it can be trialled against real data without touching anyone.
   if (
+    mode === 'auto' &&
     audit.employee_fix_hint &&
     audit.verdict !== 'approve' &&
     ctx.expense.fixAttemptCount < MAX_FIX_ATTEMPTS &&
@@ -487,6 +500,12 @@ async function loadContext(expenseId, providedFiles) {
   const reconciliationBreach = isFinalSettlement && Math.abs(settlementGap) > AI_RECONCILE_TOLERANCE_INR;
 
   // Employee history
+  const precedents = await getPrecedents({ category: expense.category, amount: thisAmount })
+    .catch((e) => {
+      console.warn('[ai-audit] precedent lookup failed (non-fatal):', e.message);
+      return [];
+    });
+
   const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
   const { data: history } = await supabaseAdmin
     .from('expenses')
@@ -543,7 +562,66 @@ async function loadContext(expenseId, providedFiles) {
       duplicateBlocked: expense.duplicate_ref === 'BLOCKED',
     },
     employeeHistory: history || [],
+    precedents,
   };
+}
+
+/**
+ * Real decisions the previous reviewer made on comparable expenses.
+ *
+ * The system prompt carries rules distilled from her 2,028 decisions, but a
+ * distilled rule loses the judgement. These are her actual calls on the same
+ * category and a similar amount — what she approved, what she rejected and the
+ * words she used — so the model can match the standard she actually applied
+ * rather than my summary of it.
+ *
+ * Rejections are deliberately over-sampled: they are 12% of her decisions but
+ * carry nearly all of the signal about where her line sat.
+ */
+async function getPrecedents({ category, amount }) {
+  const lo = Number(amount) * 0.4;
+  const hi = Number(amount) * 2.5;
+
+  const [rejected, approved] = await Promise.all([
+    supabaseAdmin
+      .from('expenses')
+      .select('amount, category, rejection_reason, screenshot_metadata')
+      .eq('status', 'rejected')
+      .eq('category', category)
+      .not('rejection_reason', 'is', null)
+      .not('approved_by', 'is', null)
+      .neq('approved_by', AI_AUDITOR_EMPLOYEE_ID)
+      .order('approved_at', { ascending: false })
+      .limit(8),
+    supabaseAdmin
+      .from('expenses')
+      .select('amount, original_amount, category, screenshot_metadata')
+      .eq('status', 'approved')
+      .eq('category', category)
+      .gte('amount', lo)
+      .lte('amount', hi)
+      .not('approved_by', 'is', null)
+      .neq('approved_by', AI_AUDITOR_EMPLOYEE_ID)
+      .order('approved_at', { ascending: false })
+      .limit(8),
+  ]);
+
+  const lines = [];
+
+  for (const r of rejected.data || []) {
+    const conf = r.screenshot_metadata?.confidence;
+    lines.push(`REJECTED ${rupee(r.amount)}${conf != null ? ` (auto-score ${conf})` : ''} — "${String(r.rejection_reason).slice(0, 90)}"`);
+  }
+
+  for (const a of approved.data || []) {
+    const conf = a.screenshot_metadata?.confidence;
+    const reduced = a.original_amount && parseFloat(a.original_amount) > parseFloat(a.amount) + 0.01
+      ? ` (reduced from ${rupee(a.original_amount)})`
+      : '';
+    lines.push(`APPROVED ${rupee(a.amount)}${reduced}${conf != null ? ` (auto-score ${conf})` : ''}`);
+  }
+
+  return lines;
 }
 
 /** The imprest's own expense deadline, which the fix window must never exceed. */
