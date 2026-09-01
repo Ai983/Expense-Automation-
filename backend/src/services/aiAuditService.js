@@ -25,7 +25,7 @@ import {
   FIX_NOTIFY_MAX_PER_DAY,
   EXPENSE_NOTIFY_ENABLED,
 } from '../config/constants.js';
-import { notifyExpenseNeedsFix } from './whatsappService.js';
+import { notifyExpenseNeedsFix, notifyExpenseRejected } from './whatsappService.js';
 
 // Providers reject oversized inline images; skip anything near the limit
 // rather than failing the whole audit.
@@ -949,7 +949,7 @@ export async function expireUnfixedExpenses() {
 
   const { data: overdue, error } = await supabaseAdmin
     .from('expenses')
-    .select('id, ref_id, amount, imprest_id, fix_request_reason')
+    .select('id, ref_id, amount, category, imprest_id, fix_request_reason, employee:employee_id (name, phone)')
     .not('awaiting_fix_until', 'is', null)
     .lt('awaiting_fix_until', nowIso)
     .in('status', AI_AUDITABLE_STATUSES)
@@ -1012,6 +1012,26 @@ export async function expireUnfixedExpenses() {
       entityId: exp.id,
       newValue: { status: 'rejected', reason },
     });
+
+    // Tell them. This is the only rejection nobody confirms by hand, which
+    // makes the message more important here, not less: without it the claim
+    // simply vanishes and the employee finds out by opening the app, if ever.
+    // Non-fatal — a gateway failure must not stop the remaining expiries.
+    try {
+      await notifyExpenseRejected({
+        name: exp.employee?.name,
+        phone: exp.employee?.phone,
+        refId: exp.ref_id,
+        amount: exp.amount,
+        category: exp.category,
+        // `reason` above is written for finance and stays English in the
+        // database; what the employee reads is Hinglish, like every other
+        // message we send them.
+        reason: `Aapse sahi screenshot maanga gaya tha, lekin ${FIX_WINDOW_DAYS} din tak koi update nahi mila.`,
+      });
+    } catch (e) {
+      console.warn(`[fix-timeout] rejection notice failed for ${exp.ref_id}:`, e.message);
+    }
 
     expired += 1;
     console.log(`[fix-timeout] ${exp.ref_id} rejected — never corrected`);
