@@ -402,6 +402,7 @@ export default function ExpenseQueue() {
           {[
             ['all', undefined, 'All'],
             ['needs_attention', undefined, '⚠ Needs my review'],
+            ['auto_approved', undefined, '🤖 Auto-approved by AI'],
             ['all', 'awaiting_fix', '📸 With employee'],
           ].map(([verdict, stage, label]) => {
             const active = filters.aiVerdict === verdict && filters.stage === stage;
@@ -414,9 +415,12 @@ export default function ExpenseQueue() {
                     ? 'bg-brand-600 text-white border-brand-600'
                     : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
                 }`}
-                title={stage === 'awaiting_fix'
-                  ? 'With the employee for correction — not in your queue'
-                  : undefined}
+                title={
+                  stage === 'awaiting_fix' ? 'With the employee for correction — not in your queue'
+                  : verdict === 'auto_approved' ? 'Approved by the AI without a human — review these to spot-check its judgement'
+                  : verdict === 'needs_attention' ? 'Your working queue: everything the AI could not settle'
+                  : undefined
+                }
               >
                 {label}
               </button>
@@ -427,14 +431,15 @@ export default function ExpenseQueue() {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-gray-500 font-medium w-24 shrink-0">AI said:</span>
           {[
-            ['approve', '✓ Approved'],
-            ['needs_human', '⚠ Needs a person'],
-            ['reject', '✗ Reject recommended'],
-            ['error', '— Could not read'],
-            ['unaudited', 'Not audited yet'],
-          ].map(([value, label]) => (
+            ['approve', '✓ Approve verdict', 'The AI judged this sound — includes ones a safety rail still held back for a person'],
+            ['needs_human', '⚠ Needs a person', 'The AI could not settle this on its own'],
+            ['reject', '✗ Reject recommended', 'The AI suggests rejecting — a person must confirm; nothing is rejected automatically'],
+            ['error', '— Could not read', 'The receipt could not be read — review by hand'],
+            ['unaudited', 'Not audited yet', 'No AI verdict yet'],
+          ].map(([value, label, title]) => (
             <button
               key={value}
+              title={title}
               onClick={() => { setFilters((f) => ({ ...f, aiVerdict: value, stage: undefined })); setPage(1); }}
               className={`px-3 py-1 rounded-full text-xs font-medium border transition ${
                 filters.aiVerdict === value && !filters.stage

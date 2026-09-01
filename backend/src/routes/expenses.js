@@ -508,6 +508,9 @@ router.get(
         // 'error' belongs here too: an expense the AI could not read still needs
         // a person, and leaving it out hid those from the queue that works them.
         if (aiVerdict === 'needs_attention') query = query.in('ai_verdict', ['reject', 'needs_human', 'error']);
+        // Approved without a human ever seeing it. Distinct from an 'approve'
+        // verdict, which includes ones a rail held back for a person to confirm.
+        else if (aiVerdict === 'auto_approved') query = query.eq('ai_auto_approved', true);
         else if (aiVerdict === 'unaudited') query = query.is('ai_verdict', null);
         else query = query.eq('ai_verdict', aiVerdict);
       }
