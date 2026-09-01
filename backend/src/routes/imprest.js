@@ -13,7 +13,7 @@ import {
 import { extractRideFare } from '../services/visionService.js';
 import { generateImprestRefId } from '../utils/refIdGenerator.js';
 import { resolveImprestRouting } from '../utils/imprestRouting.js';
-import { imprestSpendLimit, IMPREST_SPEND_LIMIT_COLUMNS } from '../utils/imprestSpendLimit.js';
+import { imprestSpendLimit, imprestSettlementTarget, IMPREST_SPEND_LIMIT_COLUMNS } from '../utils/imprestSpendLimit.js';
 import { ok, fail } from '../utils/responseHelper.js';
 import { FINANCE_ROLES, FINANCE_HEAD_ROLES, S1_ROLES, S2_ROLES, FOUNDER_ROLES, DIRECTOR_APPROVAL_THRESHOLD, WEEKLY_EMERGENCY_THRESHOLD } from '../config/constants.js';
 import { broadcastNewImprest } from '../index.js';
@@ -611,9 +611,11 @@ router.post('/reminders/:reminderId/fulfill', authMiddleware, async (req, res, n
       .eq('id', reminder.imprest_id)
       .single();
 
-    // Settlement is measured against the cash actually handed over, so a
-    // founder-reduced advance is considered settled at the reduced figure.
-    const approvedAmount = imprestSpendLimit(imprest);
+    // Settlement is measured against the cash actually handed over — NOT the
+    // claim limit, which is deliberately more generous. Using the claim limit
+    // here would re-open advances that are already settled and block people who
+    // have done nothing wrong.
+    const approvedAmount = imprestSettlementTarget(imprest);
 
     // Recompute from the expenses table rather than trusting the client's
     // asserted amount. The caller used to be able to send any number here, and
