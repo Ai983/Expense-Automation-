@@ -214,6 +214,11 @@ export const AI_AUTO_APPROVE_MIN_CONFIDENCE = parseFloat(process.env.AI_AUTO_APP
 // Reconciliation tolerance when an expense settles an imprest (₹).
 export const AI_RECONCILE_TOLERANCE_INR = parseFloat(process.env.AI_RECONCILE_TOLERANCE_INR || '50');
 
+// ...or this share of the advance, whichever is larger. A flat rupee tolerance
+// does not scale: ₹50 is generous on a ₹1,000 advance and absurdly tight on a
+// ₹50,000 one, where a 0.9% rounding gap was blocking every receipt attached.
+export const AI_RECONCILE_TOLERANCE_PCT = parseFloat(process.env.AI_RECONCILE_TOLERANCE_PCT || '0.03');
+
 // Background sweeper — retries anything the inline audit missed.
 export const AI_AUDIT_SWEEP_INTERVAL_MS = parseInt(process.env.AI_AUDIT_SWEEP_INTERVAL_MS || String(10 * 60 * 1000));
 export const AI_AUDIT_SWEEP_BATCH = parseInt(process.env.AI_AUDIT_SWEEP_BATCH || '5');

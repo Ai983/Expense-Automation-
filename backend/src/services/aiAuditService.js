@@ -14,6 +14,8 @@ import {
   AI_AUTO_APPROVE_MAX_INR,
   AI_AUTO_APPROVE_MIN_CONFIDENCE,
   AI_RECONCILE_TOLERANCE_INR,
+  AI_RECONCILE_TOLERANCE_PCT,
+  LLM_PROVIDER,
   AI_AUDIT_SWEEP_BATCH,
   AI_AUDIT_MAX_AGE_DAYS,
   AI_AUDITABLE_STATUSES,
@@ -27,7 +29,16 @@ import { notifyExpenseNeedsFix } from './whatsappService.js';
 
 // Providers reject oversized inline images; skip anything near the limit
 // rather than failing the whole audit.
-const MAX_INLINE_FILE_BYTES = 4.5 * 1024 * 1024;
+//
+// 4.5 MB was Anthropic's per-image ceiling. On OpenAI the limit is 20 MB, and
+// the old cap was quietly discarding every receipt from one employee whose
+// phone happens to shoot at ~5 MB — eight expenses came back "No readable
+// attachments" with perfectly good receipts sitting in the bucket. Base64
+// inflates by a third, so 12 MB of file stays well inside 20 MB on the wire.
+// Anthropic still caps at 5 MB per image, so the ceiling follows the provider.
+const MAX_INLINE_FILE_BYTES = parseFloat(
+  process.env.AI_AUDIT_MAX_FILE_MB || (LLM_PROVIDER === 'anthropic' ? '4.5' : '12'),
+) * 1024 * 1024;
 const MAX_FILES_PER_AUDIT = 5;
 const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
@@ -130,13 +141,20 @@ She rejected only 12% of everything she saw. Reject is reserved for these, and n
 - an attachment that cannot be read at all
 - a receipt that is clearly fabricated or altered
 
-**Everything else that troubles you is needs_human, not reject.** In particular, these are NOT grounds for rejection:
-- **A receipt dated before the advance was paid.** Company policy explicitly permits spending out of pocket and claiming it once the advance arrives. This is normal and expected. Do not reject for it, and do not treat it as a fraud signal on its own.
-- **A category or purpose that does not match the imprest.** She rejected for wrong category 3 times out of 2,028 decisions. Site staff pick the nearest category from a fixed list and often get it approximately right. If the spend is real and the receipt is sound, this is at most needs_human.
-- **A receipt that is older than you expect, or from an earlier month.** Employees batch a week or more of receipts. Flag it in your reasoning; do not reject.
-- **A missing or unclear date** when the payment proof is otherwise sound.
+## What justifies needs_human — read this just as carefully
+needs_human is NOT the safe default. It is a specific verdict for a specific situation, and choosing it wrongly is a real error, not a cautious one: it puts the expense back on a person's desk, which is the exact work this system exists to remove. Use it for one of these, and nothing else:
+- the receipt proves **materially less money** than the claim (more than ~₹10 apart) — set suggested_adjusted_amount
+- you cannot tell what the attachment shows, or part of the claim has no receipt behind it at all
+- you genuinely suspect dishonesty
 
-If your only complaint is timing, category, or tidiness, the answer is needs_human or approve — never reject.
+**The following are NOT grounds for rejection AND NOT grounds for needs_human.** If one of these is your only complaint, the verdict is **approve** — record the observation in your reasoning and in the match fields so finance can still see it, then approve:
+- **A receipt dated before the advance was paid.** Company policy explicitly permits spending out of pocket and claiming it once the advance arrives. This is normal and expected. Not a rejection, not an escalation, not a fraud signal.
+- **A category or purpose that does not match the imprest.** She rejected for wrong category 3 times out of 2,028 decisions — and she did not escalate them either, she approved them. Site staff pick the nearest label from a fixed dropdown. A real payment filed under an imperfect label is an approval. Set category_match/purpose_match to "mismatch" and approve anyway.
+- **A receipt that is older than you expect, or from an earlier month.** Employees batch a week or more of receipts.
+- **A missing or unclear date** when the payment proof is otherwise sound.
+- **The claim slightly exceeding the remaining imprest balance.** A gap of a few percent on the advance as a whole is bookkeeping noise, not a defect in this receipt. She approved 26 such expenses.
+
+If your only complaint is timing, category, tidiness, or a small balance gap, the answer is **approve** — never reject, and never needs_human.
 
 ## The rulebook (learned from her actual decisions)
 1. **Judge the receipt, not the automated score.** An automated confidence score is provided. She approved 577 expenses that scored below 70 and rejected only 10 that scored above 94 — because she looked at the image. The score is one input, never the verdict.
@@ -149,7 +167,7 @@ If your only complaint is timing, category, or tidiness, the answer is needs_hum
 
    **When the receipt genuinely proves materially less than the claim, adjust rather than reject.** Return needs_human with suggested_adjusted_amount set to what the receipt evidences. She did this 124 times, averaging about ₹1,000 reduced — a real gap, not small change.
 6. **Category and purpose: judge the spend, not the label.** Site staff choose the nearest option from a fixed dropdown and frequently pick an imperfect one — a printer cartridge filed under "Site Expense", food under a conveyance advance. She let this go almost every time (3 rejections for wrong category in 2,028 decisions). **A category or purpose mismatch on its own is NOT a reason to withhold approval.** Record it as "mismatch" so finance can see it, note it in your reasoning, and still approve if the receipt proves a real business payment within the balance. Escalate only when the spend itself looks wrong — not when only the label is.
-7. **Small overspend is not fatal.** She approved 26 expenses that exceeded the remaining balance. Flag it in your reasoning; do not reject for it alone.
+7. **Overspending the remaining balance is not fatal.** She approved 26 expenses that exceeded it. The balance is a running total across every receipt on the advance, so a small gap usually says something about the advance as a whole, not about the receipt in front of you — and a ₹93 gap on a ₹10,000 advance is noise. Note it in your reasoning; do not reject and do not escalate for it alone. Escalate only if this single receipt overshoots the advance by a large margin.
 8. **Legacy submissions with no linked imprest are not automatically wrong.** She approved 343 of them. Judge the receipt on its own merit.
 9. **Fraud signals mean you suspect dishonesty — nothing less.** Only three things qualify: an image that looks edited or tampered with, the same receipt or transaction id claimed before, or a merchant that cannot relate to the stated purpose. Raising one BLOCKS automatic approval and effectively accuses the employee, so do not raise one for anything merely untidy. **Dates are never a fraud signal** — not a receipt predating the advance, not one far from the submission date, not an old receipt. If a date genuinely troubles you, say so in your reasoning and pick needs_human; do not put it in the fraud signals list.
 10. **Escalate on a named defect, not on a general feeling of doubt.** She approved 88% of everything she decided. If the receipt is legible, proves a completed payment, matches the claimed amount, and fits the imprest's purpose, that is an approval — you do not need every detail to be perfect. Reserve needs_human for cases where you can state the specific problem in one sentence. Escalating everything ambiguous simply moves your job back to a person, which defeats the purpose.
@@ -394,7 +412,14 @@ export function decideAction(audit, ctx, mode = AI_AUDIT_MODE) {
     // approved 312 such expenses. The AI compares the transaction ids and images
     // and settles it, exactly as she did.
     if (ctx.deterministic.duplicateBlocked) blockedRails.push('confirmed duplicate transaction id');
-    if (ctx.balance.overspendAmount > 0) blockedRails.push('expense overspends the imprest');
+    // Not any overspend — a material one. The reviewer this replaces approved 26
+    // expenses that exceeded the remaining balance, because the balance is a
+    // running total over the whole advance: once an advance is a little over,
+    // EVERY remaining receipt on it trips this rail, however sound each one is.
+    // That made it the single biggest blocker of otherwise-clean approvals.
+    if (ctx.balance.overspendAmount > (ctx.balance.overspendTolerance ?? AI_RECONCILE_TOLERANCE_INR)) {
+      blockedRails.push('expense overspends the imprest');
+    }
     if (ctx.balance.reconciliationBreach) blockedRails.push('settlement totals do not reconcile');
 
     if (blockedRails.length === 0) {
@@ -533,7 +558,21 @@ async function loadContext(expenseId, providedFiles) {
   const settlementBase = paidAmount || approvedAmount;
   const isFinalSettlement = Boolean(expense.imprest_id) && settlementBase > 0 && totalAfterThis >= settlementBase;
   const settlementGap = totalAfterThis - settlementBase;
-  const reconciliationBreach = isFinalSettlement && Math.abs(settlementGap) > AI_RECONCILE_TOLERANCE_INR;
+  // The gap is a property of the ADVANCE, not of this receipt — every expense
+  // sharing the imprest sees the same number. A flat ₹50 tolerance therefore
+  // punished by volume: a ₹93 overrun on a ₹10,000 advance held three separate
+  // receipts of ₹370, ₹90 and ₹60, none of which had anything wrong with it.
+  // Scale the tolerance to the advance so the rail catches real misreconciliation
+  // (₹11,759 over on ₹38,241) and ignores rounding.
+  const overspendTolerance = Math.max(
+    AI_RECONCILE_TOLERANCE_INR,
+    (paidAmount || approvedAmount) * AI_RECONCILE_TOLERANCE_PCT,
+  );
+  const reconcileTolerance = Math.max(
+    AI_RECONCILE_TOLERANCE_INR,
+    settlementBase * AI_RECONCILE_TOLERANCE_PCT,
+  );
+  const reconciliationBreach = isFinalSettlement && Math.abs(settlementGap) > reconcileTolerance;
 
   // Employee history
   const precedents = await getPrecedents({ category: expense.category, amount: thisAmount })
@@ -583,6 +622,7 @@ async function loadContext(expenseId, providedFiles) {
       isFinalSettlement,
       settlementGap,
       reconciliationBreach,
+      overspendTolerance,
     },
     deterministic: {
       confidence: meta.confidence ?? null,
