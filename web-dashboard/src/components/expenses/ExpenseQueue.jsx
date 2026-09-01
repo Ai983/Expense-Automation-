@@ -277,7 +277,10 @@ export default function ExpenseQueue() {
   const [expenses, setExpenses] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ status: 'all', site: 'all', employeeId: 'all', aiVerdict: 'all', dateFrom: '', dateTo: '', search: '' });
+  // Opens on the working queue, not on everything. What finance needs on
+  // arrival is the short list the AI could not settle — the full 2,400-row
+  // history is a lookup, not a starting point. "All" is one click away.
+  const [filters, setFilters] = useState({ status: 'all', site: 'all', employeeId: 'all', aiVerdict: 'needs_attention', dateFrom: '', dateTo: '', search: '' });
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState(new Set());
   const [detailId, setDetailId] = useState(null);
@@ -519,7 +522,16 @@ export default function ExpenseQueue() {
               {loading ? (
                 <tr><td colSpan={11} className="text-center py-12 text-gray-400">Loading expenses...</td></tr>
               ) : displayedExpenses.length === 0 ? (
-                <tr><td colSpan={11} className="text-center py-12 text-gray-400">No expenses found</td></tr>
+                <tr><td colSpan={11} className="text-center py-12 text-gray-400">
+                  {/* An empty working queue is the goal, not an error — say so,
+                      rather than implying the filters found nothing. */}
+                  {filters.aiVerdict === 'needs_attention' && !filters.stage ? (
+                    <>
+                      <div className="text-base text-gray-600 font-medium">Nothing needs your review 🎉</div>
+                      <div className="text-xs mt-1">The AI has settled everything it could. Pick another view above to see more.</div>
+                    </>
+                  ) : 'No expenses found'}
+                </td></tr>
               ) : (
                 displayedExpenses.map((exp) => {
                   const canSelect = ['pending', 'verified', 'manual_review'].includes(exp.status);

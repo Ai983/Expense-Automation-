@@ -87,7 +87,10 @@ export default function FilterBar({ filters, onChange }) {
       <div className="flex items-end">
         <button
           className="btn-secondary text-sm"
-          onClick={() => onChange({ status: 'all', site: 'all', employeeId: 'all', dateFrom: '', dateTo: '', search: '' })}
+          // Clears only the fields this bar owns. The AI-audit chips are a
+          // separate control, and dropping aiVerdict here silently threw the
+          // reviewer back to all 2,400 rows with no chip showing as active.
+          onClick={() => onChange({ ...filters, status: 'all', site: 'all', employeeId: 'all', dateFrom: '', dateTo: '', search: '' })}
         >
           Clear filters
         </button>
