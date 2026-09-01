@@ -505,9 +505,20 @@ router.get(
       // AI auditor filters. 'needs_attention' is the queue a human works:
       // everything the AI would not clear on its own.
       if (aiVerdict && aiVerdict !== 'all') {
-        // 'error' belongs here too: an expense the AI could not read still needs
-        // a person, and leaving it out hid those from the queue that works them.
-        if (aiVerdict === 'needs_attention') query = query.in('ai_verdict', ['reject', 'needs_human', 'error']);
+        // Defined by whether a person still has to act, NOT by what the AI said.
+        // Building it out of verdicts kept leaking: 'error' was missing, then
+        // approve-verdicts a rail had held back, then rows the AI leaves as
+        // 'verified' because downgrading them would corrupt the imprest balance.
+        // Every one of those needs a human but fell outside a verdict list.
+        //
+        // An expense is either resolved (approved/rejected), with the employee
+        // (awaiting fix), or it is finance's. There is no fourth place.
+        // (Rows with the employee are already excluded above.)
+        if (aiVerdict === 'needs_attention') {
+          query = query
+            .in('status', ['pending', 'verified', 'manual_review'])
+            .not('ai_auto_approved', 'is', true);
+        }
         // Approved without a human ever seeing it. Distinct from an 'approve'
         // verdict, which includes ones a rail held back for a person to confirm.
         else if (aiVerdict === 'auto_approved') query = query.eq('ai_auto_approved', true);
