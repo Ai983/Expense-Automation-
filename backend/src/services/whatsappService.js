@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { EXPENSE_NOTIFY_ENABLED } from '../config/constants.js';
 
 // Hagerstone runs its own self-hosted WhatsApp gateway (Baileys on Railway),
 // which is deliberately Maytapi-compatible: same path shape, same x-maytapi-key
@@ -128,6 +129,10 @@ export async function sendWhatsApp(phone, message, { divertible = false } = {}) 
  * hands, and they fix the original rather than filing a second one.
  */
 export async function notifyExpenseNeedsFix({ name, phone, refId, amount, fixHint, deadline }) {
+  if (!EXPENSE_NOTIFY_ENABLED) {
+    console.log(`[WhatsApp] Expense notifications disabled — not messaging ${name || 'employee'} about ${refId}`);
+    return;
+  }
   if (!phone) {
     console.warn(`[WhatsApp] No phone for ${name || 'employee'} — cannot send fix request`);
     return;
@@ -160,6 +165,10 @@ export async function notifyExpenseNeedsFix({ name, phone, refId, amount, fixHin
  * closing this gap turns a stalled expense into a fixed one within the day.
  */
 export async function notifyExpenseRejected({ name, phone, refId, amount, category, reason }) {
+  if (!EXPENSE_NOTIFY_ENABLED) {
+    console.log(`[WhatsApp] Expense notifications disabled — not messaging ${name || 'employee'} about ${refId}`);
+    return;
+  }
   if (!phone) {
     console.warn(`[WhatsApp] No phone for ${name || 'employee'} — cannot send rejection notice`);
     return;

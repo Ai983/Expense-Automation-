@@ -21,6 +21,7 @@ import {
   MAX_FIX_ATTEMPTS,
   FIX_NOTIFY_MAX_PER_EMPLOYEE_DAY,
   FIX_NOTIFY_MAX_PER_DAY,
+  EXPENSE_NOTIFY_ENABLED,
 } from '../config/constants.js';
 import { notifyExpenseNeedsFix } from './whatsappService.js';
 
@@ -417,6 +418,9 @@ export function decideAction(audit, ctx, mode = AI_AUDIT_MODE) {
   // only, so it can be trialled against real data without touching anyone.
   if (
     mode === 'auto' &&
+    // Never hand an expense to someone we cannot contact — it would wait out
+    // its window in silence and then be auto-rejected for not being corrected.
+    EXPENSE_NOTIFY_ENABLED &&
     audit.employee_fix_hint &&
     audit.verdict !== 'approve' &&
     ctx.expense.fixAttemptCount < MAX_FIX_ATTEMPTS &&

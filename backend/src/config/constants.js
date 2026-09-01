@@ -224,6 +224,16 @@ export const AI_AUDIT_MAX_AGE_DAYS = parseInt(process.env.AI_AUDIT_MAX_AGE_DAYS 
 // When the AI finds a defect the employee can correct, the expense goes to
 // THEIR stage — out of the finance queue — and they replace the receipt on the
 // same row. One attempt only; a second failure belongs to finance.
+// Master switch for employee-facing expense messages (fix requests and
+// rejection notices). Set to 'false' to audit silently.
+//
+// When off, the auditor must NOT park expenses with employees either: an
+// expense sent to someone who is never told sits there until its window
+// closes and is then auto-rejected for "not corrected" — which is exactly how
+// a legitimate 18,900 claim was rejected without its owner ever hearing about
+// it. Silent means those cases go to finance instead.
+export const EXPENSE_NOTIFY_ENABLED = (process.env.EXPENSE_NOTIFY_ENABLED || 'true').toLowerCase() !== 'false';
+
 export const FIX_WINDOW_DAYS = parseInt(process.env.FIX_WINDOW_DAYS || '7');
 // Hard ceiling on fix attempts. Also caps re-audit spend per expense.
 export const MAX_FIX_ATTEMPTS = parseInt(process.env.MAX_FIX_ATTEMPTS || '1');
