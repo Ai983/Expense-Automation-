@@ -227,7 +227,9 @@ function AiVerdictBadge({ expense }) {
     approve: ['bg-green-100 text-green-700', '✓ Approve', 'AI recommends approval'],
     needs_human: ['bg-amber-100 text-amber-800', '⚠ Needs review', 'AI could not clear this on its own'],
     reject: ['bg-red-100 text-red-700', '✗ Reject rec.', 'AI recommends rejection — a person must confirm'],
-    error: ['bg-gray-200 text-gray-600', '— Audit failed', 'The AI could not audit this; it will be retried'],
+    // Not retried automatically — the sweeper only picks up rows with no
+    // verdict at all, so telling the reviewer to wait for a retry is wrong.
+    error: ['bg-gray-200 text-gray-600', '— Could not read', 'The AI could not read the receipt — please review this one by hand'],
   };
   const entry = map[expense.ai_verdict];
   if (!entry) return <span className="text-xs text-gray-300" title="Not audited yet">pending</span>;
@@ -388,43 +390,62 @@ export default function ExpenseQueue() {
 
       <FilterBar filters={filters} onChange={(f) => { setFilters(f); setPage(1); }} />
 
-      {/* AI auditor view switcher — "Needs human review" is the working queue */}
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
-        <span className="text-xs text-gray-500 font-medium">AI audit:</span>
-        {[
-          ['all', 'All'],
-          ['needs_attention', '⚠ Needs human review'],
-          ['approve', '✓ AI approved'],
-          ['reject', '✗ Reject recommended'],
-          ['error', '— Audit failed'],
-          ['unaudited', 'Not audited yet'],
-        ].map(([value, label]) => (
-          <button
-            key={value}
-            onClick={() => { setFilters((f) => ({ ...f, aiVerdict: value, stage: undefined })); setPage(1); }}
-            className={`px-3 py-1 rounded-full text-xs font-medium border transition ${
-              filters.aiVerdict === value && !filters.stage
-                ? 'bg-brand-600 text-white border-brand-600'
-                : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+      {/* Two separate questions, kept visually separate.
+          WHERE IT IS is a real stage — an expense is in exactly one of them.
+          WHAT THE AI SAID is only a label on top of that stage: a "Reject
+          recommended" expense is still sitting in review until a person acts.
+          Mixing the two in one row made it read as seven stages when there
+          are three, which is exactly how it confused finance. */}
+      <div className="space-y-2 mb-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-gray-500 font-medium w-24 shrink-0">Where it is:</span>
+          {[
+            ['all', undefined, 'All'],
+            ['needs_attention', undefined, '⚠ Needs my review'],
+            ['all', 'awaiting_fix', '📸 With employee'],
+          ].map(([verdict, stage, label]) => {
+            const active = filters.aiVerdict === verdict && filters.stage === stage;
+            return (
+              <button
+                key={label}
+                onClick={() => { setFilters((f) => ({ ...f, aiVerdict: verdict, stage })); setPage(1); }}
+                className={`px-3 py-1 rounded-full text-xs font-medium border transition ${
+                  active
+                    ? 'bg-brand-600 text-white border-brand-600'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                }`}
+                title={stage === 'awaiting_fix'
+                  ? 'With the employee for correction — not in your queue'
+                  : undefined}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
 
-        {/* Not finance's to action — the employee is correcting it. Visible so a
-            wrong AI defect call can never quietly disappear. */}
-        <button
-          onClick={() => { setFilters((f) => ({ ...f, aiVerdict: 'all', stage: 'awaiting_fix' })); setPage(1); }}
-          className={`px-3 py-1 rounded-full text-xs font-medium border transition ${
-            filters.stage === 'awaiting_fix'
-              ? 'bg-amber-500 text-white border-amber-500'
-              : 'bg-white text-amber-700 border-amber-300 hover:bg-amber-50'
-          }`}
-          title="With the employee for correction — not in your queue"
-        >
-          📸 Awaiting employee fix
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-gray-500 font-medium w-24 shrink-0">AI said:</span>
+          {[
+            ['approve', '✓ Approved'],
+            ['needs_human', '⚠ Needs a person'],
+            ['reject', '✗ Reject recommended'],
+            ['error', '— Could not read'],
+            ['unaudited', 'Not audited yet'],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => { setFilters((f) => ({ ...f, aiVerdict: value, stage: undefined })); setPage(1); }}
+              className={`px-3 py-1 rounded-full text-xs font-medium border transition ${
+                filters.aiVerdict === value && !filters.stage
+                  ? 'bg-brand-600 text-white border-brand-600'
+                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="flex items-center justify-between mb-4">
