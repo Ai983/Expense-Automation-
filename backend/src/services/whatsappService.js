@@ -64,7 +64,7 @@ function isConfigured() {
  * @param {string} phone  - recipient phone number with country code, e.g. "919876543210"
  * @param {string} message - plain text message
  */
-export async function sendWhatsApp(phone, message) {
+export async function sendWhatsApp(phone, message, { divertible = false } = {}) {
   if (!isConfigured()) {
     console.warn('[WhatsApp] Gateway credentials not set — skipping message');
     return;
@@ -84,7 +84,11 @@ export async function sendWhatsApp(phone, message) {
   // actually for. This exists so a test run can never message a real employee —
   // the messages tell people their expense was rejected, and an accidental
   // send during testing is not something an apology fixes.
-  if (WHATSAPP_TEST_NUMBER) {
+  // Test mode applies ONLY to messages the expense auditor sends to employees.
+  // It must never touch the imprest flow: those messages tell approvers a
+  // request is waiting and tell employees their money has been paid, and
+  // diverting them silently stalls real work and real cash.
+  if (divertible && WHATSAPP_TEST_NUMBER) {
     const testTo = normalisePhone(WHATSAPP_TEST_NUMBER);
     if (!testTo) {
       console.warn(`[WhatsApp] TEST MODE set to an unusable number "${WHATSAPP_TEST_NUMBER}" — not sending`);
@@ -144,7 +148,7 @@ export async function notifyExpenseNeedsFix({ name, phone, refId, amount, fixHin
     `App kholiye aur *isi expense* ko update kar dijiye — naya expense mat banaiye.` +
     (by ? `\n\n⏰ ${by} tak kar dijiye, warna ye expense reject ho jayega.` : '');
 
-  await sendWhatsApp(phone, msg);
+  await sendWhatsApp(phone, msg, { divertible: true });
 }
 
 /**
@@ -171,7 +175,7 @@ export async function notifyExpenseRejected({ name, phone, refId, amount, catego
     `Kripya sahi payment screenshot ke saath app se dobara submit kijiye. ` +
     `Jab tak expense accept nahi hota, aapka imprest open rahega aur naya imprest lene mein dikkat aa sakti hai.`;
 
-  await sendWhatsApp(phone, msg);
+  await sendWhatsApp(phone, msg, { divertible: true });
 }
 
 /**
