@@ -60,8 +60,8 @@ export default function HeadKanbanPage() {
   const pos = useMemo(() => filter(data.pos, 'po'), [data, site, ageFilter]);
 
   const imprestColumns = [
-    { key: 's1_pending',      title: 'S1 – Avisha', color: 'bg-yellow-100', items: imprests.filter((i) => i.current_stage === 's1_pending') },
-    { key: 's2_ritu',         title: 'S2 – Ritu', color: 'bg-blue-100',   items: imprests.filter((i) => i.current_stage === 's2_pending') },
+    // Avisha's S1 stage was merged into S2 (Ritu); any straggler s1_pending row shows here too.
+    { key: 's2_ritu',         title: 'S2 – Ritu', color: 'bg-blue-100',   items: imprests.filter((i) => i.current_stage === 's2_pending' || i.current_stage === 's1_pending') },
     { key: 'director',        title: 'Director WA', color: 'bg-purple-100', items: imprests.filter((i) => i.current_stage === 'director_pending') },
     { key: 's3_pending',      title: 'Finance Pending', color: 'bg-orange-100', items: imprests.filter((i) => i.current_stage === 's3_pending') },
     { key: 'founder',         title: 'Founder WA', color: 'bg-pink-100', items: imprests.filter((i) => i.current_stage === 'founder_review_pending') },

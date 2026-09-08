@@ -7,18 +7,20 @@ import { useSites } from '../hooks/useSites';
 // Per-role behaviour on the shared Imprest Pipeline Board.
 // Each role can only act on its own column(s); the board UI is identical for all.
 const ROLE_CFG = {
-  // Ritu — full S2 powers: acts on S1 (fast-forward) and S2 columns
+  // Ritu — the single first-level reviewer. Avisha's S1 stage was merged into S2,
+  // so any straggler s1_pending item is actioned here too. ≥₹10K site requests
+  // forward to Director; everything else goes straight to Finance.
   approver_s2: {
-    actionCols: ['s1', 's2'],
+    actionCols: ['s2'],
     actorField: 's2_approved_by', actorAt: 's2_approved_at',
-    canAct: (r) => r.current_stage === 's1_pending' || r.current_stage === 's2_pending',
-    forward: (r) => r.current_stage === 's1_pending' ? `/api/imprest/${r.id}/s2-override` : `/api/imprest/${r.id}/s2-approve`,
-    reject: (r) => r.current_stage === 's1_pending' ? `/api/imprest/${r.id}/s2-reject-s1` : `/api/imprest/${r.id}/s2-reject`,
+    canAct: (r) => r.current_stage === 's2_pending' || r.current_stage === 's1_pending',
+    forward: (r) => `/api/imprest/${r.id}/s2-approve`,
+    reject: (r) => `/api/imprest/${r.id}/s2-reject`,
     forwardPayload: ({ notes, amt }) => ({ notes, approvedAmount: amt }),
     canReduce: true, noteLabel: 'S2 Approval Note',
-    fwdTitle: (r) => r.current_stage === 's1_pending' ? 'Fast-forward to Finance (Skip S1)' : 'Forward to Finance',
-    fwdBtn: (r) => r.current_stage === 's1_pending' ? 'Fast-forward →' : 'Forward',
-    defaultNote: (r) => r.current_stage === 's1_pending' ? 'Approved and forwarded by S2 (Ritu)' : 'Approved by S2 approval',
+    fwdTitle: (r) => isDirectorRoute(r.approval_route) ? 'Approve & forward to Director' : 'Approve & forward to Finance',
+    fwdBtn: (r) => isDirectorRoute(r.approval_route) ? 'Forward to Director →' : 'Forward to Finance →',
+    defaultNote: (r) => isDirectorRoute(r.approval_route) ? 'Approved by S2 (Ritu) — forwarding to Director' : 'Approved by S2 (Ritu)',
   },
   // Avisha — S1 column only
   approver_s1: {
@@ -78,7 +80,7 @@ function timeAgo(d) {
 // Determine which kanban column a request belongs in
 function columnOf(req) {
   const s = req.current_stage;
-  if (s === 's1_pending') return 's1';
+  if (s === 's1_pending') return 's2'; // Avisha's S1 stage was merged into S2 (Ritu)
   if (s === 's2_pending') {
     // Legacy: director/dhruv WhatsApp routes waited at s2_pending
     if (req.approval_route === 'avisha_director_finance' || req.approval_route === 'avisha_dhruv_finance') return 'director';
@@ -98,6 +100,11 @@ function routeLabel(route) {
   if (route === 'avisha_dhruv_finance') return 'Dhruv Sir';
   return 'S2 · Ritu';
 }
+
+// ≥₹10K site requests carry a director route and must pass Bhaskar's WhatsApp
+// gate after S2. Legacy `avisha_*` name kept for rows created before the merge.
+const DIRECTOR_ROUTES = ['s2_director_finance_founder', 'avisha_director_finance_founder'];
+function isDirectorRoute(route) { return DIRECTOR_ROUTES.includes(route); }
 
 function StageBadge({ stage, route }) {
   const pendingLabel = stage === 's2_pending' ? routeLabel(route) : null;
@@ -126,6 +133,8 @@ function RouteIndicator({ route, stage }) {
       ? [{ k: 's1', label: 'Avisha' }, { k: 'dir', label: 'Director' }, { k: 's3', label: 'Finance' }, { k: 'founder', label: 'Founder' }]
     : route === 's2_finance_founder'
       ? [{ k: 's2', label: 'Ritu' }, { k: 's3', label: 'Finance' }, { k: 'founder', label: 'Founder' }]
+    : route === 's2_director_finance_founder'
+      ? [{ k: 's2', label: 'Ritu' }, { k: 'dir', label: 'Director' }, { k: 's3', label: 'Finance' }, { k: 'founder', label: 'Founder' }]
     : route === 'avisha_finance_founder'
       ? [{ k: 's1', label: 'Avisha' }, { k: 's3', label: 'Finance' }, { k: 'founder', label: 'Founder' }]
     // Legacy routes
@@ -242,7 +251,6 @@ function HistoryItem({ entry, onClick, atField = 's2_approved_at' }) {
 }
 
 const COLUMNS = [
-  { key: 's1', title: 'S1 — Avisha', tint: 'bg-blue-50 border-blue-200', heading: 'text-blue-700', dot: '🔵' },
   { key: 's2', title: 'S2 — Ritu', tint: 'bg-purple-50 border-purple-200', heading: 'text-purple-700', dot: '🟣' },
   { key: 'director', title: 'Director', tint: 'bg-indigo-50 border-indigo-200', heading: 'text-indigo-700', dot: '🟦' },
   { key: 'finance', title: 'Finance', tint: 'bg-amber-50 border-amber-200', heading: 'text-amber-700', dot: '🟡' },
@@ -304,13 +312,13 @@ export default function S2QueuePage() {
   }, [board, filterSite, filterName]);
 
   const buckets = useMemo(() => {
-    const out = { s1: [], s2: [], director: [], finance: [], founder: [], done: [] };
+    const out = { s2: [], director: [], finance: [], founder: [], done: [] };
     for (const r of filteredBoard) {
       const col = columnOf(r);
       if (out[col]) out[col].push(r);
     }
     // Sort each active column by oldest first (urgency), done by most recent first
-    ['s1', 's2', 'director', 'finance', 'founder'].forEach(k => {
+    ['s2', 'director', 'finance', 'founder'].forEach(k => {
       out[k].sort((a, b) => new Date(a.submitted_at) - new Date(b.submitted_at));
     });
     out.done.sort((a, b) => new Date(b.updated_at || b.submitted_at) - new Date(a.updated_at || a.submitted_at));

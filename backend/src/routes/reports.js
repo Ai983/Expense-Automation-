@@ -113,10 +113,9 @@ async function buildReport(period) {
 
   // Pipeline counts
   const pendingPipeline = {
-    s1: pipelineRows.filter(r => r.current_stage === 's1_pending').length,
-    s1Amount: pipelineRows.filter(r => r.current_stage === 's1_pending').reduce((s, r) => s + parseFloat(r.amount_requested || 0), 0),
-    // S2 (Ritu) = everything currently at s2_pending (HO/Bangalore route); Director = items parked at director_pending
-    s2_ritu: pipelineRows.filter(r => r.current_stage === 's2_pending').length,
+    // Ritu's first-review queue. Avisha's old S1 stage was merged into S2, so any
+    // straggler s1_pending row is counted here too. Director = items at director_pending.
+    s2_ritu: pipelineRows.filter(r => r.current_stage === 's2_pending' || r.current_stage === 's1_pending').length,
     s2_director: pipelineRows.filter(r => r.current_stage === 'director_pending').length,
     finance: pipelineRows.filter(r => r.current_stage === 's3_pending').length,
     financeAmount: pipelineRows.filter(r => r.current_stage === 's3_pending').reduce((s, r) => s + parseFloat(r.amount_requested || 0), 0),
@@ -287,11 +286,6 @@ function renderReportHtml(data) {
   <div class="section">
     <h2>📊 Live Approval Pipeline <span class="badge">right now</span></h2>
     <div class="pipeline">
-      <div class="pipeline-card s1">
-        <div class="pcount">${pendingPipeline.s1}</div>
-        <div class="plabel">S1 · Avisha</div>
-        <div class="pamt">${fmtRsHtml(pendingPipeline.s1Amount)}</div>
-      </div>
       <div class="pipeline-card s2">
         <div class="pcount">${pendingPipeline.s2_ritu}</div>
         <div class="plabel">S2 · Ritu</div>
@@ -441,7 +435,7 @@ router.post('/send', async (req, res, next) => {
       `${fmtDateShort(data.start)} – ${fmtDateShort(data.endDate)}\n\n` +
       `📋 *Imprests:* ${data.imprest.total} (${fmtRs(data.imprest.totalRequested)})\n` +
       `   ✓ Approved: ${data.imprest.impApproved}  ✗ Rejected: ${data.imprest.impRejected}  ⏳ Pending: ${data.imprest.impPending}\n\n` +
-      `💰 *Pipeline now:* S1=${data.pendingPipeline.s1} · S2=${data.pendingPipeline.s2_ritu} · Director=${data.pendingPipeline.s2_director} · Finance=${data.pendingPipeline.finance}\n\n` +
+      `💰 *Pipeline now:* S2=${data.pendingPipeline.s2_ritu} · Director=${data.pendingPipeline.s2_director} · Finance=${data.pendingPipeline.finance}\n\n` +
       `🏗️ *Top Site:* ${topSite ? `${topSite.site} (${fmtRs(topSite.amount)})` : '—'}\n\n` +
       `🧾 *POs Pending:* ${data.poStats.awaiting} (${fmtRs(data.poStats.awaitingAmount)})\n\n` +
       `📊 *View Full Report:*\n${reportUrl}\n\n` +

@@ -12,12 +12,12 @@ import {
 } from '../services/travelService.js';
 import { extractRideFare } from '../services/visionService.js';
 import { generateImprestRefId } from '../utils/refIdGenerator.js';
-import { resolveImprestRouting } from '../utils/imprestRouting.js';
+import { resolveImprestRouting, isDirectorRoute } from '../utils/imprestRouting.js';
 import { imprestSpendLimit, imprestSettlementTarget, IMPREST_SPEND_LIMIT_COLUMNS } from '../utils/imprestSpendLimit.js';
 import { ok, fail } from '../utils/responseHelper.js';
 import { FINANCE_ROLES, FINANCE_HEAD_ROLES, S1_ROLES, S2_ROLES, FOUNDER_ROLES, DIRECTOR_APPROVAL_THRESHOLD, WEEKLY_EMERGENCY_THRESHOLD } from '../config/constants.js';
 import { broadcastNewImprest } from '../index.js';
-import { sendImprestApprovalReminder, notifyS1, notifyS2, notifyFinance } from '../services/whatsappService.js';
+import { sendImprestApprovalReminder, notifyS2, notifyFinance } from '../services/whatsappService.js';
 import { triggerSubmissionConfirmation, triggerFounderApproval, triggerFounderGate } from '../services/n8nService.js';
 
 const router = Router();
@@ -466,13 +466,9 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       const { data: emp } = await supabaseAdmin
         .from('employees').select('name').eq('id', req.user.id).single();
       const empName = emp?.name || 'Employee';
-      if (startingStage === 's2_pending') {
-        console.log(`[Imprest] Sending s2_pending notification for ${refId} to S2 (Ritu)`);
-        await notifyS2({ refId, employeeName: empName, site, category, amount: parseFloat(amountRequested), purpose: purpose || '', s1Notes: '' });
-      } else {
-        console.log(`[Imprest] Sending s1_pending notification for ${refId} to S1 (Avisha)`);
-        await notifyS1({ refId, employeeName: empName, site, category, amount: parseFloat(amountRequested), purpose: purpose || '' });
-      }
+      // Every request now begins at S2 (Ritu). Avisha's S1 stage was merged into S2.
+      console.log(`[Imprest] Sending s2_pending notification for ${refId} to S2 (Ritu)`);
+      await notifyS2({ refId, employeeName: empName, site, category, amount: parseFloat(amountRequested), purpose: purpose || '', s1Notes: '' });
     } catch (e) { console.warn('Stage notify failed:', e.message); }
 
     return ok(res, {
@@ -901,7 +897,7 @@ router.post('/:id/approve', authMiddleware, roleGuard(FINANCE_ROLES), async (req
     const finalAmount = approvedAmount ? parseFloat(approvedAmount) : imp.amount_requested;
 
     // Director ceiling check (Route B only)
-    if (imp.approval_route === 'avisha_director_finance_founder' && imp.director_approved_amount) {
+    if (isDirectorRoute(imp.approval_route) && imp.director_approved_amount) {
       if (finalAmount > parseFloat(imp.director_approved_amount)) {
         return fail(res, `Cannot approve more than director-approved amount of ₹${imp.director_approved_amount}`);
       }
@@ -1079,6 +1075,29 @@ router.get('/s1/queue', authMiddleware, roleGuard([...S1_ROLES, 'head']), async 
   } catch (err) { next(err); }
 });
 
+// Employee's outstanding advance balance: approved/partially-approved imprests
+// minus their non-rejected expenses, excluding the request in hand. Shown to the
+// Director on the ≥₹10K WhatsApp approval so they see the employee's exposure.
+async function calcEmployeeOutstanding(employeeId, excludeId) {
+  let out = 0;
+  const { data: empImps } = await supabaseAdmin
+    .from('imprest_requests').select('id, approved_amount, amount_requested')
+    .eq('employee_id', employeeId)
+    .in('status', ['approved', 'partially_approved'])
+    .neq('id', excludeId);
+  if (empImps?.length > 0) {
+    const aIds = empImps.map(r => r.id);
+    const { data: exps } = await supabaseAdmin.from('expenses').select('imprest_id, amount, status')
+      .in('imprest_id', aIds).not('status', 'in', '("rejected","blocked")');
+    const expMap = {};
+    for (const e of (exps || [])) { expMap[e.imprest_id] = (expMap[e.imprest_id] || 0) + parseFloat(e.amount); }
+    for (const r of empImps) {
+      out += Math.max(0, parseFloat(r.approved_amount || r.amount_requested) - (expMap[r.id] || 0));
+    }
+  }
+  return Math.round(out * 100) / 100;
+}
+
 // POST /api/imprest/:id/s1-approve — Avisha forwards
 router.post('/:id/s1-approve', authMiddleware, roleGuard(S1_ROLES), async (req, res, next) => {
   try {
@@ -1120,33 +1139,12 @@ router.post('/:id/s1-approve', authMiddleware, roleGuard(S1_ROLES), async (req, 
 
     await supabaseAdmin.from('imprest_requests').update(updateFields).eq('id', req.params.id);
 
-    // Helper: calculate employee outstanding balance
-    const calcOutstanding = async () => {
-      let out = 0;
-      const { data: empImps } = await supabaseAdmin
-        .from('imprest_requests').select('id, approved_amount, amount_requested')
-        .eq('employee_id', imp.employee_id)
-        .in('status', ['approved', 'partially_approved'])
-        .neq('id', imp.id);
-      if (empImps?.length > 0) {
-        const aIds = empImps.map(r => r.id);
-        const { data: exps } = await supabaseAdmin.from('expenses').select('imprest_id, amount, status')
-          .in('imprest_id', aIds).not('status', 'in', '("rejected","blocked")');
-        const expMap = {};
-        for (const e of (exps || [])) { expMap[e.imprest_id] = (expMap[e.imprest_id] || 0) + parseFloat(e.amount); }
-        for (const r of empImps) {
-          out += Math.max(0, parseFloat(r.approved_amount || r.amount_requested) - (expMap[r.id] || 0));
-        }
-      }
-      return Math.round(out * 100) / 100;
-    };
-
     // Route B: Bhaskar Sir (Director) WhatsApp approval (≥ ₹10,000)
     if (imp.approval_route === 'avisha_director_finance_founder') {
       try {
         const [empName, oldBalance] = await Promise.all([
           supabaseAdmin.from('employees').select('name').eq('id', imp.employee_id).single().then(r => r.data?.name || ''),
-          calcOutstanding(),
+          calcEmployeeOutstanding(imp.employee_id, imp.id),
         ]);
         triggerFounderApproval({
           imprestId: imp.id, refId: imp.ref_id, requestedTo: 'Bhaskar Sir',
@@ -1205,76 +1203,6 @@ router.post('/:id/s1-reject', authMiddleware, roleGuard(S1_ROLES), async (req, r
   } catch (err) { next(err); }
 });
 
-// POST /api/imprest/:id/s2-override — S2 fast-forwards an S1-pending item (does S1+S2 in one shot → s3_pending)
-router.post('/:id/s2-override', authMiddleware, roleGuard(S2_ROLES), async (req, res, next) => {
-  try {
-    const { notes, approvedAmount } = req.body;
-    if (!notes?.trim()) return fail(res, 'A note is required before forwarding to Finance.');
-    const { data: imp, error: fetchErr } = await supabaseAdmin
-      .from('imprest_requests')
-      .select('id, ref_id, current_stage, approval_route, amount_requested, employee_id, site, category, purpose')
-      .eq('id', req.params.id).single();
-    if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
-    if (imp.current_stage !== 's1_pending') return fail(res, 'Request is not at Stage 1');
-
-    const now = new Date().toISOString();
-    const updateFields = {
-      current_stage: 's3_pending',
-      s1_approved_by: req.user.id,
-      s1_approved_at: now,
-      s1_note: '(Forwarded by S2)',
-      s2_approved_by: req.user.id,
-      s2_approved_at: now,
-      s2_note: notes.trim(),
-    };
-    if (approvedAmount && parseFloat(approvedAmount) < parseFloat(imp.amount_requested)) {
-      updateFields.amount_requested = parseFloat(approvedAmount);
-    }
-
-    await supabaseAdmin.from('imprest_requests').update(updateFields).eq('id', imp.id);
-
-    await logAudit({
-      userId: req.user.id, action: 's2_override_s1', entityType: 'expense', entityId: imp.id,
-      oldValue: { current_stage: 's1_pending' },
-      newValue: { current_stage: 's3_pending', s2_notes: notes },
-      ipAddress: req.ip,
-    });
-
-    try {
-      const empName = (await supabaseAdmin.from('employees').select('name').eq('id', imp.employee_id).single()).data?.name || '';
-      notifyFinance({ refId: imp.ref_id, employeeName: empName, site: imp.site, category: imp.category, amount: parseFloat(imp.amount_requested), purpose: imp.purpose || '', s2Notes: notes || '' });
-    } catch (e) { console.warn('Finance notify failed:', e.message); }
-
-    return ok(res, { refId: imp.ref_id, currentStage: 's3_pending', message: 'Fast-forwarded to Finance team' });
-  } catch (err) { next(err); }
-});
-
-// POST /api/imprest/:id/s2-reject-s1 — S2 rejects an S1-pending item
-router.post('/:id/s2-reject-s1', authMiddleware, roleGuard(S2_ROLES), async (req, res, next) => {
-  try {
-    const { reason } = req.body;
-    if (!reason?.trim()) return fail(res, 'Rejection reason is required');
-    const { data: imp, error: fetchErr } = await supabaseAdmin
-      .from('imprest_requests').select('id, ref_id, current_stage').eq('id', req.params.id).single();
-    if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
-    if (imp.current_stage !== 's1_pending') return fail(res, 'Request is not at Stage 1');
-
-    const now = new Date().toISOString();
-    await supabaseAdmin.from('imprest_requests').update({
-      status: 'rejected', rejection_reason: reason.trim(),
-      current_stage: 's2_rejected',
-      s1_approved_by: req.user.id, s1_approved_at: now,
-      s2_approved_by: req.user.id, s2_approved_at: now,
-    }).eq('id', req.params.id);
-
-    await logAudit({
-      userId: req.user.id, action: 's2_reject_s1', entityType: 'expense', entityId: imp.id,
-      newValue: { status: 'rejected', reason, current_stage: 's2_rejected' }, ipAddress: req.ip,
-    });
-
-    return ok(res, { refId: imp.ref_id, status: 'rejected' });
-  } catch (err) { next(err); }
-});
 
 // ════════════════════════════════════════════════════════════════════════════
 // STAGE 2: Ritu Queue & Actions
@@ -1380,46 +1308,80 @@ router.get('/s2/history', authMiddleware, roleGuard([...S2_ROLES, 'head']), asyn
   } catch (err) { next(err); }
 });
 
-// POST /api/imprest/:id/s2-approve — Ritu forwards to finance
+// POST /api/imprest/:id/s2-approve — Ritu (S2) clears the first human gate.
+// Avisha's S1 stage was merged into S2, so this also picks up any item still
+// parked at s1_pending. <₹10K and all HO/Bangalore → Finance; ≥₹10K site →
+// Director (Bhaskar) for WhatsApp approval.
 router.post('/:id/s2-approve', authMiddleware, roleGuard(S2_ROLES), async (req, res, next) => {
   try {
     const { notes, approvedAmount } = req.body;
-    if (!notes?.trim()) return fail(res, 'A note is required before forwarding to Finance.');
+    if (!notes?.trim()) return fail(res, 'A note is required before forwarding.');
     const { data: imp, error: fetchErr } = await supabaseAdmin
       .from('imprest_requests')
       .select('id, ref_id, current_stage, approval_route, amount_requested, employee_id, site, category, purpose')
       .eq('id', req.params.id).single();
     if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
-    if (imp.current_stage !== 's2_pending') return fail(res, 'Request is not at Stage 2');
-    if (imp.approval_route !== 's2_finance_founder') return fail(res, 'This request is not routed through Stage 2 reviewer');
+    if (imp.current_stage !== 's2_pending' && imp.current_stage !== 's1_pending') {
+      return fail(res, 'Request is not awaiting first-stage review');
+    }
+
+    const now = new Date().toISOString();
+    const toDirector = isDirectorRoute(imp.approval_route);
+    const nextStage = toDirector ? 'director_pending' : 's3_pending';
 
     const updateFields = {
-      current_stage: 's3_pending',
+      current_stage: nextStage,
       s2_approved_by: req.user.id,
-      s2_approved_at: new Date().toISOString(),
+      s2_approved_at: now,
       s2_note: notes.trim(),
     };
-    // Ritu can reduce the amount
-    if (approvedAmount && parseFloat(approvedAmount) < parseFloat(imp.amount_requested)) {
-      updateFields.amount_requested = parseFloat(approvedAmount);
+    // Picking an item straight off the old S1 queue: stamp the S1 gate too so the
+    // approval trail stays complete now that Ritu owns that stage.
+    if (imp.current_stage === 's1_pending') {
+      updateFields.s1_approved_by = req.user.id;
+      updateFields.s1_approved_at = now;
+      updateFields.s1_note = '(Reviewed by S2)';
+    }
+    // Ritu can reduce the amount before forwarding.
+    let effectiveAmount = parseFloat(imp.amount_requested);
+    if (approvedAmount && parseFloat(approvedAmount) < effectiveAmount) {
+      effectiveAmount = parseFloat(approvedAmount);
+      updateFields.amount_requested = effectiveAmount;
     }
 
     await supabaseAdmin.from('imprest_requests').update(updateFields).eq('id', req.params.id);
 
     await logAudit({
       userId: req.user.id, action: 's2_approve', entityType: 'expense', entityId: imp.id,
-      oldValue: { current_stage: 's2_pending' },
-      newValue: { current_stage: 's3_pending', s2_notes: notes },
+      oldValue: { current_stage: imp.current_stage },
+      newValue: { current_stage: nextStage, s2_notes: notes },
       ipAddress: req.ip,
     });
 
-    // Notify Finance when forwarded to s3_pending
+    if (toDirector) {
+      // ≥₹10K site request → Bhaskar Sir (Director) WhatsApp approval.
+      try {
+        const [empName, oldBalance] = await Promise.all([
+          supabaseAdmin.from('employees').select('name').eq('id', imp.employee_id).single().then(r => r.data?.name || ''),
+          calcEmployeeOutstanding(imp.employee_id, imp.id),
+        ]);
+        triggerFounderApproval({
+          imprestId: imp.id, refId: imp.ref_id, requestedTo: 'Bhaskar Sir',
+          employeeName: empName, employeeSite: imp.site,
+          amount: effectiveAmount, category: imp.category,
+          purpose: imp.purpose || '', oldBalance, submittedAt: now,
+        }).catch((e) => console.warn('WF2 Bhaskar trigger failed:', e.message));
+      } catch (e) { console.warn('Bhaskar WhatsApp trigger failed:', e.message); }
+      return ok(res, { refId: imp.ref_id, currentStage: nextStage, message: 'Approved — forwarding to Director for WhatsApp approval' });
+    }
+
+    // Route to Finance.
     try {
       const empName = (await supabaseAdmin.from('employees').select('name').eq('id', imp.employee_id).single()).data?.name || '';
-      notifyFinance({ refId: imp.ref_id, employeeName: empName, site: imp.site, category: imp.category, amount: parseFloat(imp.amount_requested), purpose: imp.purpose || '', s2Notes: notes || '' });
+      notifyFinance({ refId: imp.ref_id, employeeName: empName, site: imp.site, category: imp.category, amount: effectiveAmount, purpose: imp.purpose || '', s2Notes: notes || '' });
     } catch (e) { console.warn('Finance notify failed:', e.message); }
 
-    return ok(res, { refId: imp.ref_id, currentStage: 's3_pending', message: 'Forwarded to Finance team' });
+    return ok(res, { refId: imp.ref_id, currentStage: nextStage, message: 'Forwarded to Finance team' });
   } catch (err) { next(err); }
 });
 
@@ -1431,7 +1393,7 @@ router.post('/:id/s2-reject', authMiddleware, roleGuard(S2_ROLES), async (req, r
     const { data: imp, error: fetchErr } = await supabaseAdmin
       .from('imprest_requests').select('id, ref_id, current_stage, approval_route').eq('id', req.params.id).single();
     if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
-    if (imp.current_stage !== 's2_pending') return fail(res, 'Request is not at Stage 2');
+    if (imp.current_stage !== 's2_pending' && imp.current_stage !== 's1_pending') return fail(res, 'Request is not awaiting first-stage review');
 
     await supabaseAdmin.from('imprest_requests').update({
       status: 'rejected', rejection_reason: reason.trim(),
@@ -1479,7 +1441,7 @@ router.post('/:id/director-approve', authMiddleware, roleGuard(['admin']), async
       .eq('id', req.params.id).single();
     if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
     if (imp.current_stage !== 'director_pending') return fail(res, 'Request is not awaiting Director approval');
-    if (imp.approval_route !== 'avisha_director_finance_founder') return fail(res, 'This request does not require Director approval');
+    if (!isDirectorRoute(imp.approval_route)) return fail(res, 'This request does not require Director approval');
 
     const updateFields = {
       current_stage: 's3_pending',
@@ -1527,7 +1489,7 @@ router.post('/:id/director-reject', authMiddleware, roleGuard(['admin']), async 
     if (imp.current_stage !== 'director_pending') return fail(res, 'Request is not at Director approval stage');
 
     await supabaseAdmin.from('imprest_requests').update({
-      current_stage: 's1_pending',
+      current_stage: 's2_pending',
       director_approved_by: null,
       director_approved_at: null,
       director_note: reason,
@@ -1537,11 +1499,11 @@ router.post('/:id/director-reject', authMiddleware, roleGuard(['admin']), async 
     await logAudit({
       userId: req.user.id, action: 'director_reject', entityType: 'expense', entityId: imp.id,
       oldValue: { current_stage: 'director_pending' },
-      newValue: { current_stage: 's1_pending', reason },
+      newValue: { current_stage: 's2_pending', reason },
       ipAddress: req.ip,
     });
 
-    return ok(res, { refId: imp.ref_id, currentStage: 's1_pending', message: 'Request sent back to S1 for revision' });
+    return ok(res, { refId: imp.ref_id, currentStage: 's2_pending', message: 'Request sent back to S2 (Ritu) for revision' });
   } catch (err) { next(err); }
 });
 

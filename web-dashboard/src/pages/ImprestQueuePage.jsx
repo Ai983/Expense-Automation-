@@ -94,16 +94,17 @@ function downloadImprestCSV(requests) {
 // ── Approval Timeline ──────────────────────────────────────────────────────
 function ApprovalTimeline({ req }) {
   const route = req.approval_route;
-  // New three-tier routes (with legacy fallbacks)
-  const isDirector = route === 'avisha_director_finance_founder' || route === 'avisha_director_finance';
-  const isHO = route === 's2_finance_founder';
-  const hasFounderGate = route === 'avisha_finance_founder' || route === 'avisha_director_finance_founder' || route === 's2_finance_founder';
+  // Ritu (S2) is the first reviewer on every current route. Legacy `avisha_*`
+  // rows started at S1 (Avisha) and are still rendered that way.
+  const s2First = route === 's2_finance_founder' || route === 's2_director_finance_founder';
+  const isDirector = route === 's2_director_finance_founder' || route === 'avisha_director_finance_founder' || route === 'avisha_director_finance';
+  const hasFounderGate = route === 'avisha_finance_founder' || route === 'avisha_director_finance_founder' || route === 's2_finance_founder' || route === 's2_director_finance_founder';
   const financeDone = ['founder_review_pending', 'founder_approved', 's3_approved'].includes(req.current_stage) || !!req.paid;
 
   const steps = [];
 
-  // Stage 1 — S1 (Avisha) for normal sites, or S2 (Ritu) for Head Office / Bangalore
-  if (isHO) {
+  // First human gate — S2 (Ritu) on current routes, S1 (Avisha) on legacy rows.
+  if (s2First) {
     steps.push({
       label: 'S2 — Ritu', sub: 'Approval',
       done: !!req.s2_approved_at || financeDone,
@@ -117,15 +118,16 @@ function ApprovalTimeline({ req }) {
       rejected: req.current_stage === 's1_rejected',
       date: req.s1_approved_at, note: req.s1_note || req.s1_notes,
     });
-    if (isDirector) {
-      steps.push({
-        label: 'Director / Bhaskar Sir', sub: 'WhatsApp',
-        done: !!req.director_approved_at || financeDone,
-        rejected: req.current_stage === 'director_rejected',
-        date: req.director_approved_at, note: req.director_note,
-        extra: req.director_approved_amount ? `Ceiling: ${fmt(req.director_approved_amount)}` : null,
-      });
-    }
+  }
+  // Director gate (Bhaskar Sir) — ≥₹10K site requests, after the first gate.
+  if (isDirector) {
+    steps.push({
+      label: 'Director / Bhaskar Sir', sub: 'WhatsApp',
+      done: !!req.director_approved_at || financeDone,
+      rejected: req.current_stage === 'director_rejected',
+      date: req.director_approved_at, note: req.director_note,
+      extra: req.director_approved_amount ? `Ceiling: ${fmt(req.director_approved_amount)}` : null,
+    });
   }
 
   // Finance review
@@ -462,7 +464,7 @@ export default function ImprestQueuePage() {
                         {req.requires_founder_approval ? (
                           <div>
                             <div className="text-xs text-gray-500">
-                              {(req.approval_route === 'avisha_director_finance_founder' || req.approval_route === 'avisha_director_finance') ? 'Bhaskar Sir'
+                              {(req.approval_route === 'avisha_director_finance_founder' || req.approval_route === 'avisha_director_finance' || req.approval_route === 's2_director_finance_founder') ? 'Bhaskar Sir'
                                : req.approval_route === 'avisha_dhruv_finance' ? 'Dhruv Sir'
                                : req.approval_route === 's2_finance_founder' ? "Ritu Ma'am"
                                : 'Dhruv Sir (Founder)'}
