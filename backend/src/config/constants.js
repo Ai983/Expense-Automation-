@@ -47,6 +47,12 @@ export const ROLES = ['employee', 'finance', 'manager', 'admin', 'approver_s1', 
 
 export const FINANCE_ROLES = ['finance', 'manager', 'admin'];
 
+// Ritu (S2) reviews employee expenses alongside Finance now that she owns the
+// first-level imprest gate. Single source of truth for the expense human-review
+// queue guards (view + approve/reject/bulk). Kept separate from FINANCE_ROLES so
+// the broader finance powers (payments, overrides, PRQ) stay finance-only.
+export const EXPENSE_REVIEW_ROLES = [...FINANCE_ROLES, 'approver_s2'];
+
 // Multi-stage approval roles
 export const S1_ROLES = ['approver_s1', 'admin'];
 export const S2_ROLES = ['approver_s2', 'admin'];

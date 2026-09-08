@@ -14,6 +14,7 @@ import {
   CATEGORIES,
   FINANCE_ROLES,
   FINANCE_HEAD_ROLES,
+  EXPENSE_REVIEW_ROLES,
   CONFIDENCE_AUTO_APPROVE,
   CONFIDENCE_MANUAL_REVIEW,
   AMOUNT_TOLERANCE_INR,
@@ -466,7 +467,7 @@ router.get(
 router.get(
   '/finance/queue',
   authMiddleware,
-  roleGuard(FINANCE_HEAD_ROLES),
+  roleGuard([...EXPENSE_REVIEW_ROLES, 'head']),
   async (req, res, next) => {
     try {
       const { status, site, dateFrom, dateTo, employeeId, aiVerdict, stage, page = 1, limit = 50 } = req.query;
@@ -658,7 +659,7 @@ router.get('/:expenseId/details', authMiddleware, async (req, res, next) => {
 router.post(
   '/:expenseId/approve',
   authMiddleware,
-  roleGuard(FINANCE_ROLES),
+  roleGuard(EXPENSE_REVIEW_ROLES),
   async (req, res, next) => {
     try {
       const { adjustedAmount, source } = req.body || {};
@@ -747,7 +748,7 @@ router.post(
 router.post(
   '/:expenseId/reject',
   authMiddleware,
-  roleGuard(FINANCE_ROLES),
+  roleGuard(EXPENSE_REVIEW_ROLES),
   async (req, res, next) => {
     try {
       const { reason } = req.body;
@@ -837,7 +838,7 @@ router.post(
 router.post(
   '/bulk-approve',
   authMiddleware,
-  roleGuard(FINANCE_ROLES),
+  roleGuard(EXPENSE_REVIEW_ROLES),
   async (req, res, next) => {
     try {
       const { expenseIds } = req.body;
