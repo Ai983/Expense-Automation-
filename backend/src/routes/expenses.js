@@ -4,7 +4,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { roleGuard } from '../middleware/roleGuard.js';
 import { upload } from '../middleware/upload.js';
 import { uploadScreenshot, getSignedUrl } from '../services/storageService.js';
-import { verifyExpense } from '../services/verificationService.js';
+import { verifyExpense, isForeignCurrency } from '../services/verificationService.js';
 import { checkDuplicates } from '../services/duplicateService.js';
 import { logAudit } from '../services/auditService.js';
 import { generateRefId } from '../utils/refIdGenerator.js';
@@ -133,6 +133,7 @@ router.post(
       let verificationChecks = [];
       let autoAction = 'manual_review';
       let totalExtractedAmount = 0;
+      let hasForeignCurrency = false;
       const allOcrResults = [];
 
       const isPdf = primaryFile.mimetype === 'application/pdf';
@@ -149,12 +150,15 @@ router.post(
             // is not treated as a failure.
             imprestPaidAt: linkedImprest?.paid_at || null,
           });
+          const currency = v.ocrData?.currency || 'INR';
           allOcrResults.push({
             extractedAmount: v.ocrData?.amount || null,
+            currency,
             transactionId: v.ocrData?.transactionId || null,
             confidence: v.overallConfidence || 0,
           });
-          totalExtractedAmount += parseFloat(v.ocrData?.amount || 0);
+          if (isForeignCurrency(currency)) hasForeignCurrency = true;
+          else totalExtractedAmount += parseFloat(v.ocrData?.amount || 0);
 
           // Use first file's full verification as primary
           if (!verification) {
@@ -173,8 +177,21 @@ router.post(
         }
       }
 
-      // For multiple screenshots, re-verify using TOTAL extracted amount
-      if (files.length > 1 && totalExtractedAmount > 0 && verification) {
+      // A total mixing $ and ₹ is meaningless; any foreign-currency attachment
+      // sends the whole claim to a person instead of re-scoring the amount.
+      if (hasForeignCurrency && verification) {
+        const amountIdx = verificationChecks.findIndex((c) => c.step === 'amount_check');
+        const foreign = allOcrResults
+          .filter((r) => isForeignCurrency(r.currency))
+          .map((r) => `${r.currency} ${r.extractedAmount}`)
+          .join(', ');
+        if (amountIdx >= 0) {
+          verificationChecks[amountIdx] = { step: 'amount_check', result: 'warn', score: 0.5, detail: `Foreign-currency receipt(s): ${foreign} — cannot be compared to the ₹${parsedAmount} claim; verify the conversion against the card statement` };
+        }
+        totalExtractedAmount = 0;
+        autoAction = 'manual_review';
+      } else if (files.length > 1 && totalExtractedAmount > 0 && verification) {
+        // For multiple screenshots, re-verify using TOTAL extracted amount
         const totalDiff = Math.abs(totalExtractedAmount - parsedAmount);
         const tolerance = AMOUNT_TOLERANCE_INR;
         // Override the amount check with total from all screenshots
@@ -230,6 +247,8 @@ router.post(
         totalExtractedAmount: totalExtractedAmount > 0 ? Math.round(totalExtractedAmount * 100) / 100 : null,
         transactionId: ocrData?.transactionId || null,
         extractedAmount: ocrData?.amount || null,
+        currency: ocrData?.currency || 'INR',
+        hasForeignCurrency,
         date: ocrData?.date || null,
         paymentStatus: ocrData?.paymentStatus || null,
         confidence: verification?.overallConfidence || 0,

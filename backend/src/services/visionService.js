@@ -8,7 +8,8 @@ Return ONLY a valid JSON object with no extra text, markdown, or explanation.
 Today's date is ${new Date().toISOString().slice(0, 10)} — use it only to resolve a year the receipt does not print.
 
 {
-  "amount": <number or null — the payment amount in rupees as a plain number, e.g. 5000, without commas or currency symbol>,
+  "amount": <number or null — the payment amount exactly as printed, in the receipt's own currency, as a plain number with its decimal point kept, e.g. 5000 or 24.81, without commas or currency symbol>,
+  "currency": <string — ISO 4217 code of the amount's currency: "INR" for ₹/Rs/INR, "USD" for $/US$, "EUR" for €, "GBP" for £, etc. Default "INR" only when no currency is shown>,
   "transactionId": <string or null — UPI Reference Number, UTR, Txn ID, Transaction ID, Order ID, or any reference code>,
   "date": <string or null — date of the transaction in DD/MM/YYYY format>,
   "paymentStatus": <"SUCCESS" | "FAILED" | "UNKNOWN" — "SUCCESS" if the payment went through (Paid/Debited/Sent/Successful), "FAILED" if it failed/reversed/declined, "UNKNOWN" if not determinable>,
@@ -17,6 +18,7 @@ Today's date is ${new Date().toISOString().slice(0, 10)} — use it only to reso
 
 Rules:
 - amount: Look for ₹, Rs, INR symbols or words like "Amount", "Total", "Paid", "You paid", "Debited". Return the numeric value only.
+- IMPORTANT — never convert currencies and never drop the decimal point: "$118.00" is amount 118 with currency "USD", not 11800. A foreign-currency invoice (Anthropic, OpenAI, AWS, Google, etc.) keeps its own currency.
 - transactionId: Look for "UTR", "UPI Ref", "Reference No", "Txn ID", "Transaction ID", "Order ID", "Payment ID". Include the alphanumeric code.
 - date: Convert any date format you find to DD/MM/YYYY. Look for transaction date, payment date.
 - IMPORTANT — when the receipt shows a day and month but NO year (very common on ride and UPI apps, e.g. "12 Aug", "5 September"), do NOT invent or guess a year. Assume the most recent year in which that date has already occurred: use the current year if that date has passed, otherwise the previous year. Never output a year more than 12 months in the past for a date with no printed year — a fabricated old year makes a normal receipt look like a two-year-old one.
@@ -90,7 +92,7 @@ Rules:
 /**
  * Sends image buffer to Claude Vision API and extracts payment receipt fields.
  * Handles both image types and PDFs (using Claude's native document block for PDF).
- * Returns: { rawText, transactionId, amount, date, paymentStatus, ocrConfidence }
+ * Returns: { rawText, transactionId, amount, currency, date, paymentStatus, ocrConfidence }
  */
 export async function extractReceiptData(imageBuffer, mimeType = 'image/jpeg') {
   // PDFs and images are both handled by the provider layer, which routes each
@@ -111,6 +113,12 @@ export async function extractReceiptData(imageBuffer, mimeType = 'image/jpeg') {
     : parsed.amount != null ? parseFloat(String(parsed.amount).replace(/,/g, '')) || null
     : null;
 
+  // A $ amount compared as rupees fails the amount check on a number that means
+  // nothing (HSE-20260915-0001: $118 + $35 + $24.81 was scored as ₹14,316).
+  const currency = typeof parsed.currency === 'string' && /^[A-Z]{3}$/i.test(parsed.currency.trim())
+    ? parsed.currency.trim().toUpperCase()
+    : 'INR';
+
   // Compute OCR confidence based on how many fields were successfully extracted
   const fieldsFound = [
     amount != null,
@@ -125,6 +133,7 @@ export async function extractReceiptData(imageBuffer, mimeType = 'image/jpeg') {
     rawText: parsed.rawText || '',
     transactionId: parsed.transactionId || null,
     amount,
+    currency,
     date: parsed.date || null,
     paymentStatus: parsed.paymentStatus || 'UNKNOWN',
     ocrConfidence,

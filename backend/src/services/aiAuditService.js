@@ -260,7 +260,10 @@ function buildContextBlock(ctx) {
     [
       '## AUTOMATED CHECKS (one input — not your verdict)',
       `Deterministic confidence score: ${deterministic.confidence ?? 'unknown'}/100`,
-      `OCR read — amount: ${rupee(deterministic.extractedAmount)}, date: ${deterministic.date || 'not found'}, payment status: ${deterministic.paymentStatus || 'unknown'}, transaction id: ${deterministic.transactionId || 'not found'}`,
+      deterministic.hasForeignCurrency
+        ? 'FOREIGN-CURRENCY RECEIPT: one or more attachments are not in rupees, so OCR amounts are in that currency and no rupee total exists. Do not treat the rupee claim as a shortfall against them — the gap is FX conversion and card charges, which a person verifies against the statement.'
+        : null,
+      `OCR read — amount: ${deterministic.hasForeignCurrency ? `${deterministic.currency} ${deterministic.extractedAmount ?? 'not found'}` : rupee(deterministic.extractedAmount)}, date: ${deterministic.date || 'not found'}, payment status: ${deterministic.paymentStatus || 'unknown'}, transaction id: ${deterministic.transactionId || 'not found'}`,
       deterministic.totalExtractedAmount != null
         ? `Sum across all attachments: ${rupee(deterministic.totalExtractedAmount)}`
         : null,
@@ -628,6 +631,8 @@ async function loadContext(expenseId, providedFiles) {
       confidence: meta.confidence ?? null,
       extractedAmount: meta.extractedAmount ?? null,
       totalExtractedAmount: meta.totalExtractedAmount ?? null,
+      currency: meta.currency || 'INR',
+      hasForeignCurrency: !!meta.hasForeignCurrency,
       date: meta.date ?? null,
       paymentStatus: meta.paymentStatus ?? null,
       transactionId: meta.transactionId ?? null,

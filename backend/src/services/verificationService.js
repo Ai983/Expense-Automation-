@@ -25,7 +25,7 @@ export async function verifyExpense(imageBuffer, submission) {
   const checks = [];
 
   // CHECK 1 — Amount match (weight: 40 points)
-  const amountCheck = checkAmount(ocrData.amount, submission.amount);
+  const amountCheck = checkAmount(ocrData.amount, submission.amount, ocrData.currency);
   checks.push({ step: 'amount_check', ...amountCheck });
 
   // CHECK 2 — Receipt date falls inside the imprest period (weight: 20 points)
@@ -51,7 +51,11 @@ export async function verifyExpense(imageBuffer, submission) {
   const overallConfidence = Math.round(weightedScore * 0.7 + ocrData.ocrConfidence * 0.3);
 
   let autoAction;
-  if (overallConfidence >= AUTO_APPROVE_THRESHOLD) {
+  if (isForeignCurrency(ocrData.currency)) {
+    // The rupee claim includes FX conversion and card markup we cannot see, so
+    // neither auto-approve nor block: a person checks it against the statement.
+    autoAction = 'manual_review';
+  } else if (overallConfidence >= AUTO_APPROVE_THRESHOLD) {
     autoAction = 'auto_verified';
   } else if (overallConfidence >= MANUAL_REVIEW_THRESHOLD) {
     autoAction = 'manual_review';
@@ -64,9 +68,21 @@ export async function verifyExpense(imageBuffer, submission) {
 
 // ── Individual checks ─────────────────────────────────────────────────────────
 
-function checkAmount(ocrAmount, submittedAmount) {
+export function isForeignCurrency(currency) {
+  return !!currency && currency !== 'INR';
+}
+
+function checkAmount(ocrAmount, submittedAmount, currency = 'INR') {
   if (ocrAmount == null) {
     return { result: 'fail', score: 0, detail: 'Amount not found in receipt' };
+  }
+
+  if (isForeignCurrency(currency)) {
+    return {
+      result: 'warn',
+      score: 0.5,
+      detail: `Foreign-currency receipt: ${currency} ${ocrAmount} cannot be compared to the ₹${submittedAmount} claim — verify the conversion against the card statement`,
+    };
   }
 
   const diff = Math.abs(ocrAmount - submittedAmount);
