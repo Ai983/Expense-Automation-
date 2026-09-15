@@ -15,6 +15,7 @@ import { generateImprestRefId } from '../utils/refIdGenerator.js';
 import { resolveImprestRouting, isDirectorRoute } from '../utils/imprestRouting.js';
 import { imprestSpendLimit, imprestSettlementTarget, IMPREST_SPEND_LIMIT_COLUMNS } from '../utils/imprestSpendLimit.js';
 import { ok, fail } from '../utils/responseHelper.js';
+import { tryGetEmployeeBalances, balanceFor } from '../utils/employeeBalance.js';
 import { FINANCE_ROLES, FINANCE_HEAD_ROLES, S1_ROLES, S2_ROLES, FOUNDER_ROLES, DIRECTOR_APPROVAL_THRESHOLD, WEEKLY_EMERGENCY_THRESHOLD } from '../config/constants.js';
 import { broadcastNewImprest } from '../index.js';
 import { sendImprestApprovalReminder, notifyS2, notifyFinance } from '../services/whatsappService.js';
@@ -749,41 +750,11 @@ router.get('/finance/queue', authMiddleware, roleGuard(FINANCE_HEAD_ROLES), asyn
       }
     }
 
-    // Calculate per-employee outstanding balance: cash paid out minus settled expenses
-    const uniqueEmpIds = [...new Set((data || []).map((r) => r.employee_id))];
-    let employeeBalanceMap = {};
-    if (uniqueEmpIds.length > 0) {
-      const { data: paidImps } = await supabaseAdmin
-        .from('imprest_requests')
-        .select('id, employee_id, paid_amount')
-        .in('employee_id', uniqueEmpIds)
-        .eq('paid', true);
-
-      const paidImpIds = (paidImps || []).map((r) => r.id);
-      let allExpByImprest = {};
-      if (paidImpIds.length > 0) {
-        const { data: allLinkedExp } = await supabaseAdmin
-          .from('expenses')
-          .select('imprest_id, amount, status')
-          .in('imprest_id', paidImpIds)
-          .in('status', ['approved', 'verified', 'auto_verified']);
-        for (const exp of (allLinkedExp || [])) {
-          if (!allExpByImprest[exp.imprest_id]) allExpByImprest[exp.imprest_id] = 0;
-          allExpByImprest[exp.imprest_id] += parseFloat(exp.amount);
-        }
-      }
-
-      for (const imp of (paidImps || [])) {
-        const given = parseFloat(imp.paid_amount || 0);
-        const expTotal = allExpByImprest[imp.id] || 0;
-        const bal = Math.max(0, given - expTotal);
-        if (!employeeBalanceMap[imp.employee_id]) employeeBalanceMap[imp.employee_id] = 0;
-        employeeBalanceMap[imp.employee_id] += bal;
-      }
-    }
+    // Per-employee outstanding balance: cash paid out minus settled expenses
+    const employeeBalanceMap = await tryGetEmployeeBalances((data || []).map((r) => r.employee_id), 'imprest list');
 
     const enriched = (data || []).map((r) => {
-      const empBalance = Math.round((employeeBalanceMap[r.employee_id] || 0) * 100) / 100;
+      const empBalance = balanceFor(employeeBalanceMap, r.employee_id);
       if (r.status === 'approved' || r.status === 'partially_approved') {
         const approved = parseFloat(r.approved_amount || r.amount_requested);
         const expenseTotal = expenseByImprest[r.id] || 0;
@@ -1039,29 +1010,11 @@ async function buildStageQueue(req, stageFilter, routeFilter) {
 
   // Enrich with employee outstanding balance:
   // Cash actually paid out (paid_amount) minus approved expenses settled.
-  const empIds = [...new Set((data || []).map((r) => r.employee_id))];
-  let empBalMap = {};
-  if (empIds.length > 0) {
-    // Only count imprests that were physically paid to the employee
-    const { data: empImps } = await supabaseAdmin
-      .from('imprest_requests').select('id, employee_id, paid_amount')
-      .in('employee_id', empIds).eq('paid', true);
-    const aIds = (empImps || []).map((r) => r.id);
-    let expMap = {};
-    if (aIds.length > 0) {
-      const { data: exps } = await supabaseAdmin.from('expenses').select('imprest_id, amount, status')
-        .in('imprest_id', aIds).in('status', ['approved', 'verified', 'auto_verified']);
-      for (const e of (exps || [])) { expMap[e.imprest_id] = (expMap[e.imprest_id] || 0) + parseFloat(e.amount); }
-    }
-    for (const imp of (empImps || [])) {
-      const bal = Math.max(0, parseFloat(imp.paid_amount || 0) - (expMap[imp.id] || 0));
-      empBalMap[imp.employee_id] = (empBalMap[imp.employee_id] || 0) + bal;
-    }
-  }
+  const empBalMap = await tryGetEmployeeBalances((data || []).map((r) => r.employee_id), 'stage queue');
 
   const enriched = (data || []).map((r) => ({
     ...r,
-    employee_total_balance: Math.round((empBalMap[r.employee_id] || 0) * 100) / 100,
+    employee_total_balance: balanceFor(empBalMap, r.employee_id),
   }));
 
   return { requests: enriched, total: count, page: parseInt(page), limit: parseInt(limit) };
@@ -1245,34 +1198,11 @@ router.get('/board', authMiddleware, roleGuard([...S1_ROLES, ...S2_ROLES, ...FIN
     const allRequests = [...(activeRes.data || []), ...(terminalRes.data || [])];
 
     // Enrich with employee outstanding balance: cash actually paid out minus settled expenses
-    const empIds = [...new Set(allRequests.map(r => r.employee_id).filter(Boolean))];
-    let balMap = {};
-    if (empIds.length > 0) {
-      const { data: paidImps } = await supabaseAdmin
-        .from('imprest_requests')
-        .select('id, employee_id, paid_amount')
-        .in('employee_id', empIds)
-        .eq('paid', true);
-      const impIds = (paidImps || []).map(r => r.id);
-      let expSum = {};
-      if (impIds.length > 0) {
-        const { data: exps } = await supabaseAdmin
-          .from('expenses')
-          .select('imprest_id, amount, status')
-          .in('imprest_id', impIds)
-          .in('status', ['approved', 'verified', 'auto_verified']);
-        (exps || []).forEach(e => { expSum[e.imprest_id] = (expSum[e.imprest_id] || 0) + parseFloat(e.amount || 0); });
-      }
-      (paidImps || []).forEach(imp => {
-        const given = parseFloat(imp.paid_amount || 0);
-        const used = expSum[imp.id] || 0;
-        balMap[imp.employee_id] = (balMap[imp.employee_id] || 0) + Math.max(0, given - used);
-      });
-    }
+    const balMap = await tryGetEmployeeBalances(allRequests.map(r => r.employee_id), 'board');
 
     const enriched = allRequests.map(r => ({
       ...r,
-      employee_total_balance: balMap[r.employee_id] || 0,
+      employee_total_balance: balanceFor(balMap, r.employee_id),
     }));
 
     return ok(res, { requests: enriched, count: enriched.length, days_window: daysWindow });

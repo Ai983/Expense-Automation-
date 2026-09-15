@@ -527,7 +527,9 @@ export default function S2QueuePage() {
                 <div className="flex justify-between"><span className="text-gray-500">Site</span><span>{selected.site}</span></div>
                 {selected.purpose && <div className="flex justify-between"><span className="text-gray-500">Purpose</span><span className="text-right max-w-[280px]">{selected.purpose}</span></div>}
                 <div className="flex justify-between"><span className="text-gray-500">Submitted</span><span>{fmtDate(selected.submitted_at)} {fmtTime(selected.submitted_at)}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Total Unsettled</span><span className={`font-bold ${selected.employee_total_balance > 0 ? 'text-red-600' : 'text-gray-900'}`}>{fmt(selected.employee_total_balance || 0)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Total Unsettled</span>{selected.employee_total_balance == null
+                  ? <span className="text-gray-400 italic">Unavailable — refresh</span>
+                  : <span className={`font-bold ${selected.employee_total_balance > 0 ? 'text-red-600' : 'text-gray-900'}`}>{fmt(selected.employee_total_balance)}</span>}</div>
               </div>
 
               {/* Employee's past paid imprest — visible immediately, no extra clicks */}
