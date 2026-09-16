@@ -245,13 +245,20 @@ export default function SubmitExpenseScreen() {
         {result && (
           <View style={[styles.resultCard, { borderColor: result.status === 'blocked' ? '#ef4444' : '#10b981' }]}>
             <Text style={styles.resultTitle}>
-              {result.status === 'blocked' ? '🚫 Blocked' : result.status === 'verified' ? '✅ Auto-Verified' : '📋 Submitted for Review'}
+              {result.status === 'blocked' ? '🚫 Blocked' : result.status === 'verified' ? '✅ Auto-Verified' : '📋 Submitted'}
             </Text>
             <Text style={styles.resultRef}>Ref: {result.refId}</Text>
             <Text style={styles.resultMsg}>{result.message}</Text>
-            {result.confidence > 0 && (
+            {/* A confidence score is only meaningful when something was actually
+                read off the receipt. When nothing was, the number looks like a
+                pass mark to the employee — show the ask instead. */}
+            {result.receiptUnreadable ? (
+              <Text style={styles.resultWarn}>
+                ⚠ Tip: a clear screenshot of the payment confirmation (showing amount, date and transaction ID) gets approved faster.
+              </Text>
+            ) : result.confidence > 0 ? (
               <Text style={styles.resultConf}>Confidence: {result.confidence}%</Text>
-            )}
+            ) : null}
             {result.duplicateWarnings?.map((w, i) => (
               <Text key={i} style={styles.resultWarn}>⚠ {w}</Text>
             ))}

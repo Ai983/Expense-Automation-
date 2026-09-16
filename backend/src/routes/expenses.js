@@ -238,6 +238,16 @@ router.post(
         finalStatus = 'blocked';
       }
 
+      // OCR found nothing at all on this receipt — no amount, no txn id, no date,
+      // no payment status. The confidence score is then meaningless to show the
+      // employee (a PDF scoring 19% reads like a pass), so the app hides it and
+      // asks for a clearer copy instead.
+      const receiptUnreadable =
+        allOcrResults.length > 0 &&
+        allOcrResults.every((r) => r.extractedAmount == null && r.transactionId == null) &&
+        !ocrData?.date &&
+        (!ocrData?.paymentStatus || ocrData.paymentStatus === 'UNKNOWN');
+
       // 6. Build screenshot_metadata JSONB
       const screenshotMetadata = {
         attachmentType: isPdf ? 'pdf' : 'image',
@@ -249,6 +259,7 @@ router.post(
         extractedAmount: ocrData?.amount || null,
         currency: ocrData?.currency || 'INR',
         hasForeignCurrency,
+        receiptUnreadable,
         date: ocrData?.date || null,
         paymentStatus: ocrData?.paymentStatus || null,
         confidence: verification?.overallConfidence || 0,
@@ -357,7 +368,11 @@ router.post(
         transactionId: ocrData?.transactionId || null,
         duplicateWarnings: duplicateResult.warnings,
         blockReason: duplicateResult.blockReason,
-        message: getStatusMessage(finalStatus),
+        receiptUnreadable,
+        message: getStatusMessage(finalStatus, {
+          aiAuditOn: AI_AUDIT_MODE !== 'off',
+          receiptUnreadable,
+        }),
       }, 201);
     } catch (err) {
       next(err);
@@ -1058,10 +1073,24 @@ router.post('/internal/ai-audit-sweep', async (req, res, next) => {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function getStatusMessage(status) {
+// The employee-facing confirmation. `manual_review` must not promise a human
+// review: the AI auditor runs seconds after this message is written and settles
+// most of these on its own, so naming the finance team here states a prediction
+// as fact. Say what is certainly true — it's submitted — and nothing more.
+function getStatusMessage(status, { aiAuditOn = false, receiptUnreadable = false } = {}) {
+  if (status === 'manual_review') {
+    if (receiptUnreadable) {
+      return aiAuditOn
+        ? "We couldn't read the payment details off your receipt. It's being checked now — you'll be notified if a clearer copy is needed."
+        : "We couldn't read the payment details off your receipt, so it needs a manual check.";
+    }
+    return aiAuditOn
+      ? "Expense submitted. We're checking your receipt now — you'll be notified if anything is needed from you."
+      : 'Expense submitted for review.';
+  }
+
   const messages = {
     verified: 'Expense auto-verified successfully. Awaiting final approval.',
-    manual_review: 'Expense submitted for manual review by finance team.',
     blocked: 'Expense blocked due to duplicate detection or low verification confidence.',
     pending: 'Expense submitted and pending review.',
   };
