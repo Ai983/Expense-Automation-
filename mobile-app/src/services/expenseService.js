@@ -74,23 +74,30 @@ export async function fixExpense(expenseId, images) {
 }
 
 /**
- * Polls for the AI auditor's employee-facing hint after a submission.
+ * Polls for the AI auditor's outcome after a submission.
  *
- * The audit runs in the background and finishes a few seconds after submit. If
- * it spots something the employee can fix themselves — a blurry screenshot, a
- * bill instead of a payment confirmation — we want to tell them while they still
- * have the receipt to hand, rather than days later.
+ * The audit runs in the background and finishes a few seconds after submit. Two
+ * things come back and both matter to the employee:
+ *
+ *  - `fixHint`: something they can fix themselves — a blurry screenshot, a bill
+ *    instead of a payment confirmation. Told now, while they still have the
+ *    receipt to hand, rather than days later.
+ *  - `status`: the auditor settles most submissions on its own within seconds.
+ *    Without this the confirmation card sits on "we're checking your receipt"
+ *    forever, even after the expense has been approved.
  *
  * Resolves to null if the audit is not ready in time, or is unavailable. This is
  * a convenience, never a blocker: the expense is already safely submitted.
  */
-export async function waitForAuditHint(expenseId, { attempts = 8, intervalMs = 4000 } = {}) {
+export async function waitForAuditResult(expenseId, { attempts = 8, intervalMs = 4000 } = {}) {
   for (let i = 0; i < attempts; i++) {
     await new Promise((r) => setTimeout(r, intervalMs));
     try {
       const { data } = await api.get(`/api/expenses/${expenseId}/audit-status`, { timeout: 10000 });
       const result = data.data;
-      if (result?.audited) return result.fixHint || null;
+      if (result?.audited) {
+        return { status: result.status || null, fixHint: result.fixHint || null };
+      }
     } catch {
       return null; // offline, or auditing disabled — stay silent
     }

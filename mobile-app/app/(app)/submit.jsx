@@ -6,13 +6,37 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useAuth } from '../../src/context/AuthContext';
-import { submitExpense, getMyAdjustments, waitForAuditHint } from '../../src/services/expenseService';
+import { submitExpense, getMyAdjustments, waitForAuditResult } from '../../src/services/expenseService';
 import { getMyReminders, fulfillReminder } from '../../src/services/imprestService';
 import { Picker } from '@react-native-picker/picker';
 import { SITES, CATEGORIES, IMPREST_TO_EXPENSE_CATEGORY } from '../../src/constants';
 import { useSites } from '../../src/hooks/useSites';
 
 const INITIAL_FORM = { site: SITES[0], amount: '', category: CATEGORIES[0], description: '' };
+
+// The confirmation card is written at submit time, but the AI auditor settles
+// most expenses seconds later. These map the refreshed status onto the card so
+// it reflects the real outcome instead of freezing on "we're checking".
+const RESULT_TITLES = {
+  blocked: '🚫 Blocked',
+  verified: '✅ Auto-Verified',
+  approved: '✅ Approved',
+  rejected: '❌ Rejected',
+};
+
+function resultTitle(status) {
+  return RESULT_TITLES[status] || '📋 Submitted';
+}
+
+function auditedMessage(status) {
+  const messages = {
+    approved: 'Approved — this expense has been settled against your imprest.',
+    rejected: 'This expense was rejected. Check My Expenses for the reason.',
+    blocked: 'This expense was blocked. Check My Expenses for the reason.',
+    manual_review: 'Checked — finance will take a look at this one.',
+  };
+  return messages[status] || 'Expense submitted.';
+}
 
 export default function SubmitExpenseScreen() {
   const [form, setForm] = useState(INITIAL_FORM);
@@ -180,18 +204,30 @@ export default function SubmitExpenseScreen() {
       fetchReminders();
       fetchAdjustments();
 
-      // The AI audit finishes a few seconds from now. If it finds something the
-      // employee can fix themselves, tell them straight away rather than letting
-      // it sit in the finance queue for days. Never blocks or fails the submit.
+      // The AI audit finishes a few seconds from now, and usually settles the
+      // expense outright. Two things come back: the outcome, which refreshes the
+      // card so it stops claiming the receipt is still being checked, and a fix
+      // hint, which is raised immediately so the employee can re-send while they
+      // still have the receipt. Never blocks or fails the submit.
       if (res?.expenseId) {
-        waitForAuditHint(res.expenseId)
-          .then((hint) => {
-            if (!hint) return;
+        waitForAuditResult(res.expenseId)
+          .then((audit) => {
+            if (!audit) return;
+
+            if (audit.status && audit.status !== res.status) {
+              setResult((prev) => (
+                prev && prev.expenseId === res.expenseId
+                  ? { ...prev, status: audit.status, message: auditedMessage(audit.status) }
+                  : prev
+              ));
+            }
+
+            if (!audit.fixHint) return;
             const title = 'Please Re-send Your Receipt';
             if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
-              window.alert(`${title}\n\n${hint}`);
+              window.alert(`${title}\n\n${audit.fixHint}`);
             } else {
-              Alert.alert(title, hint);
+              Alert.alert(title, audit.fixHint);
             }
           })
           .catch(() => { /* advisory only */ });
@@ -243,16 +279,15 @@ export default function SubmitExpenseScreen() {
 
         {/* ── Success result ───────────────────────────────────────── */}
         {result && (
-          <View style={[styles.resultCard, { borderColor: result.status === 'blocked' ? '#ef4444' : '#10b981' }]}>
-            <Text style={styles.resultTitle}>
-              {result.status === 'blocked' ? '🚫 Blocked' : result.status === 'verified' ? '✅ Auto-Verified' : '📋 Submitted'}
-            </Text>
+          <View style={[styles.resultCard, { borderColor: result.status === 'blocked' || result.status === 'rejected' ? '#ef4444' : '#10b981' }]}>
+            <Text style={styles.resultTitle}>{resultTitle(result.status)}</Text>
             <Text style={styles.resultRef}>Ref: {result.refId}</Text>
             <Text style={styles.resultMsg}>{result.message}</Text>
             {/* A confidence score is only meaningful when something was actually
                 read off the receipt. When nothing was, the number looks like a
-                pass mark to the employee — show the ask instead. */}
-            {result.receiptUnreadable ? (
+                pass mark to the employee — show the ask instead. Once the expense
+                is settled neither matters any more. */}
+            {result.status === 'approved' || result.status === 'rejected' ? null : result.receiptUnreadable ? (
               <Text style={styles.resultWarn}>
                 ⚠ Tip: a clear screenshot of the payment confirmation (showing amount, date and transaction ID) gets approved faster.
               </Text>
