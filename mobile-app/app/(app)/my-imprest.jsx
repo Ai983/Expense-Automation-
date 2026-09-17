@@ -130,8 +130,23 @@ const STAGE_COLOURS = {
   's2_rejected': '#ef4444',
 };
 
+// Who changed the amount, in the employee's terms. Only reasons entered to explain
+// an amount change are shown — approvers' internal notes are not.
+const TRAIL_LABELS = {
+  s2: 'Reviewer',
+  director: 'Director',
+  unrecorded: 'Changed during review',
+  finance: 'Finance',
+  founder: 'Founder',
+  payment: 'Finance at payment',
+};
+
+const inr = (n) => `₹${Number(n).toLocaleString('en-IN')}`;
+
 function ImprestCard({ request }) {
   const stage = request.current_stage;
+  const trail = request.amount_trail;
+  const approvedShown = trail ? trail.final_approved : request.approved_amount;
   const statusLabel = stage ? (STAGE_LABELS[stage] || stage) : (IMPREST_STATUS_LABELS[request.status] || request.status);
   const statusColor = stage ? (STAGE_COLOURS[stage] || '#9ca3af') : (IMPREST_STATUS_COLOURS[request.status] || '#9ca3af');
   const submittedDate = new Date(request.submitted_at).toLocaleDateString('en-IN', {
@@ -151,21 +166,43 @@ function ImprestCard({ request }) {
       <Text style={styles.site}>{request.site}</Text>
 
       <View style={styles.cardFooter}>
-        <Text style={styles.amount}>₹{Number(request.amount_requested).toLocaleString('en-IN')}</Text>
-        {(request.status === 'approved' || request.status === 'partially_approved') && request.approved_amount && (
-          <Text style={[styles.approvedAmount, request.status === 'approved' && { color: '#16a34a' }]}>
-            Approved: ₹{Number(request.approved_amount).toLocaleString('en-IN')}
+        <Text style={styles.amount}>
+          {trail ? 'Requested ' : ''}{inr(trail?.requested ?? request.amount_requested)}
+        </Text>
+        {(request.status === 'approved' || request.status === 'partially_approved') && approvedShown != null && (
+          <Text style={[styles.approvedAmount, { color: '#16a34a' }]}>
+            Approved: {inr(approvedShown)}
           </Text>
         )}
         <Text style={styles.date}>{submittedDate}</Text>
       </View>
 
-      {request.paid && request.paid_amount && (
+      {trail?.steps?.length > 0 && (
+        <View style={styles.trailBox}>
+          <Text style={styles.trailTitle}>Amount changes / राशि में बदलाव</Text>
+          {trail.steps.map((s, i) => (
+            <View key={i} style={styles.trailStep}>
+              <Text style={styles.trailLine}>
+                {TRAIL_LABELS[s.stage] || s.stage}: <Text style={styles.trailFrom}>{inr(s.from)}</Text> → <Text style={styles.trailTo}>{inr(s.amount)}</Text>
+              </Text>
+              {s.reason ? <Text style={styles.trailReason}>Reason: {s.reason}</Text> : null}
+            </View>
+          ))}
+        </View>
+      )}
+
+      {request.paid && request.paid_amount != null && (
         <View style={styles.paidBox}>
           <Text style={styles.paidText}>
-            💸 Paid ₹{Number(request.paid_amount).toLocaleString('en-IN')}
+            💸 Paid {inr(request.paid_amount)}
             {request.paid_at ? `  •  ${new Date(request.paid_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}` : ''}
           </Text>
+          <Text style={styles.fileFor}>Submit expenses for {inr(request.paid_amount)} / इतने के खर्च जमा करें</Text>
+          {trail?.old_balance_adjusted > 0 ? (
+            <Text style={styles.paymentRemark}>
+              {inr(trail.old_balance_adjusted)} was adjusted against cash you already held from an earlier advance.
+            </Text>
+          ) : null}
           {request.payment_remark ? (
             <Text style={styles.paymentRemark}>Note: {request.payment_remark}</Text>
           ) : null}
@@ -229,6 +266,18 @@ const styles = StyleSheet.create({
   paymentRemark: {
     marginTop: 3, fontSize: 12, color: '#374151', fontStyle: 'italic',
   },
+  fileFor: {
+    marginTop: 3, fontSize: 12, color: '#065f46', fontWeight: '600',
+  },
+  trailBox: {
+    marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#dbeafe',
+  },
+  trailTitle: { fontSize: 11, fontWeight: '700', color: '#1d4ed8', marginBottom: 4 },
+  trailStep: { marginBottom: 4 },
+  trailLine: { fontSize: 12, color: '#374151' },
+  trailFrom: { color: '#9ca3af', textDecorationLine: 'line-through' },
+  trailTo: { fontWeight: '700', color: '#1d4ed8' },
+  trailReason: { fontSize: 12, color: '#4b5563', fontStyle: 'italic', marginTop: 1 },
   founderApprovedBox: {
     marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#a7f3d0',
     backgroundColor: '#ecfdf5', borderRadius: 6, padding: 8,

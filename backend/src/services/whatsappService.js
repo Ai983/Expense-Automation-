@@ -193,6 +193,7 @@ export async function notifyExpenseRejected({ name, phone, refId, amount, catego
 const S1_PHONE = process.env.S1_PHONE || '';
 const S2_PHONE = process.env.S2_PHONE || '';
 const FINANCE_PHONE = process.env.FINANCE_PHONE || '';
+const FOUNDER_PHONE = process.env.FOUNDER_PHONE || '';
 
 /**
  * Notify S1 approver (Avisha) when a new imprest arrives at s1_pending.
@@ -278,5 +279,61 @@ export async function sendImprestApprovalReminder({ name, phone, refId, approved
     console.log(`[WhatsApp] Payment notification sent to ${name} (${phone})`);
   } catch (err) {
     console.warn(`[WhatsApp] Failed to send to ${name}:`, err.response?.data || err.message);
+  }
+}
+
+/**
+ * Tells an employee that finance will not pay an imprest the founder approved.
+ * Their app said "Founder approved — payment coming", so silence here would
+ * leave them waiting on cash that is never going to arrive.
+ */
+export async function notifyImprestPaymentDeclined({ name, phone, refId, amount, site, category, reason }) {
+  if (!phone) {
+    console.warn(`[WhatsApp] No phone for ${name || 'employee'} — cannot send payment-declined notice`);
+    return;
+  }
+  const message =
+    `Hi ${name || ''}! 👋\n\n` +
+    `❌ *Payment Declined — ${refId}*\n\n` +
+    `Finance has declined to release payment for this imprest advance.\n\n` +
+    `💰 *Amount:* ₹${Number(amount).toLocaleString('en-IN')}\n` +
+    `📍 *Site:* ${site}\n` +
+    `📁 *Category:* ${category}\n` +
+    `📝 *Reason:* ${reason}\n\n` +
+    `This request is now closed. If you still need the advance, please raise a new request from the HagerStone app.`;
+  try {
+    await sendWhatsApp(phone, message);
+  } catch (err) {
+    console.warn(`[WhatsApp] Payment-declined notice to ${name} failed:`, err.response?.data || err.message);
+  }
+}
+
+/**
+ * Tells the founder when finance departs from what they approved — either
+ * declining to pay, or paying a different amount. The founder gate is the
+ * final sign-off, so a change after it must not happen out of the founder's sight.
+ */
+export async function notifyFounderPaymentChange({ kind, refId, employeeName, site, approvedAmount, paidAmount, reason, financeUser }) {
+  if (!FOUNDER_PHONE) return;
+  const inr = (v) => `₹${Number(v).toLocaleString('en-IN')}`;
+  const message = kind === 'declined'
+    ? `❌ *Finance Declined Payment — ${refId}*\n\n` +
+      `You approved this imprest, but finance has declined to pay it.\n\n` +
+      `Employee: ${employeeName}\n` +
+      `Site: ${site}\n` +
+      `Approved: ${inr(approvedAmount)}\n` +
+      `Reason: ${reason}\n` +
+      (financeUser ? `Declined by: ${financeUser}` : '')
+    : `✏️ *Finance Paid a Different Amount — ${refId}*\n\n` +
+      `Employee: ${employeeName}\n` +
+      `Site: ${site}\n` +
+      `Approved payout: ${inr(approvedAmount)}\n` +
+      `Actually paid: ${inr(paidAmount)}\n` +
+      `Reason: ${reason}\n` +
+      (financeUser ? `Paid by: ${financeUser}` : '');
+  try {
+    await sendWhatsApp(FOUNDER_PHONE, message);
+  } catch (err) {
+    console.warn(`[WhatsApp] Founder payment-change notice for ${refId} failed:`, err.response?.data || err.message);
   }
 }

@@ -50,9 +50,11 @@ export function imprestSpendLimit(imprest) {
   // to the approved figure rather than reporting a zero limit.
   if (paid == null || Number.isNaN(paid)) return approved;
 
-  // The founder chose to release less than was sanctioned. That money never
-  // reached the employee, so they cannot account for it: the limit is the cash.
+  // The founder — or finance at payout — chose to release a deliberate figure.
+  // Money held back never reached the employee, so they cannot account for it:
+  // the limit is the cash.
   if (imprest.founder_adjusted_amount != null) return paid;
+  if (imprest.finance_adjusted_amount != null) return paid;
 
   // Otherwise the sanctioned figure. Where paid < approved without a founder
   // cut, the difference is an old balance the employee was already holding —
@@ -103,4 +105,4 @@ export function imprestSettlementTarget(imprest) {
 
 /** Columns these helpers need — keep every select in step with this. */
 export const IMPREST_SPEND_LIMIT_COLUMNS =
-  'amount_requested, approved_amount, paid_amount, old_balance_deducted, founder_adjusted_amount';
+  'amount_requested, approved_amount, paid_amount, old_balance_deducted, founder_adjusted_amount, finance_adjusted_amount';

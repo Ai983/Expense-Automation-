@@ -3,6 +3,8 @@ import api from '../services/api';
 import { showToast } from '../components/layout/Toast';
 import { useAuth } from '../context/AuthContext';
 import { useSites } from '../hooks/useSites';
+import { PayImprestModal, DeclinePaymentModal, defaultPayout } from '../components/imprest/PaymentModals';
+import AmountTrail, { amountWasChanged } from '../components/imprest/AmountTrail';
 
 // Per-role behaviour on the shared Imprest Pipeline Board.
 // Each role can only act on its own column(s); the board UI is identical for all.
@@ -16,8 +18,8 @@ const ROLE_CFG = {
     canAct: (r) => r.current_stage === 's2_pending' || r.current_stage === 's1_pending',
     forward: (r) => `/api/imprest/${r.id}/s2-approve`,
     reject: (r) => `/api/imprest/${r.id}/s2-reject`,
-    forwardPayload: ({ notes, amt }) => ({ notes, approvedAmount: amt }),
-    canReduce: true, noteLabel: 'S2 Approval Note',
+    forwardPayload: ({ notes, amt, adjustReason }) => ({ notes, approvedAmount: amt, adjustReason }),
+    canReduce: true, canIncrease: false, noteLabel: 'S2 Approval Note',
     fwdTitle: (r) => isDirectorRoute(r.approval_route) ? 'Approve & forward to Director' : 'Approve & forward to Finance',
     fwdBtn: (r) => isDirectorRoute(r.approval_route) ? 'Forward to Director →' : 'Forward to Finance →',
     defaultNote: (r) => isDirectorRoute(r.approval_route) ? 'Approved by S2 (Ritu) — forwarding to Director' : 'Approved by S2 (Ritu)',
@@ -35,15 +37,16 @@ const ROLE_CFG = {
     fwdBtn: () => 'Forward',
     defaultNote: () => 'Approved and forwarded by S1 (Avisha)',
   },
-  // Finance — Finance column only (approve/reject at s3)
+  // Finance — approve/reject at s3, then pay or decline once the founder approves
   finance: {
-    actionCols: ['finance'],
+    actionCols: ['finance', 'payment'],
+    canPay: true,
     actorField: 'approved_by', actorAt: 'approved_at',
     canAct: (r) => r.current_stage === 's3_pending',
     forward: (r) => `/api/imprest/${r.id}/approve`,
     reject: (r) => `/api/imprest/${r.id}/reject`,
-    forwardPayload: ({ notes, amt }) => ({ approvedAmount: amt, s3Note: notes }),
-    canReduce: true, noteLabel: 'Finance Note',
+    forwardPayload: ({ notes, amt, adjustReason }) => ({ approvedAmount: amt, s3Note: notes, adjustReason }),
+    canReduce: true, canIncrease: true, noteLabel: 'Finance Note',
     fwdTitle: () => 'Approve & send to Founder',
     fwdBtn: () => 'Approve',
     defaultNote: () => '',
@@ -89,6 +92,9 @@ function columnOf(req) {
   if (s === 'director_pending') return 'director';        // new: ≥₹10K director gate
   if (s === 's3_pending') return 'finance';
   if (s === 'founder_review_pending') return 'founder';   // new: founder approval gate
+  // Founder approved, finance still has to pay (or decline). Must come before the
+  // status check below — these rows carry status 'approved' and used to fall into Done.
+  if (s === 'founder_approved') return req.paid ? 'done' : 'payment';
   if (s === 'paid' || req.status === 'approved') return 'done';
   if (['s1_rejected', 's2_rejected', 's3_rejected', 'director_rejected', 'founder_rejected'].includes(s)) return 'done';
   return 'done';
@@ -171,8 +177,9 @@ function RouteIndicator({ route, stage }) {
   );
 }
 
-function KanbanCard({ req, onView, onForward, onReject, actionable }) {
+function KanbanCard({ req, onView, onForward, onReject, actionable, payable, onPay, onDecline }) {
   const isRejected = req.current_stage?.includes('rejected');
+  const awaitingPayment = req.current_stage === 'founder_approved' && !req.paid;
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-2.5 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
       onClick={() => onView(req)}>
@@ -183,7 +190,12 @@ function KanbanCard({ req, onView, onForward, onReject, actionable }) {
       </div>
       <p className="font-semibold text-[15px] text-gray-900 truncate">{req.employee?.name || '—'}</p>
       <div className="flex items-baseline justify-between mt-0.5">
-        <p className="text-lg font-bold text-gray-900">{fmt(req.amount_requested)}</p>
+        <p className="text-lg font-bold text-gray-900">
+          {fmt(req.amount_requested)}
+          {req.amount_trail && Number(req.amount_trail.requested) !== Number(req.amount_requested) && (
+            <span className="ml-1.5 text-[11px] font-normal text-gray-400 line-through" title="Employee's original request">{fmt(req.amount_trail.requested)}</span>
+          )}
+        </p>
         {req.approved_amount && req.approved_amount !== req.amount_requested && (
           <span className="text-[11px] text-green-600">→ {fmt(req.approved_amount)}</span>
         )}
@@ -205,8 +217,31 @@ function KanbanCard({ req, onView, onForward, onReject, actionable }) {
       {isRejected && req.rejection_reason && (
         <p className="text-[11px] text-red-600 mt-1 italic line-clamp-1" title={req.rejection_reason}>✗ "{req.rejection_reason}"</p>
       )}
+      {awaitingPayment && (
+        <>
+          <p className="text-[11px] text-emerald-700 font-semibold mt-1">
+            💸 To pay {fmt(defaultPayout(req))}
+            {req.founder_gate_reviewed_at && <span className="font-normal text-gray-500"> · approved {timeAgo(req.founder_gate_reviewed_at)}</span>}
+          </p>
+          {req.founder_gate_comment && (
+            <p className="text-[11px] text-pink-600 mt-0.5 italic line-clamp-1" title={req.founder_gate_comment}>Founder: "{req.founder_gate_comment}"</p>
+          )}
+        </>
+      )}
       {req.employee_total_balance > 0 && (
         <p className="text-[10px] text-red-600 font-bold mt-1">⚠ Prev balance: {fmt(req.employee_total_balance)}</p>
+      )}
+      {payable && awaitingPayment && (
+        <div className="flex gap-1.5 mt-2">
+          <button onClick={(e) => { e.stopPropagation(); onPay(req); }}
+            className="flex-1 text-[11px] active:scale-95 text-white py-1.5 rounded font-semibold transition-all duration-150 shadow-sm hover:shadow-md bg-blue-600 hover:bg-blue-700">
+            💸 Pay
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); onDecline(req); }}
+            className="flex-1 text-[11px] bg-white border border-red-300 text-red-600 hover:bg-red-50 active:scale-95 py-1.5 rounded font-semibold transition-all duration-150">
+            ✗ Decline
+          </button>
+        </div>
       )}
       {actionable && (
         <div className="flex gap-1.5 mt-2">
@@ -251,6 +286,7 @@ const COLUMNS = [
   { key: 'director', title: 'Director', tint: 'bg-indigo-50 border-indigo-200', heading: 'text-indigo-700', dot: '🟦' },
   { key: 'finance', title: 'Finance', tint: 'bg-amber-50 border-amber-200', heading: 'text-amber-700', dot: '🟡' },
   { key: 'founder', title: 'Founder — Dhruv', tint: 'bg-pink-50 border-pink-200', heading: 'text-pink-700', dot: '🩷' },
+  { key: 'payment', title: 'Finance — Payment', tint: 'bg-emerald-50 border-emerald-200', heading: 'text-emerald-700', dot: '🟢' },
   { key: 'done', title: 'Recently Done', tint: 'bg-gray-50 border-gray-200', heading: 'text-gray-700', dot: '⚫' },
 ];
 
@@ -269,11 +305,14 @@ export default function S2QueuePage() {
   const [modalMode, setModalMode] = useState(null);
   const [notes, setNotes] = useState('');
   const [approveAmount, setApproveAmount] = useState('');
+  const [adjustReason, setAdjustReason] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [acting, setActing] = useState(false);
   const [actionError, setActionError] = useState('');
   const [empHistory, setEmpHistory] = useState([]);
   const [empHistoryLoading, setEmpHistoryLoading] = useState(false);
+  const [payReq, setPayReq] = useState(null);
+  const [declineReq, setDeclineReq] = useState(null);
 
   const fetchBoard = useCallback(async () => {
     setLoading(true);
@@ -308,7 +347,7 @@ export default function S2QueuePage() {
   }, [board, filterSite, filterName]);
 
   const buckets = useMemo(() => {
-    const out = { s2: [], director: [], finance: [], founder: [], done: [] };
+    const out = { s2: [], director: [], finance: [], founder: [], payment: [], done: [] };
     for (const r of filteredBoard) {
       const col = columnOf(r);
       if (out[col]) out[col].push(r);
@@ -317,6 +356,9 @@ export default function S2QueuePage() {
     ['s2', 'director', 'finance', 'founder'].forEach(k => {
       out[k].sort((a, b) => new Date(a.submitted_at) - new Date(b.submitted_at));
     });
+    // Payment: longest-waiting since the founder approved comes first
+    out.payment.sort((a, b) =>
+      new Date(a.founder_gate_reviewed_at || a.submitted_at) - new Date(b.founder_gate_reviewed_at || b.submitted_at));
     out.done.sort((a, b) => new Date(b.updated_at || b.submitted_at) - new Date(a.updated_at || a.submitted_at));
     return out;
   }, [filteredBoard]);
@@ -357,19 +399,32 @@ export default function S2QueuePage() {
   const openView = (req) => { setSelected(req); setModalMode('view'); };
   const openForward = (req) => {
     setSelected(req); setApproveAmount(String(req.amount_requested));
-    setNotes(cfg.defaultNote(req));
+    setNotes(cfg.defaultNote(req)); setAdjustReason('');
     setActionError(''); setModalMode('forward');
   };
+
+  const amountChanged = !!selected && approveAmount !== ''
+    && Math.round(parseFloat(approveAmount) * 100) !== Math.round(Number(selected.amount_requested) * 100);
   const openReject = (req) => { setSelected(req); setRejectReason(''); setActionError(''); setModalMode('reject'); };
   const closeModal = () => { setSelected(null); setModalMode(null); };
+  const openPay = (req) => { closeModal(); setPayReq(req); };
+  const openDecline = (req) => { closeModal(); setDeclineReq(req); };
 
   const handleForward = async () => {
     if (!notes.trim()) { setActionError('A note is required before forwarding.'); return; }
+    if (cfg.canReduce && amountChanged) {
+      if (!(parseFloat(approveAmount) > 0)) { setActionError('Enter a valid amount.'); return; }
+      if (!cfg.canIncrease && parseFloat(approveAmount) > Number(selected.amount_requested)) {
+        setActionError(`You can only reduce the amount (max ${fmt(selected.amount_requested)}).`); return;
+      }
+      if (!adjustReason.trim()) { setActionError('Give a reason for changing the amount.'); return; }
+    }
     setActing(true); setActionError('');
     try {
       await api.post(cfg.forward(selected), cfg.forwardPayload({
         notes: notes.trim(),
         amt: parseFloat(approveAmount) || undefined,
+        adjustReason: amountChanged ? adjustReason.trim() : undefined,
       }));
       showToast('Forwarded successfully', 'success');
       closeModal(); fetchBoard();
@@ -438,6 +493,9 @@ export default function S2QueuePage() {
                           onForward={openForward}
                           onReject={openReject}
                           actionable={isActionable && cfg.canAct(r)}
+                          payable={isActionable && !!cfg.canPay}
+                          onPay={openPay}
+                          onDecline={openDecline}
                         />
                       </div>
                     ))}
@@ -559,6 +617,14 @@ export default function S2QueuePage() {
                 )}
               </div>
 
+              {/* Amount trail — shown whenever the amount moved, or once it is approved */}
+              {selected.amount_trail && (amountWasChanged(selected) || selected.amount_trail.final_approved != null) && (
+                <div className="border rounded-xl p-4">
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Amount Trail</p>
+                  <AmountTrail req={selected} compact />
+                </div>
+              )}
+
               {/* Timeline of stage actions */}
               <div className="border rounded-xl p-4 space-y-2 text-sm">
                 <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Approval Trail</p>
@@ -584,12 +650,40 @@ export default function S2QueuePage() {
                     </div>
                   </div>
                 )}
+                {selected.founder_gate_status === 'approved' && selected.founder_gate_reviewed_at && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-pink-600 mt-0.5">●</span>
+                    <div className="flex-1">
+                      <div className="flex justify-between"><span className="font-semibold">Founder — Approved</span><span className="text-xs text-gray-500">{fmtDate(selected.founder_gate_reviewed_at)} {fmtTime(selected.founder_gate_reviewed_at)}</span></div>
+                      {selected.founder_gate_comment && <p className="text-xs italic text-gray-600">"{selected.founder_gate_comment}"</p>}
+                      {selected.founder_adjusted_amount != null && <p className="text-xs text-blue-600">Founder set payout: {fmt(selected.founder_adjusted_amount)}</p>}
+                    </div>
+                  </div>
+                )}
+                {selected.current_stage === 'founder_approved' && !selected.paid && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-emerald-600 mt-0.5">○</span>
+                    <div className="flex-1">
+                      <span className="font-semibold text-emerald-700">Awaiting payment by Finance — {fmt(defaultPayout(selected))}</span>
+                    </div>
+                  </div>
+                )}
+                {selected.payment_declined_at && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-red-600 mt-0.5">●</span>
+                    <div className="flex-1">
+                      <div className="flex justify-between"><span className="font-semibold text-red-700">Finance — Payment Declined</span><span className="text-xs text-gray-500">{fmtDate(selected.payment_declined_at)} {fmtTime(selected.payment_declined_at)}</span></div>
+                    </div>
+                  </div>
+                )}
                 {selected.paid_at && (
                   <div className="flex items-start gap-2">
                     <span className="text-green-600 mt-0.5">●</span>
                     <div className="flex-1">
                       <div className="flex justify-between"><span className="font-semibold">Finance — Paid</span><span className="text-xs text-gray-500">{fmtDate(selected.paid_at)} {fmtTime(selected.paid_at)}</span></div>
                       {selected.paid_amount && <p className="text-xs text-gray-600">Paid: {fmt(selected.paid_amount)}</p>}
+                      {selected.finance_adjusted_amount != null && <p className="text-xs text-blue-600">Changed by finance from {fmt(defaultPayout(selected))}</p>}
+                      {selected.payment_remark && <p className="text-xs italic text-gray-600">"{selected.payment_remark}"</p>}
                     </div>
                   </div>
                 )}
@@ -608,12 +702,25 @@ export default function S2QueuePage() {
                 <>
                   {cfg.canReduce && (
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-1">Approved Amount (₹) — you can reduce</label>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">
+                        Approved Amount (₹) — {cfg.canIncrease ? 'you can increase or reduce' : 'you can reduce'}
+                      </label>
                       <input type="number" value={approveAmount} onChange={(e) => setApproveAmount(e.target.value)}
                         className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-                      {parseFloat(approveAmount) < parseFloat(selected.amount_requested) && approveAmount && (
-                        <p className="text-xs text-blue-600 mt-1">Amount reduced from {fmt(selected.amount_requested)} to {fmt(approveAmount)}</p>
+                      {amountChanged && (
+                        <p className="text-xs text-blue-600 mt-1">
+                          Amount {parseFloat(approveAmount) < Number(selected.amount_requested) ? 'reduced' : 'increased'} from {fmt(selected.amount_requested)} to {fmt(approveAmount)}
+                        </p>
                       )}
+                    </div>
+                  )}
+                  {cfg.canReduce && amountChanged && (
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Reason for Changing the Amount <span className="text-red-500">*</span></label>
+                      <textarea value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400" rows={2}
+                        placeholder="e.g. Only 3 labourers needed, not 5…" />
+                      <p className="text-xs text-gray-400 mt-1">Shown to the next approvers and to the employee in their app.</p>
                     </div>
                   )}
                   <div>
@@ -649,6 +756,14 @@ export default function S2QueuePage() {
                   {acting ? 'Rejecting...' : 'Reject'}
                 </button>
               )}
+              {modalMode === 'view' && cfg.canPay && selected.current_stage === 'founder_approved' && !selected.paid && (
+                <>
+                  <button onClick={() => openDecline(selected)} className="px-4 py-2 text-sm text-red-700 border border-red-300 rounded-lg hover:bg-red-50 active:scale-95 transition-all duration-150">Decline Payment</button>
+                  <button onClick={() => openPay(selected)} className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 active:scale-95 transition-all duration-150">
+                    💸 Pay
+                  </button>
+                </>
+              )}
               {modalMode === 'view' && cfg.canAct(selected) && (
                 <>
                   <button onClick={() => openReject(selected)} className="px-4 py-2 text-sm text-red-700 border border-red-300 rounded-lg hover:bg-red-50 active:scale-95 transition-all duration-150">Reject</button>
@@ -661,6 +776,11 @@ export default function S2QueuePage() {
           </div>
         </div>
       )}
+
+      <PayImprestModal req={payReq} onClose={() => setPayReq(null)}
+        onDone={() => { setPayReq(null); showToast('Marked as paid', 'success'); fetchBoard(); }} />
+      <DeclinePaymentModal req={declineReq} onClose={() => setDeclineReq(null)}
+        onDone={() => { setDeclineReq(null); showToast('Payment declined', 'info'); fetchBoard(); }} />
     </div>
   );
 }

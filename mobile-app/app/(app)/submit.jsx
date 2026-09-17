@@ -81,10 +81,15 @@ export default function SubmitExpenseScreen() {
 
   function applyReminder(reminder) {
     const imp = reminder.imprest;
-    const approvedAmt = parseFloat(imp?.approved_amount || imp?.amount_requested || 0);
+    // The cash actually paid — the advance settles against this, not the approved
+    // figure (a founder or finance cut means less was handed over).
+    const approvedAmt = parseFloat(reminder.amount_paid ?? imp?.paid_amount ?? imp?.approved_amount ?? imp?.amount_requested ?? 0);
+    // The most that can be filed before it is flagged as overspend — the server's rule.
+    const claimLimit = parseFloat(reminder.claim_limit ?? approvedAmt);
     // Use actual_submitted (sum of finance-approved expense amounts) over stale fulfilled_amount
     const previouslyFulfilled = parseFloat(reminder.actual_submitted ?? reminder.fulfilled_amount ?? 0);
     const remainingBalance = Math.max(0, approvedAmt - previouslyFulfilled);
+    const claimRemaining = Math.max(0, claimLimit - previouslyFulfilled);
     // Use the imprest site as-is — don't fall back to SITES[0] which loses the real site
     const site = imp?.site || SITES[0];
     if (imp?.site && !SITES.includes(imp.site)) setImprestSiteExtra(imp.site);
@@ -103,7 +108,7 @@ export default function SubmitExpenseScreen() {
     setActiveReminderId(reminder.id);
     setActiveImprestId(imp?.id || null);
     setImprestApprovedAmount(approvedAmt);
-    setImprestRemainingBalance(remainingBalance > 0 ? remainingBalance : approvedAmt);
+    setImprestRemainingBalance(claimRemaining > 0 ? claimRemaining : claimLimit);
     setImages([]);
     setResult(null);
   }
@@ -381,7 +386,8 @@ export default function SubmitExpenseScreen() {
               const daysLeft = Math.floor(hoursLeft / 24);
               const isActive = activeReminderId === r.id;
               const isExpired = r.status === 'expired' || msLeft < 0;
-              const approvedAmt = parseFloat(imp?.approved_amount || imp?.amount_requested || 0);
+              // What was actually paid out — the amount to submit expenses for
+              const approvedAmt = parseFloat(r.amount_paid ?? imp?.paid_amount ?? imp?.approved_amount ?? imp?.amount_requested ?? 0);
               // actual_submitted reflects finance-approved amounts; fall back to fulfilled_amount if not present
               const fulfilledAmt = parseFloat(r.actual_submitted ?? r.fulfilled_amount ?? 0);
               const remainingBal = Math.max(0, approvedAmt - fulfilledAmt);
@@ -408,7 +414,7 @@ export default function SubmitExpenseScreen() {
                   </View>
                   <Text style={styles.reminderDetail}>{imp?.category} · {imp?.site}</Text>
                   <Text style={styles.reminderAmount}>
-                    Approved: ₹{approvedAmt.toLocaleString('en-IN')}
+                    Paid to you: ₹{approvedAmt.toLocaleString('en-IN')}
                     {remainingBal < approvedAmt ? `  •  Balance: ₹${remainingBal.toLocaleString('en-IN')}` : ''}
                   </Text>
                   {hasPartial && (

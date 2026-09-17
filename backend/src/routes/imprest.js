@@ -14,11 +14,12 @@ import { extractRideFare } from '../services/visionService.js';
 import { generateImprestRefId } from '../utils/refIdGenerator.js';
 import { resolveImprestRouting, isDirectorRoute } from '../utils/imprestRouting.js';
 import { imprestSpendLimit, imprestSettlementTarget, IMPREST_SPEND_LIMIT_COLUMNS } from '../utils/imprestSpendLimit.js';
+import { buildAmountTrail, describeAmountChange } from '../utils/imprestAmountTrail.js';
 import { ok, fail } from '../utils/responseHelper.js';
 import { tryGetEmployeeBalances, balanceFor } from '../utils/employeeBalance.js';
 import { FINANCE_ROLES, FINANCE_HEAD_ROLES, S1_ROLES, S2_ROLES, FOUNDER_ROLES, DIRECTOR_APPROVAL_THRESHOLD, WEEKLY_EMERGENCY_THRESHOLD } from '../config/constants.js';
 import { broadcastNewImprest } from '../index.js';
-import { sendImprestApprovalReminder, notifyS2, notifyFinance } from '../services/whatsappService.js';
+import { sendImprestApprovalReminder, notifyS2, notifyFinance, notifyImprestPaymentDeclined, notifyFounderPaymentChange } from '../services/whatsappService.js';
 import { triggerSubmissionConfirmation, triggerFounderApproval, triggerFounderGate } from '../services/n8nService.js';
 
 const router = Router();
@@ -63,6 +64,26 @@ async function maybeClearImprestBlock(employeeId, actorUserId = null, ip = null)
     newValue: { imprest_blocked: false, reason: 'All imprest reminders fulfilled' },
     ipAddress: ip,
   });
+}
+
+// Notes sent with the founder-gate WhatsApp. Every amount change on the way is
+// spelled out next to the stage that made it, so the founder sees why the figure
+// in front of them differs from what the employee asked for.
+function founderGateNotes(imp) {
+  const changed = (a, b) => a != null && b != null && Math.round(Number(a) * 100) !== Math.round(Number(b) * 100);
+  const join = (...parts) => parts.filter(Boolean).join(' — ') || null;
+  const s2Cut = imp.s2_adjusted_amount != null
+    ? describeAmountChange('S2', imp.original_amount_requested ?? imp.amount_requested, imp.s2_adjusted_amount, imp.s2_adjust_reason)
+    : null;
+  const financeChange = changed(imp.approved_amount, imp.amount_requested)
+    ? describeAmountChange('Finance', imp.amount_requested, imp.approved_amount, imp.s3_adjust_reason)
+    : null;
+  return {
+    s1: imp.s1_note || null,
+    s2: join(imp.s2_note || imp.s2_notes, s2Cut),
+    s3: join(imp.s3_note, financeChange),
+    director: imp.director_note || null,
+  };
 }
 
 // Monday 00:00 of the calendar week containing `date` (server time).
@@ -354,6 +375,7 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
         category,
         people_count: parseInt(peopleCount),
         amount_requested: parseFloat(amountRequested),
+        original_amount_requested: parseFloat(amountRequested),
         purpose: purpose || null,
         per_person_rate: perPersonRate ? parseFloat(perPersonRate) : null,
         rate_source: rateSource,
@@ -578,8 +600,16 @@ router.get('/my-reminders/:employeeId', authMiddleware, async (req, res, next) =
       await maybeClearImprestBlock(employeeId, req.user.id, req.ip);
     }
 
+    // amount_paid — what the employee received and must account for (settles the
+    // advance). claim_limit — the most they may file before it is flagged as
+    // overspend. The app shows these instead of re-deriving them from columns.
     const reminders = allReminders
-      .map((r) => ({ ...r, actual_submitted: submittedMap[r.imprest_id] || 0 }))
+      .map((r) => ({
+        ...r,
+        actual_submitted: submittedMap[r.imprest_id] || 0,
+        amount_paid: r.imprest ? imprestSettlementTarget(r.imprest) : null,
+        claim_limit: r.imprest ? imprestSpendLimit(r.imprest) : null,
+      }))
       // Exclude reminders that were just auto-settled or are already fulfilled
       .filter((r) => !autoSettledIds.includes(r.id));
 
@@ -680,7 +710,8 @@ router.get('/my-requests/:employeeId', authMiddleware, async (req, res, next) =>
       .order('submitted_at', { ascending: false })
       .range(offset, offset + parseInt(limit) - 1);
     if (error) throw error;
-    return ok(res, { requests: data, total: count, page: parseInt(page) });
+    const requests = (data || []).map((r) => ({ ...r, amount_trail: buildAmountTrail(r) }));
+    return ok(res, { requests, total: count, page: parseInt(page) });
   } catch (err) { next(err); }
 });
 
@@ -763,9 +794,10 @@ router.get('/finance/queue', authMiddleware, roleGuard(FINANCE_HEAD_ROLES), asyn
           total_expenses_submitted: Math.round(expenseTotal * 100) / 100,
           old_balance: Math.round(Math.max(0, approved - expenseTotal) * 100) / 100,
           employee_total_balance: empBalance,
+          amount_trail: buildAmountTrail(r),
         };
       }
-      return { ...r, employee_total_balance: empBalance };
+      return { ...r, employee_total_balance: empBalance, amount_trail: buildAmountTrail(r) };
     });
 
     // Generate signed URLs for payment receipts
@@ -849,11 +881,11 @@ router.post('/finance/unblock/:employeeId', authMiddleware, roleGuard(FINANCE_RO
 // Finance S3 approval — transitions to founder gate for final approval
 router.post('/:id/approve', authMiddleware, roleGuard(FINANCE_ROLES), async (req, res, next) => {
   try {
-    const { approvedAmount, s3Note } = req.body;
+    const { approvedAmount, s3Note, adjustReason } = req.body;
     if (!s3Note?.trim()) return fail(res, 'Finance note is required before sending to Founder for approval.');
     const { data: imp, error: fetchErr } = await supabaseAdmin
       .from('imprest_requests')
-      .select('id, ref_id, status, amount_requested, employee_id, category, site, purpose, current_stage, approval_route, director_approved_amount, old_balance_deducted, s1_note, s2_note, s2_notes, director_note')
+      .select('id, ref_id, status, amount_requested, original_amount_requested, s2_adjusted_amount, s2_adjust_reason, employee_id, category, site, purpose, current_stage, approval_route, director_approved_amount, old_balance_deducted, s1_note, s2_note, s2_notes, director_note')
       .eq('id', req.params.id).single();
     if (fetchErr || !imp) return fail(res, 'Imprest request not found', 404);
 
@@ -874,6 +906,13 @@ router.post('/:id/approve', authMiddleware, roleGuard(FINANCE_ROLES), async (req
       }
     }
 
+    // Finance may approve more or less than was forwarded to it, but must say why —
+    // the reason travels to the Founder and is shown to the employee.
+    const amountChanged = Math.round(finalAmount * 100) !== Math.round(parseFloat(imp.amount_requested) * 100);
+    if (amountChanged && !adjustReason?.trim()) {
+      return fail(res, 'A reason is required when you approve a different amount than was forwarded to Finance.');
+    }
+
     const isPartial = finalAmount < imp.amount_requested;
     const approvedAt = new Date().toISOString();
     const netAmount = Math.max(0, finalAmount - parseFloat(imp.old_balance_deducted || 0));
@@ -888,17 +927,12 @@ router.post('/:id/approve', authMiddleware, roleGuard(FINANCE_ROLES), async (req
       current_stage: 'founder_review_pending',  // NEW: send to founder, not payment
       founder_gate_sent_at: approvedAt,
       s3_note: s3Note || null,
+      s3_adjust_reason: amountChanged ? adjustReason.trim() : null,
     };
     await supabaseAdmin.from('imprest_requests').update(updateData).eq('id', req.params.id);
 
-    // Trigger WF5: notify Dhruv Sir via WhatsApp
-    // s2_note is canonical; fall back to s2_notes (legacy plural column written by older code)
-    const allNotes = {
-      s1: imp.s1_note || null,
-      s2: imp.s2_note || imp.s2_notes || null,
-      s3: s3Note.trim(),
-      director: imp.director_note || null,
-    };
+    // Trigger WF5: notify Dhruv Sir via WhatsApp, with every amount change spelled out
+    const allNotes = founderGateNotes({ ...imp, ...updateData, s3_note: s3Note.trim() });
     try {
       const { data: emp } = await supabaseAdmin
         .from('employees').select('name').eq('id', imp.employee_id).single();
@@ -927,8 +961,11 @@ router.post('/:id/approve', authMiddleware, roleGuard(FINANCE_ROLES), async (req
     await logAudit({
       userId: req.user.id, action: 'approve',
       entityType: 'expense', entityId: imp.id,
-      oldValue: { status: 'pending', current_stage: 's3_pending' },
-      newValue: { status: isPartial ? 'partially_approved' : 'approved', approvedAmount: finalAmount, current_stage: 'founder_review_pending' },
+      oldValue: { status: 'pending', current_stage: 's3_pending', amount_forwarded: parseFloat(imp.amount_requested) },
+      newValue: {
+        status: isPartial ? 'partially_approved' : 'approved', approvedAmount: finalAmount, current_stage: 'founder_review_pending',
+        ...(amountChanged && { adjustReason: adjustReason.trim() }),
+      },
       ipAddress: req.ip,
     });
 
@@ -954,6 +991,12 @@ router.post('/:id/reject', authMiddleware, roleGuard(FINANCE_ROLES), async (req,
 
     if (imp.current_stage === 'director_rejected') {
       return fail(res, 'This request was already rejected by the Director.');
+    }
+    // Finance rejects only at its own review stage. Without this, a direct call
+    // could reject a founder-approved or even an already-paid imprest, leaving
+    // a row marked both paid and rejected.
+    if (imp.current_stage !== 's3_pending') {
+      return fail(res, 'Only requests awaiting finance review can be rejected. To stop a founder-approved payment, use Decline payment.');
     }
 
     await supabaseAdmin.from('imprest_requests').update({
@@ -1015,6 +1058,7 @@ async function buildStageQueue(req, stageFilter, routeFilter) {
   const enriched = (data || []).map((r) => ({
     ...r,
     employee_total_balance: balanceFor(empBalMap, r.employee_id),
+    amount_trail: buildAmountTrail(r),
   }));
 
   return { requests: enriched, total: count, page: parseInt(page), limit: parseInt(limit) };
@@ -1175,11 +1219,15 @@ router.get('/board', authMiddleware, roleGuard([...S1_ROLES, ...S2_ROLES, ...FIN
     const daysWindow = parseInt(req.query.days) || 14;
     const sinceIso = new Date(Date.now() - daysWindow * 86400000).toISOString();
 
-    // Active stages — all pending (includes new three-tier system stages)
+    // Active stages — all pending (includes new three-tier system stages), plus
+    // founder-approved requests finance has not yet paid. Those were missing
+    // from the board entirely: not pending, not terminal. paid=false keeps out a
+    // few legacy rows stuck at founder_approved that were in fact paid.
     const activeRes = await supabaseAdmin
       .from('imprest_requests')
       .select('*, employee:employee_id (id, name, email, site)')
-      .in('current_stage', ['s1_pending', 's2_pending', 'director_pending', 's3_pending', 'founder_review_pending'])
+      .in('current_stage', ['s1_pending', 's2_pending', 'director_pending', 's3_pending', 'founder_review_pending', 'founder_approved'])
+      .eq('paid', false)
       .order('submitted_at', { ascending: false })
       .limit(300);
 
@@ -1203,6 +1251,7 @@ router.get('/board', authMiddleware, roleGuard([...S1_ROLES, ...S2_ROLES, ...FIN
     const enriched = allRequests.map(r => ({
       ...r,
       employee_total_balance: balanceFor(balMap, r.employee_id),
+      amount_trail: buildAmountTrail(r),
     }));
 
     return ok(res, { requests: enriched, count: enriched.length, days_window: daysWindow });
@@ -1244,15 +1293,20 @@ router.get('/s2/history', authMiddleware, roleGuard([...S2_ROLES, 'head']), asyn
 // Director (Bhaskar) for WhatsApp approval.
 router.post('/:id/s2-approve', authMiddleware, roleGuard(S2_ROLES), async (req, res, next) => {
   try {
-    const { notes, approvedAmount } = req.body;
+    const { notes, approvedAmount, adjustReason } = req.body;
     if (!notes?.trim()) return fail(res, 'A note is required before forwarding.');
     const { data: imp, error: fetchErr } = await supabaseAdmin
       .from('imprest_requests')
-      .select('id, ref_id, current_stage, approval_route, amount_requested, employee_id, site, category, purpose')
+      .select('id, ref_id, current_stage, approval_route, amount_requested, original_amount_requested, employee_id, site, category, purpose')
       .eq('id', req.params.id).single();
     if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
     if (imp.current_stage !== 's2_pending' && imp.current_stage !== 's1_pending') {
       return fail(res, 'Request is not awaiting first-stage review');
+    }
+    const requestedAmount = parseFloat(imp.amount_requested);
+    const reduces = approvedAmount && parseFloat(approvedAmount) < requestedAmount;
+    if (reduces && !adjustReason?.trim()) {
+      return fail(res, 'A reason is required when you reduce the amount — Finance, the Founder and the employee will see it.');
     }
 
     const now = new Date().toISOString();
@@ -1272,19 +1326,29 @@ router.post('/:id/s2-approve', authMiddleware, roleGuard(S2_ROLES), async (req, 
       updateFields.s1_approved_at = now;
       updateFields.s1_note = '(Reviewed by S2)';
     }
-    // Ritu can reduce the amount before forwarding.
-    let effectiveAmount = parseFloat(imp.amount_requested);
-    if (approvedAmount && parseFloat(approvedAmount) < effectiveAmount) {
-      effectiveAmount = parseFloat(approvedAmount);
+    // Ritu can reduce the amount before forwarding. amount_requested carries the
+    // reduced figure onward (Director, Finance); the employee's original and the
+    // reason are kept so every later stage can see what changed and why.
+    let effectiveAmount = requestedAmount;
+    let cutText = null;
+    if (reduces) {
+      effectiveAmount = Math.round(parseFloat(approvedAmount) * 100) / 100;
       updateFields.amount_requested = effectiveAmount;
+      updateFields.s2_adjusted_amount = effectiveAmount;
+      updateFields.s2_adjust_reason = adjustReason.trim();
+      if (imp.original_amount_requested == null) updateFields.original_amount_requested = requestedAmount;
+      cutText = describeAmountChange('S2', requestedAmount, effectiveAmount, adjustReason.trim());
     }
 
     await supabaseAdmin.from('imprest_requests').update(updateFields).eq('id', req.params.id);
 
     await logAudit({
       userId: req.user.id, action: 's2_approve', entityType: 'expense', entityId: imp.id,
-      oldValue: { current_stage: imp.current_stage },
-      newValue: { current_stage: nextStage, s2_notes: notes },
+      oldValue: { current_stage: imp.current_stage, amount_requested: requestedAmount },
+      newValue: {
+        current_stage: nextStage, s2_notes: notes,
+        ...(reduces && { amount_requested: effectiveAmount, adjustReason: adjustReason.trim() }),
+      },
       ipAddress: req.ip,
     });
 
@@ -1299,7 +1363,10 @@ router.post('/:id/s2-approve', authMiddleware, roleGuard(S2_ROLES), async (req, 
           imprestId: imp.id, refId: imp.ref_id, requestedTo: 'Bhaskar Sir',
           employeeName: empName, employeeSite: imp.site,
           amount: effectiveAmount, category: imp.category,
-          purpose: imp.purpose || '', oldBalance, submittedAt: now,
+          // The Director's WhatsApp template has no notes field; the cut rides on
+          // the purpose line so he knows the figure was reduced and why.
+          purpose: [imp.purpose, cutText && `[${cutText}]`].filter(Boolean).join(' '),
+          oldBalance, submittedAt: now,
         }).catch((e) => console.warn('WF2 Bhaskar trigger failed:', e.message));
       } catch (e) { console.warn('Bhaskar WhatsApp trigger failed:', e.message); }
       return ok(res, { refId: imp.ref_id, currentStage: nextStage, message: 'Approved — forwarding to Director for WhatsApp approval' });
@@ -1308,7 +1375,7 @@ router.post('/:id/s2-approve', authMiddleware, roleGuard(S2_ROLES), async (req, 
     // Route to Finance.
     try {
       const empName = (await supabaseAdmin.from('employees').select('name').eq('id', imp.employee_id).single()).data?.name || '';
-      notifyFinance({ refId: imp.ref_id, employeeName: empName, site: imp.site, category: imp.category, amount: effectiveAmount, purpose: imp.purpose || '', s2Notes: notes || '' });
+      notifyFinance({ refId: imp.ref_id, employeeName: empName, site: imp.site, category: imp.category, amount: effectiveAmount, purpose: imp.purpose || '', s2Notes: [notes, cutText].filter(Boolean).join(' — ') });
     } catch (e) { console.warn('Finance notify failed:', e.message); }
 
     return ok(res, { refId: imp.ref_id, currentStage: nextStage, message: 'Forwarded to Finance team' });
@@ -1367,7 +1434,7 @@ router.post('/:id/director-approve', authMiddleware, roleGuard(['admin']), async
     if (!notes?.trim()) return fail(res, 'A note is required before forwarding to Finance.');
     const { data: imp, error: fetchErr } = await supabaseAdmin
       .from('imprest_requests')
-      .select('id, ref_id, current_stage, approval_route, amount_requested, employee_id, site, category, purpose')
+      .select('id, ref_id, current_stage, approval_route, amount_requested, original_amount_requested, employee_id, site, category, purpose')
       .eq('id', req.params.id).single();
     if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
     if (imp.current_stage !== 'director_pending') return fail(res, 'Request is not awaiting Director approval');
@@ -1379,10 +1446,12 @@ router.post('/:id/director-approve', authMiddleware, roleGuard(['admin']), async
       director_approved_at: new Date().toISOString(),
       director_note: notes || null,
     };
-    // Director can reduce the amount
+    // Director can reduce the amount. The note is the reason; the employee's
+    // original figure is kept so the cut stays visible in the amount trail.
     if (approvedAmount && parseFloat(approvedAmount) < parseFloat(imp.amount_requested)) {
       updateFields.director_approved_amount = parseFloat(approvedAmount);
       updateFields.amount_requested = parseFloat(approvedAmount);
+      if (imp.original_amount_requested == null) updateFields.original_amount_requested = parseFloat(imp.amount_requested);
     } else {
       updateFields.director_approved_amount = parseFloat(imp.amount_requested);
     }
@@ -1499,17 +1568,40 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
   try {
     const { data: imp, error: fetchErr } = await supabaseAdmin
       .from('imprest_requests')
-      .select('id, ref_id, current_stage, status, approved_amount, net_approved_amount, founder_adjusted_amount, employee_id, category, old_balance_deducted')
+      .select('id, ref_id, current_stage, status, paid, amount_requested, approved_amount, net_approved_amount, founder_adjusted_amount, employee_id, category, site, old_balance_deducted')
       .eq('id', req.params.id).single();
     if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
     if (imp.current_stage !== 'founder_approved') return fail(res, 'Founder approval required before payment.');
+    if (imp.paid) return fail(res, 'This imprest is already marked paid.');
 
     // If the founder adjusted the amount at the gate, that is the EXACT payout
     // (old-balance deduction is ignored). Otherwise fall back to the net/approved.
-    const paidAmount = imp.founder_adjusted_amount != null
+    const approvedPayout = imp.founder_adjusted_amount != null
       ? parseFloat(imp.founder_adjusted_amount)
       : parseFloat(imp.net_approved_amount || imp.approved_amount);
     const paymentRemark = req.body?.paymentRemark?.trim() || null;
+
+    // Finance may pay a different amount: anything up to what the founder signed
+    // off (their adjusted figure, else the gross approved amount before any
+    // old-balance deduction), never more. Before this, finance could only record
+    // the system figure and typed the real one into the remark ("4500 paid"),
+    // leaving paid_amount — and every balance built on it — wrong.
+    let paidAmount = approvedPayout;
+    let financeAdjusted = null;
+    const rawAdjusted = req.body?.adjustedAmount;
+    if (rawAdjusted !== undefined && rawAdjusted !== null && String(rawAdjusted).trim() !== '') {
+      const adj = Number(rawAdjusted);
+      if (!Number.isFinite(adj) || adj <= 0) return fail(res, 'Amount to pay must be a positive number');
+      if (Math.round(adj * 100) !== Math.round(approvedPayout * 100)) {
+        const cap = parseFloat(imp.founder_adjusted_amount ?? imp.approved_amount ?? imp.amount_requested);
+        if (Math.round(adj * 100) > Math.round(cap * 100)) {
+          return fail(res, `Cannot pay more than the founder approved (₹${cap.toLocaleString('en-IN')})`);
+        }
+        if (!paymentRemark) return fail(res, 'A reason is required when you pay a different amount');
+        financeAdjusted = Math.round(adj * 100) / 100;
+        paidAmount = financeAdjusted;
+      }
+    }
 
     const updateFields = {
       paid: true,
@@ -1518,6 +1610,7 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
       paid_amount: Math.round(paidAmount * 100) / 100,
       current_stage: 'paid',
       payment_remark: paymentRemark,
+      finance_adjusted_amount: financeAdjusted,
     };
 
     // Upload payment receipt if provided
@@ -1527,7 +1620,14 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
       updateFields.payment_receipt_path = receiptPath;
     }
 
-    await supabaseAdmin.from('imprest_requests').update(updateFields).eq('id', req.params.id);
+    // Conditional on the stage so a concurrent Decline (or a double-click) can't
+    // be overwritten by a payment.
+    const { data: updated, error: updErr } = await supabaseAdmin.from('imprest_requests')
+      .update(updateFields)
+      .eq('id', req.params.id).eq('current_stage', 'founder_approved').eq('paid', false)
+      .select('id');
+    if (updErr) throw updErr;
+    if (!updated?.length) return fail(res, 'This imprest was just paid or declined by someone else. Refresh the queue.', 409);
 
     // NOW start the 7-day expense reminder
     const deadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -1552,14 +1652,100 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
           category: imp.category || '', deadline, paymentRemark,
         });
       }
+      if (financeAdjusted !== null) {
+        await notifyFounderPaymentChange({
+          kind: 'adjusted', refId: imp.ref_id, employeeName: emp?.name || '', site: imp.site,
+          approvedAmount: approvedPayout, paidAmount, reason: paymentRemark, financeUser: req.user.name,
+        });
+      }
     } catch (e) { console.warn('WhatsApp pay notification failed:', e.message); }
 
     await logAudit({
       userId: req.user.id, action: 'pay_imprest', entityType: 'expense', entityId: imp.id,
-      newValue: { paid: true, paidAmount, current_stage: 'paid' }, ipAddress: req.ip,
+      newValue: {
+        paid: true, paidAmount, current_stage: 'paid',
+        ...(financeAdjusted !== null && { financeAdjustedFrom: approvedPayout, reason: paymentRemark }),
+      },
+      ipAddress: req.ip,
     });
 
     return ok(res, { refId: imp.ref_id, status: 'paid', paidAmount: Math.round(paidAmount * 100) / 100 });
+  } catch (err) { next(err); }
+});
+
+// ── POST /api/imprest/:id/decline-payment ────────────────────────────────────
+// Finance declines to pay an imprest the founder already approved — e.g. it was
+// paid outside the system, or the work no longer exists. Before this, such
+// requests sat in "Approved – Unpaid" forever with founder notes like "Already
+// paid" or "Not exist", still counting toward the site's weekly limit and the
+// employee's outstanding advances.
+//
+// Closes the request as a finance rejection (s3_rejected) so every existing
+// stage filter and the mobile app treat it correctly; payment_declined_at marks
+// it as a post-founder decline.
+router.post('/:id/decline-payment', authMiddleware, roleGuard(FINANCE_ROLES), async (req, res, next) => {
+  try {
+    const reason = req.body?.reason?.trim();
+    if (!reason) return fail(res, 'A reason is required to decline payment');
+
+    const { data: imp, error: fetchErr } = await supabaseAdmin
+      .from('imprest_requests')
+      .select('id, ref_id, current_stage, status, paid, employee_id, site, category, approved_amount, net_approved_amount, founder_adjusted_amount')
+      .eq('id', req.params.id).single();
+    if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
+    if (imp.current_stage !== 'founder_approved') return fail(res, 'Only founder-approved imprests awaiting payment can be declined.');
+    if (imp.paid) return fail(res, 'This imprest is already paid and cannot be declined.');
+
+    const now = new Date().toISOString();
+    const { data: updated, error: updErr } = await supabaseAdmin.from('imprest_requests')
+      .update({
+        current_stage: 's3_rejected',
+        status: 'rejected',
+        rejection_reason: reason,
+        payment_declined_by: req.user.id,
+        payment_declined_at: now,
+      })
+      .eq('id', imp.id).eq('current_stage', 'founder_approved').eq('paid', false)
+      .select('id');
+    if (updErr) throw updErr;
+    if (!updated?.length) return fail(res, 'This imprest was just paid or declined by someone else. Refresh the queue.', 409);
+
+    await logAudit({
+      userId: req.user.id, action: 'decline_payment',
+      entityType: 'expense', entityId: imp.id,
+      oldValue: { status: imp.status, current_stage: 'founder_approved' },
+      newValue: { status: 'rejected', current_stage: 's3_rejected', reason },
+      ipAddress: req.ip,
+    });
+
+    try {
+      broadcastNewImprest({
+        id: imp.id,
+        refId: imp.ref_id,
+        type: 'payment_declined',
+        currentStage: 's3_rejected',
+      });
+    } catch (e) { console.warn('WebSocket broadcast failed:', e.message); }
+
+    const payout = imp.founder_adjusted_amount != null
+      ? parseFloat(imp.founder_adjusted_amount)
+      : parseFloat(imp.net_approved_amount || imp.approved_amount);
+    try {
+      const { data: emp } = await supabaseAdmin
+        .from('employees').select('name, phone').eq('id', imp.employee_id).single();
+      await Promise.all([
+        notifyImprestPaymentDeclined({
+          name: emp?.name, phone: emp?.phone, refId: imp.ref_id,
+          amount: payout, site: imp.site, category: imp.category || '', reason,
+        }),
+        notifyFounderPaymentChange({
+          kind: 'declined', refId: imp.ref_id, employeeName: emp?.name || '', site: imp.site,
+          approvedAmount: payout, reason, financeUser: req.user.name,
+        }),
+      ]);
+    } catch (e) { console.warn('WhatsApp payment-declined notification failed:', e.message); }
+
+    return ok(res, { refId: imp.ref_id, status: 'rejected', message: 'Payment declined' });
   } catch (err) { next(err); }
 });
 
@@ -1586,7 +1772,7 @@ router.get('/founder/history', authMiddleware, roleGuard(FOUNDER_ROLES), async (
       .order('founder_gate_reviewed_at', { ascending: false })
       .limit(200);
     if (error) throw error;
-    return ok(res, { requests: data || [] });
+    return ok(res, { requests: (data || []).map((r) => ({ ...r, amount_trail: buildAmountTrail(r) })) });
   } catch (err) { next(err); }
 });
 
@@ -1742,7 +1928,7 @@ router.post('/:id/resend-founder-gate', authMiddleware, roleGuard(FINANCE_ROLES)
   try {
     const { data: imp, error: fetchErr } = await supabaseAdmin
       .from('imprest_requests')
-      .select('id, ref_id, current_stage, employee_id, site, approved_amount, category, purpose, s1_note, s2_note, s3_note, director_note')
+      .select('id, ref_id, current_stage, employee_id, site, amount_requested, original_amount_requested, s2_adjusted_amount, s2_adjust_reason, approved_amount, s3_adjust_reason, category, purpose, s1_note, s2_note, s2_notes, s3_note, director_note')
       .eq('id', req.params.id).single();
     if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
     if (imp.current_stage !== 'founder_review_pending') return fail(res, 'Request is not awaiting founder approval');
@@ -1751,12 +1937,7 @@ router.post('/:id/resend-founder-gate', authMiddleware, roleGuard(FINANCE_ROLES)
     try {
       const { data: emp } = await supabaseAdmin
         .from('employees').select('name').eq('id', imp.employee_id).single();
-      const allNotes = {
-        s1: imp.s1_note || null,
-        s2: imp.s2_note || null,
-        s3: imp.s3_note || null,
-        director: imp.director_note || null,
-      };
+      const allNotes = founderGateNotes(imp);
       triggerFounderGate({
         imprestId: imp.id,
         refId: imp.ref_id,

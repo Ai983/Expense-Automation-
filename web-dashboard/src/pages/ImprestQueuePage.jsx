@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import api from '../services/api';
 import { useSites } from '../hooks/useSites';
+import { PayImprestModal, DeclinePaymentModal, defaultPayout } from '../components/imprest/PaymentModals';
+import AmountTrail, { amountWasChanged } from '../components/imprest/AmountTrail';
 
 const IMPREST_CATEGORIES = [
   'Food Expense', 'Site Room Rent', 'Travelling', 'Conveyance',
@@ -41,6 +43,11 @@ const STATUS_LABELS = {
 
 function fmt(amount) {
   return `₹${Number(amount).toLocaleString('en-IN')}`;
+}
+
+function statusLabel(req) {
+  if (req.payment_declined_at) return 'Payment Declined';
+  return STATUS_LABELS[req.status] || req.status;
 }
 
 function fmtDate(d) {
@@ -99,7 +106,10 @@ function ApprovalTimeline({ req }) {
   const s2First = route === 's2_finance_founder' || route === 's2_director_finance_founder';
   const isDirector = route === 's2_director_finance_founder' || route === 'avisha_director_finance_founder' || route === 'avisha_director_finance';
   const hasFounderGate = route === 'avisha_finance_founder' || route === 'avisha_director_finance_founder' || route === 's2_finance_founder' || route === 's2_director_finance_founder';
-  const financeDone = ['founder_review_pending', 'founder_approved', 's3_approved'].includes(req.current_stage) || !!req.paid;
+  // A payment decline is recorded as s3_rejected, but it happens after finance
+  // and the founder both approved — those steps stay green.
+  const declined = !!req.payment_declined_at;
+  const financeDone = ['founder_review_pending', 'founder_approved', 's3_approved'].includes(req.current_stage) || !!req.paid || declined;
 
   const steps = [];
 
@@ -134,16 +144,16 @@ function ApprovalTimeline({ req }) {
   steps.push({
     label: 'Finance', sub: 'Review',
     done: financeDone,
-    rejected: req.current_stage === 's3_rejected',
+    rejected: req.current_stage === 's3_rejected' && !declined,
     date: req.approved_at,
-    note: req.rejection_reason && req.current_stage === 's3_rejected' ? req.rejection_reason : null,
+    note: req.rejection_reason && req.current_stage === 's3_rejected' && !declined ? req.rejection_reason : null,
   });
 
   // Founder gate (Dhruv Sir) — final approval before payment in the new system
   if (hasFounderGate) {
     steps.push({
       label: 'Founder / Dhruv Sir', sub: 'WhatsApp',
-      done: req.founder_review_status === 'approved' || req.current_stage === 'founder_approved' || !!req.paid,
+      done: req.founder_review_status === 'approved' || req.current_stage === 'founder_approved' || !!req.paid || declined,
       rejected: req.founder_review_status === 'rejected' || req.current_stage === 'founder_rejected',
       date: req.founder_review_at, note: req.founder_review_comment,
     });
@@ -151,8 +161,12 @@ function ApprovalTimeline({ req }) {
 
   // Payment
   steps.push({
-    label: 'Payment', sub: req.paid ? fmt(req.paid_amount) : 'Not yet paid',
-    done: !!req.paid, rejected: false, date: req.paid_at, note: null,
+    label: 'Payment',
+    sub: declined ? 'Declined by finance' : req.paid ? fmt(req.paid_amount) : 'Not yet paid',
+    done: !!req.paid, rejected: declined,
+    date: declined ? req.payment_declined_at : req.paid_at,
+    note: declined ? req.rejection_reason : null,
+    extra: req.paid && req.finance_adjusted_amount != null ? `Finance changed the amount from ${fmt(defaultPayout(req))}` : null,
   });
 
   return (
@@ -215,12 +229,12 @@ export default function ImprestQueuePage() {
   const [modalMode, setModalMode] = useState(null);
   const [approveAmount, setApproveAmount] = useState('');
   const [approveNote, setApproveNote] = useState('');
+  const [adjustReason, setAdjustReason] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState('');
   const [payReq, setPayReq] = useState(null);
-  const [payReceipt, setPayReceipt] = useState(null);
-  const [payRemark, setPayRemark] = useState('');
+  const [declineReq, setDeclineReq] = useState(null);
 
   const detailScrollRef = useRef(null);
 
@@ -255,22 +269,31 @@ export default function ImprestQueuePage() {
 
   const openApprove = (req) => {
     setSelected(req); setApproveAmount(String(req.amount_requested));
-    setApproveNote(''); setRejectReason(''); setActionError(''); setModalMode('approve');
+    setApproveNote(''); setAdjustReason(''); setRejectReason(''); setActionError(''); setModalMode('approve');
   };
   const openReject = (req) => {
     setSelected(req); setRejectReason(''); setActionError(''); setModalMode('reject');
   };
   const closeModal = () => {
     setSelected(null); setModalMode(null);
-    setApproveAmount(''); setApproveNote(''); setRejectReason(''); setActionError('');
+    setApproveAmount(''); setApproveNote(''); setAdjustReason(''); setRejectReason(''); setActionError('');
   };
+
+  // Finance may approve more or less than was forwarded, but must say why.
+  const approveAmountChanged = !!selected && approveAmount !== ''
+    && Math.round(parseFloat(approveAmount) * 100) !== Math.round(Number(selected.amount_requested) * 100);
 
   const handleApprove = async () => {
     if (!approveAmount || parseFloat(approveAmount) <= 0) { setActionError('Enter a valid approved amount.'); return; }
+    if (approveAmountChanged && !adjustReason.trim()) { setActionError('Give a reason for changing the amount.'); return; }
     if (!approveNote.trim()) { setActionError('Finance note is required before sending to Founder.'); return; }
     setActionLoading(true); setActionError('');
     try {
-      await api.post(`/api/imprest/${selected.id}/approve`, { approvedAmount: parseFloat(approveAmount), s3Note: approveNote.trim() });
+      await api.post(`/api/imprest/${selected.id}/approve`, {
+        approvedAmount: parseFloat(approveAmount),
+        s3Note: approveNote.trim(),
+        ...(approveAmountChanged && { adjustReason: adjustReason.trim() }),
+      });
       closeModal(); fetchQueue();
     } catch (e) { setActionError(e.response?.data?.error || 'Approval failed.'); }
     finally { setActionLoading(false); }
@@ -286,20 +309,8 @@ export default function ImprestQueuePage() {
     finally { setActionLoading(false); }
   };
 
-  const handlePay = async () => {
-    if (!payReq) return;
-    setActionLoading(true); setActionError('');
-    try {
-      const formData = new FormData();
-      if (payReceipt) formData.append('receipt', payReceipt);
-      if (payRemark.trim()) formData.append('paymentRemark', payRemark.trim());
-      await api.post(`/api/imprest/${payReq.id}/pay`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      setPayReq(null); setPayReceipt(null); setPayRemark(''); fetchQueue();
-    } catch (e) { setActionError(e.response?.data?.error || 'Pay failed'); }
-    finally { setActionLoading(false); }
-  };
+  const openPay = (req) => setPayReq(req);
+  const openDecline = (req) => setDeclineReq(req);
 
   const totalPages = Math.ceil(total / limit);
   const clearFilters = () => {
@@ -425,6 +436,11 @@ export default function ImprestQueuePage() {
                       <td className="px-4 py-3 text-right text-gray-700">{req.people_count}</td>
                       <td className="px-4 py-3 text-right font-semibold text-gray-900">
                         {fmt(req.amount_requested)}
+                        {req.amount_trail && Number(req.amount_trail.requested) !== Number(req.amount_requested) && (
+                          <div className="text-xs font-normal text-gray-400 line-through" title="Employee's original request — see Amount Trail">
+                            {fmt(req.amount_trail.requested)}
+                          </div>
+                        )}
                         {req.user_edited_amount && req.ai_estimated_amount && (
                           <div className={`text-xs mt-0.5 ${deviationClass(req.amount_deviation, req.amount_requested)}`}>
                             AI: {fmt(req.ai_estimated_amount)}
@@ -452,7 +468,7 @@ export default function ImprestQueuePage() {
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[req.status] || 'bg-gray-100 text-gray-600'}`}>
-                          {STATUS_LABELS[req.status] || req.status}
+                          {statusLabel(req)}
                         </span>
                         {req.rejection_reason && (
                           <div className="text-xs text-red-500 mt-1 max-w-[120px] line-clamp-1" title={req.rejection_reason}>
@@ -503,8 +519,12 @@ export default function ImprestQueuePage() {
                             </button>
                           )}
                           {req.current_stage === 'founder_approved' && !req.paid && (
-                            <button onClick={() => { setPayReq(req); setPayReceipt(null); setPayRemark(''); setActionError(''); }}
-                              className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 transition-colors font-medium">💸 Pay</button>
+                            <>
+                              <button onClick={() => openPay(req)}
+                                className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 transition-colors font-medium">💸 Pay</button>
+                              <button onClick={() => openDecline(req)}
+                                className="text-xs bg-white text-red-600 border border-red-300 px-3 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium">Decline</button>
+                            </>
                           )}
                           {req.paid && (
                             <span className="text-xs text-green-600 font-semibold">✓ Paid {fmtDate(req.paid_at)}</span>
@@ -561,7 +581,7 @@ export default function ImprestQueuePage() {
                 <span className="font-mono text-sm text-amber-600 font-bold bg-amber-50 px-2 py-1 rounded-lg">{detailReq.ref_id}</span>
                 <h2 className="text-base font-bold text-gray-900">{detailReq.category}</h2>
                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLES[detailReq.status] || 'bg-gray-100 text-gray-600'}`}>
-                  {STATUS_LABELS[detailReq.status] || detailReq.status}
+                  {statusLabel(detailReq)}
                 </span>
               </div>
               <button onClick={() => setDetailReq(null)}
@@ -653,8 +673,16 @@ export default function ImprestQueuePage() {
                     {detailReq.founder_adjusted_amount != null && (
                       <p className="text-xs font-semibold text-blue-700 mt-1">✏️ Founder adjusted the amount: {fmt(detailReq.approved_amount)} → {fmt(detailReq.founder_adjusted_amount)}</p>
                     )}
-                    <p className="text-xs text-emerald-600 mt-0.5 font-medium">Ready for payment — click Pay Now below.</p>
+                    <p className="text-xs text-emerald-600 mt-0.5 font-medium">Ready for payment — click Pay Now below, or Decline Payment if it should not be paid.</p>
                   </div>
+                </div>
+              )}
+
+              {/* Amount Trail — who changed the amount, to what, and why */}
+              {detailReq.amount_trail && (
+                <div className="bg-gray-50 rounded-xl p-4">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5"><span className="w-1 h-3 rounded-full bg-blue-400 inline-block" />Amount Trail</p>
+                  <AmountTrail req={detailReq} />
                 </div>
               )}
 
@@ -697,6 +725,12 @@ export default function ImprestQueuePage() {
                       {detailReq.founder_adjusted_amount != null && (
                         <CompactRow label="Founder Set (payout)" value={fmt(detailReq.founder_adjusted_amount)} bold className="text-blue-600" />
                       )}
+                      {detailReq.finance_adjusted_amount != null && (
+                        <CompactRow label="Finance Paid (changed)" value={fmt(detailReq.finance_adjusted_amount)} bold className="text-blue-600" />
+                      )}
+                      {detailReq.payment_declined_at && (
+                        <CompactRow label="Payment Declined" value={fmtDate(detailReq.payment_declined_at)} bold className="text-red-600" />
+                      )}
                       {detailReq.approver?.name && <CompactRow label="By" value={detailReq.approver.name} />}
                       {detailReq.approved_at && <CompactRow label="On" value={fmtDate(detailReq.approved_at)} />}
                       {detailReq.rejection_reason && <CompactRow label="Reason" value={detailReq.rejection_reason} className="text-red-600" />}
@@ -733,10 +767,16 @@ export default function ImprestQueuePage() {
                 </>
               )}
               {detailReq.current_stage === 'founder_approved' && !detailReq.paid && (
-                <button onClick={() => { setDetailReq(null); setPayReq(detailReq); setPayReceipt(null); setPayRemark(''); setActionError(''); }}
-                  className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 active:scale-95 transition-all">
-                  💸 Pay Now
-                </button>
+                <>
+                  <button onClick={() => { setDetailReq(null); openDecline(detailReq); }}
+                    className="px-5 py-2 text-sm font-semibold text-red-600 bg-white border border-red-300 rounded-lg hover:bg-red-50 active:scale-95 transition-all">
+                    ✗ Decline Payment
+                  </button>
+                  <button onClick={() => { setDetailReq(null); openPay(detailReq); }}
+                    className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 active:scale-95 transition-all">
+                    💸 Pay Now
+                  </button>
+                </>
               )}
               <button onClick={() => setDetailReq(null)}
                 className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 active:scale-95 transition-all">
@@ -769,7 +809,7 @@ export default function ImprestQueuePage() {
                 {selected.travel_from && <Row label="Route" value={`${selected.travel_from} → ${selected.travel_to}`} />}
                 {selected.date_from && <Row label="Duration" value={`${fmtDate(selected.date_from)} – ${fmtDate(selected.date_to)}`} />}
                 <Row label="People" value={selected.people_count} />
-                <Row label="Amount Requested" value={fmt(selected.amount_requested)} bold />
+                <Row label={amountWasChanged(selected) ? 'Amount Forwarded' : 'Amount Requested'} value={fmt(selected.amount_requested)} bold />
                 {selected.ai_estimated_amount && <Row label="AI Estimate" value={fmt(selected.ai_estimated_amount)} />}
                 {selected.purpose && <Row label="Purpose" value={selected.purpose} />}
                 {selected.employee_total_balance > 0 && (
@@ -777,16 +817,26 @@ export default function ImprestQueuePage() {
                 )}
               </div>
 
+              {modalMode === 'approve' && amountWasChanged(selected) && (
+                <div className="border border-blue-200 rounded-xl p-3">
+                  <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-2">Amount changed before reaching you</p>
+                  <AmountTrail req={selected} compact />
+                </div>
+              )}
+
               {modalMode === 'approve' && (
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">Approved Amount (₹)</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Approved Amount (₹) — you can increase or reduce</label>
                     <input type="number" value={approveAmount}
                       onChange={(e) => setApproveAmount(e.target.value)}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                       placeholder="Enter approved amount" />
-                    {parseFloat(approveAmount) < parseFloat(selected.amount_requested) && approveAmount && (
-                      <p className="text-xs text-blue-600 mt-1">This will be recorded as a partial approval.</p>
+                    {approveAmountChanged && (
+                      <p className="text-xs text-blue-600 mt-1">
+                        {parseFloat(approveAmount) < Number(selected.amount_requested) ? 'Reducing' : 'Increasing'} from {fmt(selected.amount_requested)} to {fmt(approveAmount)}.
+                        {parseFloat(approveAmount) < Number(selected.amount_requested) && ' Recorded as a partial approval.'}
+                      </p>
                     )}
                     {selected?.director_approved_amount && (
                       <p className="text-xs text-orange-600 mt-1">Director approved {fmt(selected.director_approved_amount)} — you cannot exceed this amount.</p>
@@ -795,6 +845,15 @@ export default function ImprestQueuePage() {
                       <p className="text-xs text-amber-600 mt-1">Old balance deduction: {fmt(selected.old_balance_deducted)} will be subtracted.</p>
                     )}
                   </div>
+                  {approveAmountChanged && (
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Reason for Changing the Amount <span className="text-red-500">*</span></label>
+                      <textarea value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                        rows={2} placeholder="e.g. Rate revised to ₹450/day as per site agreement…" />
+                      <p className="text-xs text-gray-400 mt-1">Shown to the Founder and to the employee in their app.</p>
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Finance Note <span className="text-red-500">*</span></label>
                     <textarea value={approveNote} onChange={(e) => setApproveNote(e.target.value)}
@@ -834,56 +893,9 @@ export default function ImprestQueuePage() {
         )}
       </Modal>
 
-      {/* ── Pay Modal ─────────────────────────────────────────────────────── */}
-      <Modal open={!!payReq}>
-        {payReq && (
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md modal-content">
-            <div className="p-5 border-b">
-              <h2 className="text-lg font-bold text-gray-900">💸 Mark as Paid</h2>
-              <p className="text-sm text-gray-500 mt-0.5">{payReq.ref_id} — {payReq.employee?.name}</p>
-            </div>
-            <div className="p-5 space-y-4">
-              <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-gray-500">Amount</span><span className="font-bold text-green-700 text-base">{fmt(payReq.founder_adjusted_amount ?? (payReq.net_approved_amount || payReq.approved_amount))}</span></div>
-                {payReq.founder_adjusted_amount != null && (
-                  <div className="flex justify-between text-xs"><span className="text-blue-600">✏️ Set by founder — fixed</span><span className="text-gray-400 line-through">{fmt(payReq.approved_amount)}</span></div>
-                )}
-                <div className="flex justify-between"><span className="text-gray-500">Category</span><span>{payReq.category}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Site</span><span>{payReq.site}</span></div>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  Finance Remark <span className="text-gray-400 font-normal">(optional)</span>
-                </label>
-                <textarea
-                  value={payRemark}
-                  onChange={(e) => setPayRemark(e.target.value)}
-                  rows={2}
-                  placeholder="e.g. Paid via NEFT, transferred to account ending 4521…"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
-                />
-                <p className="text-xs text-gray-400 mt-1">This remark will be sent to the employee over WhatsApp.</p>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Payment Receipt <span className="text-gray-400 font-normal">(optional)</span></label>
-                <input type="file" accept="image/*,application/pdf"
-                  onChange={(e) => setPayReceipt(e.target.files[0] || null)}
-                  className="w-full text-sm text-gray-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
-                <p className="text-xs text-gray-400 mt-1">Upload a payment slip or receipt as proof.</p>
-              </div>
-              {actionError && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{actionError}</p>}
-            </div>
-            <div className="p-5 border-t flex justify-end gap-3">
-              <button onClick={() => { setPayReq(null); setPayReceipt(null); setPayRemark(''); setActionError(''); }}
-                className="px-4 py-2 text-sm text-gray-600 border rounded-lg hover:bg-gray-50 active:scale-95 transition-all">Cancel</button>
-              <button onClick={handlePay} disabled={actionLoading}
-                className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60 active:scale-95 transition-all">
-                {actionLoading ? 'Processing…' : 'Confirm Payment'}
-              </button>
-            </div>
-          </div>
-        )}
-      </Modal>
+      {/* ── Pay / Decline Payment (shared with the Pipeline Board) ─────────── */}
+      <PayImprestModal req={payReq} onClose={() => setPayReq(null)} onDone={() => { setPayReq(null); fetchQueue(); }} />
+      <DeclinePaymentModal req={declineReq} onClose={() => setDeclineReq(null)} onDone={() => { setDeclineReq(null); fetchQueue(); }} />
     </div>
   );
 }
