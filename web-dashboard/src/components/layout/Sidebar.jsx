@@ -34,6 +34,7 @@ function baseNavItems(role) {
     case 'approver_s2':
       return [
         { to: '/s2-queue', label: 'Imprest Review', icon: '📋' },
+        { to: '/director-queue', label: 'Director Approvals', icon: '🟦' },
         { to: '/queue', label: 'Expense Review', icon: '🔍' },
         { to: '/imprest-analytics', label: 'Imprest Analytics', icon: '📈' },
         { to: '/feedback', label: 'Feedback', icon: '💬' },

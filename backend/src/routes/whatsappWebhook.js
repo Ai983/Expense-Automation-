@@ -253,6 +253,13 @@ async function handleFounderDirectorReply({ msgText, cleanPhone, quotedMsg, deci
     return;
   }
 
+  const { data: stageRow } = await supabaseAdmin
+    .from('imprest_requests').select('ref_id, current_stage').eq('id', imprestId).maybeSingle();
+  if (stageRow?.current_stage !== 'director_pending') {
+    console.log(`[WhatsApp] Director ${decision} ignored — ${stageRow?.ref_id || imprestId} is at ${stageRow?.current_stage || 'unknown'}, not director_pending`);
+    return;
+  }
+
   const updateFields = {
     founder_review_status: decision,
     founder_review_comment: comment || null,
@@ -278,11 +285,16 @@ async function handleFounderDirectorReply({ msgText, cleanPhone, quotedMsg, deci
     updateFields.rejection_reason = 'Rejected by Director via WhatsApp' + (comment ? ': ' + comment : '');
   }
 
-  const { error: updateErr } = await supabaseAdmin
-    .from('imprest_requests').update(updateFields).eq('id', imprestId);
+  // Only while still at the Director: S2 may already have approved/rejected it
+  // on the Director's behalf from the dashboard.
+  const { data: updated, error: updateErr } = await supabaseAdmin
+    .from('imprest_requests').update(updateFields)
+    .eq('id', imprestId).eq('current_stage', 'director_pending').select('id');
 
   if (updateErr) {
     console.error('[WhatsApp] Failed to update imprest:', updateErr.message);
+  } else if (!updated?.length) {
+    console.log(`[WhatsApp] Director ${decision} ignored — imprest ${imprestId} is no longer at director_pending`);
   } else {
     console.log(`[WhatsApp] Director ${decision} — stage: ${updateFields.current_stage} for imprest ${imprestId}`);
   }
