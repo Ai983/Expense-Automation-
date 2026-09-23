@@ -103,6 +103,21 @@ export function imprestSettlementTarget(imprest) {
   return paid;
 }
 
+// Paise left over from rounding (IMP-20260409-0001: paid 980.50, filed 979.90)
+// kept advances "Overdue" for months. Anything under a rupee is not a balance.
+export const SETTLEMENT_TOLERANCE = 1;
+
+/**
+ * Has enough been filed against this imprest to close it?
+ * Both reminder-settling paths call this so they cannot disagree again — the
+ * submit-screen auto-settle once measured against the claim limit instead and
+ * left 26 fully-covered advances showing "Overdue".
+ */
+export function isImprestSettled(imprest, filed) {
+  const target = imprestSettlementTarget(imprest);
+  return target > 0 && target - (parseFloat(filed) || 0) < SETTLEMENT_TOLERANCE;
+}
+
 /** Columns these helpers need — keep every select in step with this. */
 export const IMPREST_SPEND_LIMIT_COLUMNS =
   'amount_requested, approved_amount, paid_amount, old_balance_deducted, founder_adjusted_amount, finance_adjusted_amount';

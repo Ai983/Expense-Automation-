@@ -13,7 +13,7 @@ import {
 import { extractRideFare } from '../services/visionService.js';
 import { generateImprestRefId } from '../utils/refIdGenerator.js';
 import { resolveImprestRouting, isDirectorRoute } from '../utils/imprestRouting.js';
-import { imprestSpendLimit, imprestSettlementTarget, IMPREST_SPEND_LIMIT_COLUMNS } from '../utils/imprestSpendLimit.js';
+import { imprestSpendLimit, imprestSettlementTarget, isImprestSettled, IMPREST_SPEND_LIMIT_COLUMNS } from '../utils/imprestSpendLimit.js';
 import { buildAmountTrail, describeAmountChange } from '../utils/imprestAmountTrail.js';
 import { ok, fail } from '../utils/responseHelper.js';
 import { tryGetEmployeeBalances, balanceFor } from '../utils/employeeBalance.js';
@@ -578,15 +578,15 @@ router.get('/my-reminders/:employeeId', authMiddleware, async (req, res, next) =
       }
     }
 
-    // Auto-settle: if actual_submitted >= approved_amount AND finance has approved at least one
+    // Auto-settle: if what was filed covers the cash paid AND finance has approved at least one
     // expense, the reminder is fully covered — mark it fulfilled so it disappears from the submit screen.
+    // Measured against the cash paid, not the (larger) claim limit — see isImprestSettled.
     const autoSettledIds = [];
     const allReminders = [...(data || []), ...healedReminders];
     for (const r of allReminders) {
       if (!r.imprest_id || r.id?.startsWith('virtual-')) continue;
-      const approvedAmt = imprestSpendLimit(r.imprest);
       const submitted = submittedMap[r.imprest_id] || 0;
-      const fullySettled = approvedAmt > 0 && submitted >= approvedAmt && financeApprovedSet.has(r.imprest_id);
+      const fullySettled = isImprestSettled(r.imprest, submitted) && financeApprovedSet.has(r.imprest_id);
       if (fullySettled) {
         autoSettledIds.push(r.id);
       }
@@ -668,8 +668,8 @@ router.post('/reminders/:reminderId/fulfill', authMiddleware, async (req, res, n
       );
     }
 
-    // If total expenses cover the approved amount, mark as fulfilled; otherwise keep pending
-    const isFullyFulfilled = totalFulfilled >= approvedAmount;
+    // If total expenses cover the cash paid (to the rupee), mark as fulfilled; otherwise keep pending
+    const isFullyFulfilled = isImprestSettled(imprest, totalFulfilled);
 
     await supabaseAdmin
       .from('imprest_expense_reminders')
@@ -684,7 +684,7 @@ router.post('/reminders/:reminderId/fulfill', authMiddleware, async (req, res, n
       await maybeClearImprestBlock(reminder.employee_id, req.user.id, req.ip);
     }
 
-    const remainingBalance = Math.max(0, approvedAmount - totalFulfilled);
+    const remainingBalance = isFullyFulfilled ? 0 : Math.max(0, approvedAmount - totalFulfilled);
 
     return ok(res, {
       message: isFullyFulfilled ? 'Reminder marked as fulfilled' : 'Partial expense recorded',

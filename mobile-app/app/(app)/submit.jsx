@@ -415,7 +415,6 @@ export default function SubmitExpenseScreen() {
                   <Text style={styles.reminderDetail}>{imp?.category} · {imp?.site}</Text>
                   <Text style={styles.reminderAmount}>
                     Paid to you: ₹{approvedAmt.toLocaleString('en-IN')}
-                    {remainingBal < approvedAmt ? `  •  Balance: ₹${remainingBal.toLocaleString('en-IN')}` : ''}
                   </Text>
                   {hasPartial && (
                     <View style={styles.balanceRow}>
