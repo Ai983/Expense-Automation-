@@ -1592,6 +1592,112 @@ router.post('/:id/resend-director', authMiddleware, roleGuard([...new Set([...S1
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// S2 MARK-PAID: Ritu (EA) records an imprest that was already paid outside the
+// system but is stuck at some approval stage. Skips the remaining stages and
+// leaves the row exactly as a normal /pay would, so balances, the claim limit,
+// the 7-day reminder and the mobile app need no special case.
+// ════════════════════════════════════════════════════════════════════════════
+
+const S2_MARK_PAID_STAGES = [
+  's1_pending', 's2_pending', 'director_pending', 's3_pending', 's3_approved',
+  'founder_review_pending', 'founder_approved',
+];
+
+// GET /api/imprest/s2/unpaid — every open, unpaid imprest Ritu may mark paid
+router.get('/s2/unpaid', authMiddleware, roleGuard(S2_ROLES), async (req, res, next) => {
+  try {
+    const result = await buildStageQueue(req, S2_MARK_PAID_STAGES, null);
+    result.requests = result.requests.filter((r) => !r.paid);
+    return ok(res, result);
+  } catch (err) { next(err); }
+});
+
+// POST /api/imprest/:id/s2-mark-paid — { paidAmount, remark }
+router.post('/:id/s2-mark-paid', authMiddleware, roleGuard(S2_ROLES), async (req, res, next) => {
+  try {
+    const remark = req.body?.remark?.trim();
+    if (!remark) return fail(res, 'A remark is required — how and when was it paid?');
+    const paidAmount = Math.round(Number(req.body?.paidAmount) * 100) / 100;
+    if (!Number.isFinite(paidAmount) || paidAmount <= 0) return fail(res, 'Paid amount must be a positive number');
+
+    const { data: imp, error: fetchErr } = await supabaseAdmin
+      .from('imprest_requests')
+      .select('id, ref_id, current_stage, status, paid, amount_requested, original_amount_requested, approved_amount, employee_id, category, site')
+      .eq('id', req.params.id).single();
+    if (fetchErr || !imp) return fail(res, 'Imprest not found', 404);
+    if (imp.paid) return fail(res, 'This imprest is already marked paid.');
+    if (!S2_MARK_PAID_STAGES.includes(imp.current_stage)) {
+      return fail(res, `Cannot mark paid at stage "${imp.current_stage}"`);
+    }
+    const asked = parseFloat(imp.original_amount_requested ?? imp.amount_requested);
+    if (paidAmount > asked) {
+      return fail(res, `Cannot mark more than the employee requested (₹${asked.toLocaleString('en-IN')})`);
+    }
+
+    const now = new Date().toISOString();
+    // Finance hasn't approved yet: the paid figure becomes the approved figure so
+    // balance and claim-limit code (which read status/approved_amount) see a
+    // normal paid advance.
+    const preFinance = imp.approved_amount == null;
+    const approved = preFinance ? paidAmount : parseFloat(imp.approved_amount);
+    const updateFields = {
+      paid: true,
+      paid_at: now,
+      paid_by: req.user.id,
+      paid_amount: paidAmount,
+      current_stage: 'paid',
+      payment_remark: `Marked paid by S2 (${req.user.name || 'Ritu'}): ${remark}`,
+      ...(preFinance && {
+        status: paidAmount < asked ? 'partially_approved' : 'approved',
+        approved_amount: paidAmount,
+        net_approved_amount: paidAmount,
+      }),
+      // Paid differs from what was approved → cap the claim limit at the cash,
+      // same as a finance-adjusted payout (utils/imprestSpendLimit.js).
+      finance_adjusted_amount: Math.round(paidAmount * 100) !== Math.round(approved * 100) ? paidAmount : null,
+    };
+
+    const { data: updated, error: updErr } = await supabaseAdmin.from('imprest_requests')
+      .update(updateFields)
+      .eq('id', imp.id).eq('current_stage', imp.current_stage).eq('paid', false)
+      .select('id');
+    if (updErr) throw updErr;
+    if (!updated?.length) return fail(res, 'This imprest just moved — refresh and try again.', 409);
+
+    const deadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    try {
+      await supabaseAdmin.from('imprest_expense_reminders').insert({
+        imprest_id: imp.id, employee_id: imp.employee_id, imprest_ref_id: imp.ref_id,
+        deadline, status: 'pending',
+      });
+    } catch (e) { console.error('[CRITICAL] Failed to create expense reminder for', imp.ref_id, ':', e.message); }
+
+    try {
+      const { data: emp } = await supabaseAdmin
+        .from('employees').select('name, phone, site').eq('id', imp.employee_id).single();
+      if (emp?.phone) {
+        await sendImprestApprovalReminder({
+          name: emp.name, phone: emp.phone, refId: imp.ref_id,
+          approvedAmount: paidAmount, site: emp.site,
+          category: imp.category || '', deadline, paymentRemark: remark,
+        });
+      }
+    } catch (e) { console.warn('WhatsApp mark-paid notification failed:', e.message); }
+
+    await logAudit({
+      userId: req.user.id, action: 's2_mark_paid', entityType: 'expense', entityId: imp.id,
+      oldValue: { current_stage: imp.current_stage, status: imp.status, amount_requested: parseFloat(imp.amount_requested) },
+      newValue: { current_stage: 'paid', paidAmount, remark, skippedStage: imp.current_stage },
+      ipAddress: req.ip,
+    });
+
+    try { broadcastNewImprest({ id: imp.id, refId: imp.ref_id, type: 'paid', currentStage: 'paid' }); } catch { /* non-fatal */ }
+
+    return ok(res, { refId: imp.ref_id, status: 'paid', paidAmount });
+  } catch (err) { next(err); }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // PAY: Finance marks imprest as paid — starts 7-day reminder
 // ════════════════════════════════════════════════════════════════════════════
 

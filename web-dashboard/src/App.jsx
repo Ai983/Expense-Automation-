@@ -11,6 +11,7 @@ import ImprestAnalyticsPage from './pages/ImprestAnalyticsPage';
 import S1QueuePage from './pages/S1QueuePage';
 import S2QueuePage from './pages/S2QueuePage';
 import DirectorQueuePage from './pages/DirectorQueuePage';
+import MarkPaidPage from './pages/MarkPaidPage';
 import ResetPassword from './pages/ResetPassword';
 import FeedbackPage from './pages/FeedbackPage';
 import ProcurementQueuePage from './pages/ProcurementQueuePage';
@@ -90,6 +91,7 @@ function AppRoutes() {
       <Route path="/s2-queue" element={<ProtectedLayout><S2QueuePage /></ProtectedLayout>} />
       <Route path="/imprest-board" element={<ProtectedLayout><S2QueuePage /></ProtectedLayout>} />
       <Route path="/director-queue" element={<ProtectedLayout><DirectorQueuePage /></ProtectedLayout>} />
+      <Route path="/mark-paid" element={<ProtectedLayout><MarkPaidPage /></ProtectedLayout>} />
       <Route path="/feedback" element={<ProtectedLayout><FeedbackPage /></ProtectedLayout>} />
       <Route path="/procurement-queue" element={<ProtectedLayout><ProcurementQueuePage /></ProtectedLayout>} />
       {/* Phase 5 — compliance-cleared payment requests from CPS */}
