@@ -198,6 +198,7 @@ router.get('/finance-queue', authMiddleware, roleGuard([...FINANCE_ROLES, 'head'
         paid_amount, paid_by, paid_at, finance_notes,
         payment_receipt_path, payment_logs,
         payment_model, cps_authorization_ref, cps_tranche_id,
+        rejection_reason, rejection_stage, rejected_at,
         created_at, ingested_at
       `)
       .in('status', ['pending_payment', 'partially_paid', 'paid', 'payment_rejected', 'superseded'])
@@ -540,6 +541,95 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
       remaining_balance: Math.max(0, realTotal - newTotalPaid),
       fully_settled: isFullySettled,
     });
+  } catch (err) { next(err); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// POST /api/po-payments/:id/cancel-po
+// Finance decides a pending PO should NOT be paid (order never placed, duplicate,
+// already settled elsewhere…). Only allowed while nothing has been paid — once
+// money has gone out, cancelling would hide a real payment.
+// Moves the finance row to payment_rejected and cancels the PO in CPS. The PR /
+// RFQ are left alone so procurement can re-order if the need still exists.
+// ─────────────────────────────────────────────────────────────────────────
+router.post('/:id/cancel-po', authMiddleware, roleGuard(FINANCE_ROLES), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const reason = req.body?.reason?.trim();
+    if (!reason) return fail(res, 'Cancellation reason is required', 400);
+
+    const { data: current } = await supabaseAdmin
+      .from('po_payments')
+      .select('id, cps_po_id, cps_po_ref, status, paid_amount, payment_model')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (!current) return fail(res, 'PO payment not found', 404);
+    if (current.payment_model === 'tranche') {
+      return fail(res, 'This is an authorized installment — cancel it in CPS, not here.', 409);
+    }
+    if (current.status !== 'pending_payment' || Number(current.paid_amount || 0) > 0) {
+      return fail(res, `Cannot cancel — ${Number(current.paid_amount || 0) > 0 ? 'a payment has already been recorded' : `current status is ${current.status}`}`, 409);
+    }
+
+    const nowIso = new Date().toISOString();
+    // Conditional on status so a concurrent Pay can't be overwritten.
+    const { data, error } = await supabaseAdmin
+      .from('po_payments')
+      .update({
+        status: 'payment_rejected',
+        rejected_by: req.user.id,
+        rejected_at: nowIso,
+        rejection_reason: reason,
+        rejection_stage: 'finance_cancelled',
+      })
+      .eq('id', id)
+      .eq('status', 'pending_payment')
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return fail(res, 'PO was updated by someone else — refresh and try again', 409);
+
+    await logAudit({
+      userId: req.user.id,
+      action: 'PO_PAYMENT_CANCELLED',
+      entityType: 'po_payment',
+      entityId: id,
+      newValue: { reason, po_ref: current.cps_po_ref },
+    });
+
+    // Cancel the PO in CPS so it drops out of every procurement queue.
+    let cpsCancelled = false;
+    if (cpsSupabase && current.cps_po_id) {
+      const byName = req.user.name || req.user.email || 'Finance';
+      const { data: cpsPo, error: cpsErr } = await cpsSupabase
+        .from('cps_purchase_orders')
+        .update({ status: 'cancelled', cancel_reason: `[FINANCE CANCELLED] ${reason}`, updated_at: nowIso })
+        .eq('id', current.cps_po_id)
+        .not('status', 'in', '(cancelled,superseded)')
+        .select('id, po_number')
+        .maybeSingle();
+      if (cpsErr) {
+        console.error('[CPS sync] cancel PO failed:', cpsErr.message);
+      } else if (cpsPo) {
+        cpsCancelled = true;
+        const { error: auditErr } = await cpsSupabase.from('cps_audit_log').insert({
+          user_name: `${byName} (Finance)`,
+          user_role: 'finance',
+          action_type: 'PO_CANCELLED_BY_FINANCE',
+          entity_type: 'purchase_order',
+          entity_id: cpsPo.id,
+          entity_number: cpsPo.po_number,
+          description: `PO ${cpsPo.po_number} cancelled from the Finance dashboard. Reason: ${reason}`,
+          after_value: { status: 'cancelled', reason },
+          severity: 'warning',
+        });
+        if (auditErr) console.error('[CPS sync] cancel audit failed:', auditErr.message);
+      }
+    }
+
+    return ok(res, { ...data, cps_cancelled: cpsCancelled });
   } catch (err) { next(err); }
 });
 

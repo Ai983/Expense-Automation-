@@ -60,6 +60,7 @@ export default function POPaymentsTab() {
   const [expandedId, setExpandedId] = useState(null);
   const [payModal, setPayModal] = useState(null);
   const [adjustModal, setAdjustModal] = useState(null);
+  const [cancelModal, setCancelModal] = useState(null);
   const [comparisonData, setComparisonData] = useState({});
   // SPEC-PAY-01 Gate-2: authorized installment payables (paid against a CPS authorization)
   const [payables, setPayables] = useState([]);
@@ -142,6 +143,12 @@ export default function POPaymentsTab() {
     await api.patch(`/api/po-payments/${po.id}/adjust-amount`, { adjusted_amount: adjustedAmount, notes });
     await loadQueue();
     setAdjustModal(null);
+  }
+
+  async function handleCancel(po, reason) {
+    await api.post(`/api/po-payments/${po.id}/cancel-po`, { reason });
+    await loadQueue();
+    setCancelModal(null);
   }
 
   function downloadComparisonSheet(po, compData) {
@@ -400,6 +407,7 @@ export default function POPaymentsTab() {
   const pending = queue.filter(p => ['pending_payment', 'partially_paid'].includes(p.status));
   const paid = queue.filter(p => p.status === 'paid');
   const superseded = queue.filter(p => p.status === 'superseded');
+  const cancelled = queue.filter(p => p.status === 'payment_rejected');
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000);
   const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
 
@@ -715,6 +723,15 @@ export default function POPaymentsTab() {
                         )}
 
                         <div className="flex gap-2">
+                          {/* Cancel only while nothing is paid — a paid PO can't be un-paid */}
+                          {alreadyPaid === 0 && po.payment_model !== 'tranche' && (
+                            <button
+                              onClick={() => setCancelModal({ po })}
+                              className="px-3 py-1.5 border border-red-300 text-red-700 hover:bg-red-50 text-xs rounded-lg font-medium"
+                            >
+                              Cancel PO
+                            </button>
+                          )}
                           <button
                             onClick={() => setAdjustModal({ po })}
                             className="px-3 py-1.5 border border-purple-300 text-purple-700 hover:bg-purple-50 text-xs rounded-lg font-medium"
@@ -907,6 +924,34 @@ export default function POPaymentsTab() {
         </div>
       )}
 
+      {/* Cancelled by Finance — PO was not to be paid */}
+      {cancelled.length > 0 && (
+        <div>
+          <h3 className="text-sm font-medium text-gray-400 mb-3">Cancelled by Finance ({cancelled.length})</h3>
+          <div className="space-y-2">
+            {cancelled.map(po => (
+              <div key={po.id} className="flex items-center justify-between gap-4 py-3 px-4 bg-red-50/40 rounded-lg border border-red-100">
+                <div className="flex items-start gap-3 min-w-0">
+                  <span className="w-2 h-2 rounded-full bg-red-400 shrink-0 mt-1.5" />
+                  <div className="min-w-0">
+                    <p className="font-mono text-sm text-gray-600">{po.cps_po_ref}</p>
+                    <p className="text-sm text-gray-600">{po.project_name}</p>
+                    <p className="text-xs text-gray-400">{po.supplier_name}</p>
+                    {po.rejection_reason && (
+                      <p className="text-xs text-red-600 italic mt-0.5">Reason: "{po.rejection_reason}"</p>
+                    )}
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-medium text-gray-500 line-through">{fmt(po.total_amount)}</p>
+                  <p className="text-xs text-gray-400">Cancelled {fmtDate(po.rejected_at)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Superseded / Revised POs */}
       {superseded.length > 0 && (
         <div>
@@ -952,6 +997,15 @@ export default function POPaymentsTab() {
           po={adjustModal.po}
           onConfirm={handleAdjust}
           onClose={() => setAdjustModal(null)}
+          fmt={fmt}
+        />
+      )}
+
+      {cancelModal && (
+        <CancelPOModal
+          po={cancelModal.po}
+          onConfirm={handleCancel}
+          onClose={() => setCancelModal(null)}
           fmt={fmt}
         />
       )}
@@ -1149,6 +1203,73 @@ function AdjustAmountModal({ po, onConfirm, onClose, fmt }) {
             className="flex-1 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
           >
             {loading ? 'Saving...' : 'Save Adjustment'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function CancelPOModal({ po, onConfirm, onClose, fmt }) {
+  const [reason, setReason] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit() {
+    setLoading(true);
+    setError('');
+    try {
+      await onConfirm(po, reason.trim());
+    } catch (e) {
+      setError(e?.response?.data?.error || e?.response?.data?.message || e?.message || 'Cancel failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Modal open>
+      <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl">
+        <h2 className="text-lg font-semibold mb-1 text-red-700">Cancel PO</h2>
+        <p className="text-sm text-gray-500 mb-2">{po.cps_po_ref} — {po.supplier_name}</p>
+        <p className="text-xs text-gray-500 mb-5">
+          PO Total: {fmt(po.total_amount)}. This PO will not be paid and will be cancelled in CPS as well.
+          Use this only when the order was never placed, is a duplicate, or was already settled another way.
+        </p>
+
+        {po.procurement_notes && (
+          <p className="text-xs text-blue-600 italic mb-4 bg-blue-50 border border-blue-100 rounded p-2">
+            Procurement: "{po.procurement_notes}"
+          </p>
+        )}
+
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Reason for cancelling <span className="text-red-500">*</span>
+        </label>
+        <textarea
+          rows={3}
+          value={reason}
+          onChange={e => setReason(e.target.value)}
+          placeholder="e.g. Order never placed, duplicate of HI-PO-…, already paid in cash…"
+          className="w-full px-3 py-2 border rounded-lg text-sm resize-none"
+        />
+
+        {error && (
+          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        <div className="flex gap-3 mt-6">
+          <button onClick={onClose} className="flex-1 py-2 border rounded-lg text-sm hover:bg-gray-50">
+            Back
+          </button>
+          <button
+            onClick={submit}
+            disabled={loading || !reason.trim()}
+            className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+          >
+            {loading ? 'Cancelling...' : 'Confirm Cancel PO'}
           </button>
         </div>
       </div>
