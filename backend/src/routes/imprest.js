@@ -17,7 +17,7 @@ import { imprestSpendLimit, imprestSettlementTarget, isImprestSettled, IMPREST_S
 import { buildAmountTrail, describeAmountChange } from '../utils/imprestAmountTrail.js';
 import { ok, fail } from '../utils/responseHelper.js';
 import { tryGetEmployeeBalances, balanceFor } from '../utils/employeeBalance.js';
-import { FINANCE_ROLES, FINANCE_HEAD_ROLES, S1_ROLES, S2_ROLES, FOUNDER_ROLES, DIRECTOR_APPROVAL_THRESHOLD, WEEKLY_EMERGENCY_THRESHOLD } from '../config/constants.js';
+import { FINANCE_ROLES, FINANCE_HEAD_ROLES, S1_ROLES, S2_ROLES, FOUNDER_ROLES, VIEWER_ROLES, DIRECTOR_APPROVAL_THRESHOLD, WEEKLY_EMERGENCY_THRESHOLD } from '../config/constants.js';
 import { broadcastNewImprest } from '../index.js';
 import { sendImprestApprovalReminder, notifyS2, notifyFinance, notifyImprestPaymentDeclined, notifyFounderPaymentChange } from '../services/whatsappService.js';
 import { triggerSubmissionConfirmation, triggerFounderApproval, triggerFounderGate } from '../services/n8nService.js';
@@ -1065,7 +1065,7 @@ async function buildStageQueue(req, stageFilter, routeFilter) {
 }
 
 // GET /api/imprest/s1/queue — Avisha's queue
-router.get('/s1/queue', authMiddleware, roleGuard([...S1_ROLES, 'head']), async (req, res, next) => {
+router.get('/s1/queue', authMiddleware, roleGuard([...S1_ROLES, ...VIEWER_ROLES]), async (req, res, next) => {
   try {
     const result = await buildStageQueue(req, 's1_pending', null);
     return ok(res, result);
@@ -1206,7 +1206,7 @@ router.post('/:id/s1-reject', authMiddleware, roleGuard(S1_ROLES), async (req, r
 // ════════════════════════════════════════════════════════════════════════════
 
 // GET /api/imprest/s2/queue — Ritu's queue (HO/Bangalore sites)
-router.get('/s2/queue', authMiddleware, roleGuard([...S2_ROLES, 'head']), async (req, res, next) => {
+router.get('/s2/queue', authMiddleware, roleGuard([...S2_ROLES, ...VIEWER_ROLES]), async (req, res, next) => {
   try {
     const result = await buildStageQueue(req, 's2_pending', null);
     return ok(res, result);
@@ -1214,7 +1214,7 @@ router.get('/s2/queue', authMiddleware, roleGuard([...S2_ROLES, 'head']), async 
 });
 
 // GET /api/imprest/board — Full pipeline view: every active request + recent terminal ones
-router.get('/board', authMiddleware, roleGuard([...S1_ROLES, ...S2_ROLES, ...FINANCE_ROLES, 'head', 'admin']), async (req, res, next) => {
+router.get('/board', authMiddleware, roleGuard([...S1_ROLES, ...S2_ROLES, ...FINANCE_ROLES, ...VIEWER_ROLES, 'admin']), async (req, res, next) => {
   try {
     const daysWindow = parseInt(req.query.days) || 14;
     const sinceIso = new Date(Date.now() - daysWindow * 86400000).toISOString();
@@ -1259,7 +1259,7 @@ router.get('/board', authMiddleware, roleGuard([...S1_ROLES, ...S2_ROLES, ...FIN
 });
 
 // GET /api/imprest/s2/history — Logged-in S2 reviewer's recent approvals + rejections
-router.get('/s2/history', authMiddleware, roleGuard([...S2_ROLES, 'head']), async (req, res, next) => {
+router.get('/s2/history', authMiddleware, roleGuard([...S2_ROLES, ...VIEWER_ROLES]), async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
     const { data, error } = await supabaseAdmin
@@ -1424,7 +1424,7 @@ router.get('/director/queue', authMiddleware, roleGuard(S2_ROLES), async (req, r
 });
 
 // GET /api/imprest/director-pending — S1/Head view of requests waiting at Director stage
-router.get('/director-pending', authMiddleware, roleGuard([...S1_ROLES, 'head']), async (req, res, next) => {
+router.get('/director-pending', authMiddleware, roleGuard([...S1_ROLES, ...VIEWER_ROLES]), async (req, res, next) => {
   try {
     const result = await buildStageQueue(req, 'director_pending', null);
     return ok(res, result);

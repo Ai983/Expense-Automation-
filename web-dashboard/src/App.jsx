@@ -26,7 +26,10 @@ import HeadImprestListPage from './pages/HeadImprestListPage';
 import HeadPOListPage from './pages/HeadPOListPage';
 
 function getDefaultRoute(role) {
-  if (role === 'head') return '/head';
+  // The founder lands on the read-only Head view. He used to fall through to
+  // '/queue', the finance expense queue, which the API refuses for his role —
+  // so signing in dropped him straight onto an error.
+  if (role === 'head' || role === 'founder') return '/head';
   if (role === 'approver_s1') return '/s1-queue';
   if (role === 'approver_s2') return '/s2-queue';
   if (role === 'procurement_finance') return '/procurement-queue';

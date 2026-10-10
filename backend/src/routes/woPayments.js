@@ -16,7 +16,7 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const FINANCE_ROLES = ['finance', 'manager', 'admin'];
-const ALL_VIEWER_ROLES = ['procurement_finance', 'finance', 'manager', 'admin', 'head'];
+const ALL_VIEWER_ROLES = ['procurement_finance', 'finance', 'manager', 'admin', 'head', 'founder'];
 
 // Columns finance needs for the queue + payment math.
 const WO_SELECT =

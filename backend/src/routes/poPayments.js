@@ -15,7 +15,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 // ── Roles ──────────────────────────────────────────────────────────────────
 const PROCUREMENT_ROLES = ['procurement_finance', 'admin'];
 const FINANCE_ROLES = ['finance', 'manager', 'admin'];
-const ALL_VIEWER_ROLES = ['procurement_finance', 'finance', 'manager', 'admin', 'head'];
+const ALL_VIEWER_ROLES = ['procurement_finance', 'finance', 'manager', 'admin', 'head', 'founder'];
 
 // ── CPS payment sync helper ───────────────────────────────────────────────
 // Calls cps_sync_payment_from_finance RPC — updates payment status, amount,
@@ -181,7 +181,7 @@ router.get('/procurement-queue', authMiddleware, roleGuard(PROCUREMENT_ROLES), a
 // Returns ALL PO fields so finance can cross-verify against the full PO.
 // Includes pending_payment, partially_paid, and recently paid (last 60 days).
 // ─────────────────────────────────────────────────────────────────────────
-router.get('/finance-queue', authMiddleware, roleGuard([...FINANCE_ROLES, 'head']), async (req, res, next) => {
+router.get('/finance-queue', authMiddleware, roleGuard([...FINANCE_ROLES, 'head', 'founder']), async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('po_payments')
@@ -811,7 +811,7 @@ router.post('/pay-authorization', authMiddleware, roleGuard(FINANCE_ROLES), uplo
 // Flow: po_payments.cps_po_ref → cps_purchase_orders → cps_comparison_sheets
 //       + all quotes with line items and supplier profiles
 // ─────────────────────────────────────────────────────────────────────────
-router.get('/:id/comparison', authMiddleware, roleGuard([...FINANCE_ROLES, ...PROCUREMENT_ROLES, 'head']), async (req, res, next) => {
+router.get('/:id/comparison', authMiddleware, roleGuard([...FINANCE_ROLES, ...PROCUREMENT_ROLES, 'head', 'founder']), async (req, res, next) => {
   try {
     const { id } = req.params;
 

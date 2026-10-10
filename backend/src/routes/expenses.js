@@ -15,6 +15,7 @@ import {
   FINANCE_ROLES,
   FINANCE_HEAD_ROLES,
   EXPENSE_REVIEW_ROLES,
+  VIEWER_ROLES,
   CONFIDENCE_AUTO_APPROVE,
   CONFIDENCE_MANUAL_REVIEW,
   AMOUNT_TOLERANCE_INR,
@@ -501,7 +502,7 @@ router.get(
 router.get(
   '/finance/queue',
   authMiddleware,
-  roleGuard([...EXPENSE_REVIEW_ROLES, 'head']),
+  roleGuard([...EXPENSE_REVIEW_ROLES, ...VIEWER_ROLES]),
   async (req, res, next) => {
     try {
       const { status, site, dateFrom, dateTo, employeeId, aiVerdict, stage, page = 1, limit = 50 } = req.query;

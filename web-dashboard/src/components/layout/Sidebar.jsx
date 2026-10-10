@@ -15,7 +15,12 @@ function getNavItems(role, permissions) {
 
 function baseNavItems(role) {
   switch (role) {
+    // 'founder' shares the Head nav: see everything, action nothing. Without
+    // this it fell through to `default` and showed him the finance links
+    // (Expense Queue, Weekly Overrides…), every one of which the API rejects —
+    // exactly the "nav offers a link the API refuses" trap noted above.
     case 'head':
+    case 'founder':
       return [
         { to: '/head', label: 'Overview', icon: '🏠' },
         { to: '/head/kanban', label: 'Workflow Board', icon: '📌' },

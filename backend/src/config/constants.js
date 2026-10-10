@@ -58,13 +58,23 @@ export const S1_ROLES = ['approver_s1', 'admin'];
 export const S2_ROLES = ['approver_s2', 'admin'];
 export const S3_ROLES = ['finance', 'manager', 'admin'];
 export const FOUNDER_ROLES = ['founder', 'admin'];
-export const ALL_DASHBOARD_ROLES = ['approver_s1', 'approver_s2', 'finance', 'manager', 'admin', 'head'];
+export const ALL_DASHBOARD_ROLES = ['approver_s1', 'approver_s2', 'finance', 'manager', 'admin', 'head', 'founder'];
+
+// Roles that may SEE everything without acting on it. 'founder' belongs here and
+// deliberately NOT in FINANCE_ROLES: the founder needs the whole picture, while
+// releasing payments, S3 approval and overrides stay with finance.
+//
+// Until 2026-10-10 'founder' was in none of the viewer lists, so Dhruv could
+// approve at his own gate yet could not open the imprest board — and the
+// dashboard sidebar fell through to the finance nav, offering him links the API
+// then refused. Put a read-only role here; never in FINANCE_ROLES.
+export const VIEWER_ROLES = ['head', 'founder'];
 
 // Head role — read-only across all modules
-export const HEAD_ROLES = ['head', 'admin'];
+export const HEAD_ROLES = ['head', 'admin', 'founder'];
 
-// Finance roles + head (for read-only GET routes that finance views)
-export const FINANCE_HEAD_ROLES = ['finance', 'manager', 'admin', 'head'];
+// Finance roles + read-only viewers (for GET routes that finance views)
+export const FINANCE_HEAD_ROLES = ['finance', 'manager', 'admin', 'head', 'founder'];
 
 // ── Payment Requests (PRQ) — the compliance-gated queue from CPS ──────────────
 // These are deliberately built from roles that EXIST in finance.employees.
