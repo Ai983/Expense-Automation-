@@ -195,16 +195,33 @@ router.post(
         // For multiple screenshots, re-verify using TOTAL extracted amount
         const totalDiff = Math.abs(totalExtractedAmount - parsedAmount);
         const tolerance = AMOUNT_TOLERANCE_INR;
+        // The common case is NOT several payments but one payment shown twice:
+        // the shop bill plus the UPI screenshot for it. Summing those doubles the
+        // amount and blocked honest claims, so a single screenshot that matches
+        // the claim also counts as a match.
+        const singleMatch = allOcrResults.find(
+          (r) => r.extractedAmount != null && Math.abs(parseFloat(r.extractedAmount) - parsedAmount) <= tolerance
+        );
         // Override the amount check with total from all screenshots
         const amountIdx = verificationChecks.findIndex((c) => c.step === 'amount_check');
         if (amountIdx >= 0) {
-          if (totalDiff <= tolerance) {
+          if (totalDiff > tolerance && singleMatch) {
+            verificationChecks[amountIdx] = { step: 'amount_check', result: 'pass', score: 1, detail: `Match: one of ${files.length} screenshots shows ₹${singleMatch.extractedAmount} vs submitted ₹${parsedAmount} (bill + payment proof of the same payment)` };
+          } else if (totalDiff <= tolerance) {
             verificationChecks[amountIdx] = { step: 'amount_check', result: 'pass', score: 1, detail: `Match: Total OCR ₹${totalExtractedAmount} from ${files.length} screenshots vs submitted ₹${parsedAmount} (diff ₹${totalDiff.toFixed(2)})` };
           } else if (totalDiff <= tolerance * 3) {
             verificationChecks[amountIdx] = { step: 'amount_check', result: 'warn', score: 0.5, detail: `Close: Total OCR ₹${totalExtractedAmount} from ${files.length} screenshots vs submitted ₹${parsedAmount} (diff ₹${totalDiff.toFixed(2)})` };
           } else {
             verificationChecks[amountIdx] = { step: 'amount_check', result: 'fail', score: 0, detail: `Mismatch: Total OCR ₹${totalExtractedAmount} from ${files.length} screenshots vs submitted ₹${parsedAmount} (diff ₹${totalDiff.toFixed(2)})` };
           }
+        }
+        // The transaction ID is usually on the payment screenshot, not the bill
+        // that happens to be attached first — accept it from any screenshot.
+        const txnFromAny = allOcrResults.find((r) => r.transactionId)?.transactionId;
+        const txnIdx = verificationChecks.findIndex((c) => c.step === 'txn_id_check');
+        if (txnFromAny && !ocrData?.transactionId && txnIdx >= 0) {
+          ocrData = { ...ocrData, transactionId: txnFromAny };
+          verificationChecks[txnIdx] = { step: 'txn_id_check', result: 'pass', score: 1, detail: `Valid Transaction ID: ${txnFromAny} (from another screenshot)` };
         }
         // Recalculate confidence with updated amount check
         const scores = { amount_check: 40, date_check: 20, status_check: 30, txn_id_check: 10 };
