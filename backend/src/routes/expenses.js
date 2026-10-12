@@ -249,6 +249,13 @@ router.post(
         !ocrData?.date &&
         (!ocrData?.paymentStatus || ocrData.paymentStatus === 'UNKNOWN');
 
+      // Why it was blocked, in words the employee can act on. Stored on the row
+      // so the app and dashboard can show it — previously only a 'BLOCKED' marker
+      // was kept and nobody could tell what to fix.
+      const blockReason = finalStatus === 'blocked'
+        ? (duplicateResult.blockReason || describeLowConfidence(verificationChecks, verification?.overallConfidence || 0))
+        : null;
+
       // 6. Build screenshot_metadata JSONB
       const screenshotMetadata = {
         attachmentType: isPdf ? 'pdf' : 'image',
@@ -267,6 +274,7 @@ router.post(
         rawText: ocrData?.rawText ? ocrData.rawText.slice(0, 1000) : null,
         duplicateWarnings: duplicateResult.warnings,
         verificationChecks,
+        blockReason,
       };
 
       // 7. Insert expense
@@ -368,7 +376,7 @@ router.post(
         confidence: verification?.overallConfidence || 0,
         transactionId: ocrData?.transactionId || null,
         duplicateWarnings: duplicateResult.warnings,
-        blockReason: duplicateResult.blockReason,
+        blockReason,
         receiptUnreadable,
         message: getStatusMessage(finalStatus, {
           aiAuditOn: AI_AUDIT_MODE !== 'off',
@@ -1092,10 +1100,30 @@ function getStatusMessage(status, { aiAuditOn = false, receiptUnreadable = false
 
   const messages = {
     verified: 'Expense auto-verified successfully. Awaiting final approval.',
-    blocked: 'Expense blocked due to duplicate detection or low verification confidence.',
+    blocked: 'Expense blocked — see the reason below.',
     pending: 'Expense submitted and pending review.',
   };
   return messages[status] || 'Expense submitted.';
+}
+
+// Turns the failed verification checks into a reason an employee can act on.
+// Used when an expense is blocked for low confidence rather than as a duplicate.
+const CHECK_PROBLEMS = {
+  amount_check: 'the amount on the screenshot does not match the amount you entered',
+  status_check: 'the payment status (SUCCESS / Paid) is not visible',
+  date_check: 'the receipt date is outside the imprest period',
+  txn_id_check: 'no transaction / UPI reference number is visible',
+};
+
+function describeLowConfidence(checks = [], confidence = 0) {
+  const problems = checks
+    .filter((c) => c.result !== 'pass' && CHECK_PROBLEMS[c.step])
+    .map((c) => CHECK_PROBLEMS[c.step]);
+  if (problems.length === 0) {
+    return `Low verification confidence (${confidence}%). Please upload a clear payment screenshot.`;
+  }
+  return `Low verification confidence (${confidence}%): ${problems.join('; ')}. ` +
+    'Upload a clear payment screenshot showing the amount, date, SUCCESS status and transaction ID.';
 }
 
 export default router;

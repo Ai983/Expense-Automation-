@@ -32,7 +32,7 @@ function auditedMessage(status) {
   const messages = {
     approved: 'Approved — this expense has been settled against your imprest.',
     rejected: 'This expense was rejected. Check My Expenses for the reason.',
-    blocked: 'This expense was blocked. Check My Expenses for the reason.',
+    blocked: 'This expense was blocked — see the reason below.',
     manual_review: 'Checked — finance will take a look at this one.',
   };
   return messages[status] || 'Expense submitted.';
@@ -288,6 +288,9 @@ export default function SubmitExpenseScreen() {
             <Text style={styles.resultTitle}>{resultTitle(result.status)}</Text>
             <Text style={styles.resultRef}>Ref: {result.refId}</Text>
             <Text style={styles.resultMsg}>{result.message}</Text>
+            {result.status === 'blocked' && result.blockReason ? (
+              <Text style={styles.resultWarn}>🚫 {result.blockReason}</Text>
+            ) : null}
             {/* A confidence score is only meaningful when something was actually
                 read off the receipt. When nothing was, the number looks like a
                 pass mark to the employee — show the ask instead. Once the expense

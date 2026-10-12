@@ -74,6 +74,12 @@ export default function ExpenseCard({ expense, onFix }) {
       {expense.rejection_reason && (
         <Text style={styles.rejectionReason}>Reason: {expense.rejection_reason}</Text>
       )}
+      {expense.status === 'blocked' && !expense.rejection_reason && expense.screenshot_metadata?.blockReason && (
+        <View style={styles.blockBox}>
+          <Text style={styles.blockTitle}>Why it was blocked</Text>
+          <Text style={styles.blockReason}>{expense.screenshot_metadata.blockReason}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -118,6 +124,9 @@ const styles = StyleSheet.create({
   adjustmentDetail: { fontSize: 12, color: '#374151', marginBottom: 4 },
   adjustmentWarning: { fontSize: 12, color: '#b45309', fontWeight: '600' },
   rejectionReason: { fontSize: 12, color: '#ef4444', marginTop: 8, fontStyle: 'italic' },
+  blockBox: { marginTop: 10, backgroundColor: '#fef2f2', borderLeftWidth: 3, borderLeftColor: '#ef4444', borderRadius: 6, padding: 10 },
+  blockTitle: { fontSize: 12, fontWeight: '700', color: '#b91c1c', marginBottom: 2 },
+  blockReason: { fontSize: 12, color: '#7f1d1d', lineHeight: 17 },
   fixBadge: { backgroundColor: '#fef3c7', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   fixBadgeText: { fontSize: 12, fontWeight: '700', color: '#92400e' },
   fixBox: { marginTop: 10, backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a', borderRadius: 10, padding: 12 },

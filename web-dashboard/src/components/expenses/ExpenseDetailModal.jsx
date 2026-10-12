@@ -121,6 +121,14 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
               ))}
             </div>
 
+            {/* Why the system blocked it at submission */}
+            {expense.status === 'blocked' && meta.blockReason && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-sm font-semibold text-red-800 mb-1">🚫 Why it was blocked</p>
+                <p className="text-xs text-red-700">{meta.blockReason}</p>
+              </div>
+            )}
+
             {/* Duplicate warnings */}
             {expense.duplicate_flag && meta.duplicateWarnings?.length > 0 && (
               <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">

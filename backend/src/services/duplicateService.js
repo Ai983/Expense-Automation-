@@ -50,7 +50,7 @@ export async function checkDuplicates({ employeeId, amount, site, submittedAt, t
 
     if (effectiveTxn.length > 0) {
       isBlocked = true;
-      blockReason = `Duplicate transaction ID "${transactionId}" already recorded as ${effectiveTxn[0].ref_id}`;
+      blockReason = `Duplicate: this payment (transaction ID "${transactionId}") was already submitted as ${effectiveTxn[0].ref_id}. The same screenshot cannot be claimed twice.`;
     }
   }
 
@@ -119,7 +119,7 @@ export async function checkDuplicates({ employeeId, amount, site, submittedAt, t
     isBlocked = true;
     blockReason =
       blockReason ||
-      `Suspicious pattern: ${effectiveFailures.length} rejected/blocked submissions in last 24 hours`;
+      `Too many failed submissions: ${effectiveFailures.length} of your expenses were rejected/blocked in the last 24 hours, so new ones are blocked automatically. Fix the earlier ones or contact Finance.`;
     warnings.push(
       `Account flagged: ${effectiveFailures.length} rejected/blocked submissions in last 24 hours`
     );
