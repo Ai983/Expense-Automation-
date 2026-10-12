@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
+import { sendImprestRejectionNotice } from '../utils/imprestRejectionNotice.js';
 import { notifyS2, notifyFinance, sendWhatsApp } from '../services/whatsappService.js';
 import { logAudit } from '../services/auditService.js';
 
@@ -297,6 +298,9 @@ async function handleFounderDirectorReply({ msgText, cleanPhone, quotedMsg, deci
     console.log(`[WhatsApp] Director ${decision} ignored — imprest ${imprestId} is no longer at director_pending`);
   } else {
     console.log(`[WhatsApp] Director ${decision} — stage: ${updateFields.current_stage} for imprest ${imprestId}`);
+    if (decision !== 'approved') {
+      sendImprestRejectionNotice(imprestId, { rejectedBy: 'Director', reason: comment || 'Not specified' });
+    }
   }
 }
 
@@ -378,6 +382,10 @@ async function handleStageApproverReply({ role, msgText, cleanPhone, decision, c
     console.error(`[WhatsApp] Failed to update imprest for ${role}:`, updateErr.message);
   } else {
     console.log(`[WhatsApp] ${role} ${decision} — ${imp.ref_id} → ${updateFields.current_stage}`);
+    if (decision !== 'approved') {
+      const by = { s1: 'Stage 1 approver', s2: 'Ritu (S2)', finance: 'Finance' }[role];
+      sendImprestRejectionNotice(imp.id, { rejectedBy: by, reason: comment || 'Not specified' });
+    }
   }
 }
 

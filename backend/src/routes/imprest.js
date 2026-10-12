@@ -20,6 +20,7 @@ import { tryGetEmployeeBalances, balanceFor } from '../utils/employeeBalance.js'
 import { FINANCE_ROLES, FINANCE_HEAD_ROLES, S1_ROLES, S2_ROLES, FOUNDER_ROLES, VIEWER_ROLES, DIRECTOR_APPROVAL_THRESHOLD, WEEKLY_EMERGENCY_THRESHOLD } from '../config/constants.js';
 import { broadcastNewImprest } from '../index.js';
 import { sendImprestApprovalReminder, notifyS2, notifyFinance, notifyImprestPaymentDeclined, notifyFounderPaymentChange } from '../services/whatsappService.js';
+import { sendImprestRejectionNotice } from '../utils/imprestRejectionNotice.js';
 import { triggerSubmissionConfirmation, triggerFounderApproval, triggerFounderGate } from '../services/n8nService.js';
 
 const router = Router();
@@ -1012,6 +1013,8 @@ router.post('/:id/reject', authMiddleware, roleGuard(FINANCE_ROLES), async (req,
       ipAddress: req.ip,
     });
 
+    sendImprestRejectionNotice(imp.id, { rejectedBy: 'Finance', reason: reason.trim() });
+
     return ok(res, { refId: imp.ref_id, status: 'rejected' });
   } catch (err) { next(err); }
 });
@@ -1195,6 +1198,8 @@ router.post('/:id/s1-reject', authMiddleware, roleGuard(S1_ROLES), async (req, r
       userId: req.user.id, action: 's1_reject', entityType: 'expense', entityId: imp.id,
       newValue: { status: 'rejected', reason }, ipAddress: req.ip,
     });
+
+    sendImprestRejectionNotice(imp.id, { rejectedBy: 'Stage 1 approver', reason: reason.trim() });
 
     return ok(res, { refId: imp.ref_id, status: 'rejected' });
   } catch (err) { next(err); }
@@ -1403,6 +1408,8 @@ router.post('/:id/s2-reject', authMiddleware, roleGuard(S2_ROLES), async (req, r
       newValue: { status: 'rejected', reason, current_stage: 's2_rejected' }, ipAddress: req.ip,
     });
 
+    sendImprestRejectionNotice(imp.id, { rejectedBy: 'Ritu (S2)', reason: reason.trim() });
+
     return ok(res, { refId: imp.ref_id, status: 'rejected' });
   } catch (err) { next(err); }
 });
@@ -1532,6 +1539,7 @@ router.post('/:id/director-reject', authMiddleware, roleGuard(S2_ROLES), async (
     });
 
     try { broadcastNewImprest({ id: imp.id, refId: imp.ref_id, type: 'director_review', currentStage: 'director_rejected' }); } catch { /* non-fatal */ }
+    sendImprestRejectionNotice(imp.id, { rejectedBy: 'Director', reason: reason.trim() });
 
     return ok(res, { refId: imp.ref_id, currentStage: 'director_rejected', message: 'Request rejected at Director stage' });
   } catch (err) { next(err); }
@@ -2178,6 +2186,8 @@ router.post('/:id/founder-review', async (req, res, next) => {
         const empName = (await supabaseAdmin.from('employees').select('name').eq('id', imp.employee_id).single()).data?.name || '';
         notifyFinance({ refId: imp.ref_id, employeeName: empName, site: imp.site, category: imp.category, amount: parseFloat(imp.amount_requested), purpose: imp.purpose || '', s2Notes: 'Director approved' });
       } catch (e) { console.warn('Finance notify failed:', e.message); }
+    } else {
+      sendImprestRejectionNotice(imp.id, { rejectedBy: 'Director', reason: comment || 'Not specified' });
     }
 
     await logAudit({

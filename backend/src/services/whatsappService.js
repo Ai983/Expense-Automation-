@@ -309,6 +309,33 @@ export async function notifyImprestPaymentDeclined({ name, phone, refId, amount,
 }
 
 /**
+ * Tells an employee their imprest request was rejected, by whom, and why.
+ * Previously only a post-founder payment decline was messaged, so a rejection
+ * at S2, Director or Finance review was invisible until they opened the app.
+ */
+export async function notifyImprestRejected({ name, phone, refId, amount, site, category, rejectedBy, reason }) {
+  if (!phone) {
+    console.warn(`[WhatsApp] No phone for ${name || 'employee'} — cannot send imprest rejection notice`);
+    return;
+  }
+  const message =
+    `Hi ${name || ''}! 👋\n\n` +
+    `❌ *Imprest Rejected — ${refId}*\n\n` +
+    `Your imprest request has been rejected${rejectedBy ? ` by *${rejectedBy}*` : ''}.\n\n` +
+    `💰 *Amount:* ₹${Number(amount).toLocaleString('en-IN')}\n` +
+    `📍 *Site:* ${site || '-'}\n` +
+    `📁 *Category:* ${category || '-'}\n` +
+    `📝 *Reason:* ${reason || 'Not specified'}\n\n` +
+    `This request is now closed. If you still need the advance, please correct it as per the reason above and raise a new request from the HagerStone app.`;
+  try {
+    await sendWhatsApp(phone, message);
+    console.log(`[WhatsApp] Imprest rejection notice sent to ${name} for ${refId}`);
+  } catch (err) {
+    console.warn(`[WhatsApp] Imprest rejection notice to ${name} failed:`, err.response?.data || err.message);
+  }
+}
+
+/**
  * Tells the founder when finance departs from what they approved — either
  * declining to pay, or paying a different amount. The founder gate is the
  * final sign-off, so a change after it must not happen out of the founder's sight.
