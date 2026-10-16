@@ -59,6 +59,23 @@ function daysBetween(from, to) {
   return Math.max(1, Math.round(ms / 86400000) + 1);
 }
 
+// Every Sunday between two YYYY-MM-DD dates, inclusive ([] for incomplete dates).
+// Sunday is the weekly off: food is paid for it only when ticked as a working day.
+function sundaysBetween(from, to) {
+  const re = /^\d{4}-\d{2}-\d{2}$/;
+  if (!re.test(from || '') || !re.test(to || '') || to < from) return [];
+  const out = [];
+  for (let d = new Date(`${from}T00:00:00Z`); d <= new Date(`${to}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)) {
+    if (d.getUTCDay() === 0) out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+// "2026-10-05" → "Sun 5 Oct"
+function fmtSunday(ymd) {
+  return new Date(`${ymd}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
 // "2026-10-01" → "1 Oct"
 function fmtYmd(ymd) {
   if (!ymd) return '';
@@ -168,6 +185,8 @@ export default function ImprestScreen() {
   const [foodTaken, setFoodTaken] = useState([]);
   const [forOthers, setForOthers] = useState(false);
   const [forOthersNames, setForOthersNames] = useState('');
+  // Food Sunday rule — the Sundays the employee ticked as working days
+  const [sundaysWorked, setSundaysWorked] = useState([]);
 
   // Travelling
   const [travelSubtype, setTravelSubtype] = useState(TRAVEL_SUBTYPES[0]);
@@ -213,6 +232,12 @@ export default function ImprestScreen() {
     return () => { alive = false; };
   }, [currentStep]);
 
+  // Food Sunday rule: paid days = calendar days − Sundays not ticked as working
+  const foodSundays = category === 'Food Expense' ? sundaysBetween(dateFrom, dateTo) : [];
+  const workedSundays = foodSundays.filter((s) => sundaysWorked.includes(s));
+  const foodPaidDays = daysBetween(dateFrom, dateTo) - foodSundays.length + workedSundays.length;
+  const toggleSunday = (s) => setSundaysWorked((list) => (list.includes(s) ? list.filter((x) => x !== s) : [...list, s]));
+
   // Own-food requests the chosen dates collide with (YYYY-MM-DD compares as text)
   const foodClashes = (!forOthers && dateFrom && dateTo)
     ? foodTaken.filter((r) => r.date_from <= dateTo && r.date_to >= dateFrom)
@@ -227,7 +252,8 @@ export default function ImprestScreen() {
     : null;
 
   // ── Food rate loader ─────────────────────────────────────────────────────────
-  const loadFoodRate = useCallback(async (selectedSite, currentDateFrom, currentDateTo, currentPeopleCount) => {
+  // `paidDays` already excludes Sundays not ticked as working days
+  const loadFoodRate = useCallback(async (selectedSite, paidDays, currentPeopleCount) => {
     setFoodRateLoading(true);
     setFoodRateError('');
     setFoodRate(null);
@@ -237,9 +263,8 @@ export default function ImprestScreen() {
       if (match) {
         setFoodRate(match.rate);
         // Use passed-in values (not stale closure)
-        const days = daysBetween(currentDateFrom, currentDateTo);
         const people = parseInt(currentPeopleCount) || 1;
-        if (days > 0) setAmountRequested(String(match.rate * people * days));
+        if (paidDays > 0) setAmountRequested(String(match.rate * people * paidDays));
       } else {
         setFoodRateError('No food rate configured for this site.');
       }
@@ -354,6 +379,10 @@ export default function ImprestScreen() {
         if (!dateTo) { showAlert('Zaroori', 'Khatam ki date chunein.'); return false; }
         if (new Date(dateTo) < new Date(dateFrom)) { showAlert('Galat Date', 'Khatam ki date, shuru ki date ke baad honi chahiye.'); return false; }
         if (currentStep === 'food_dates') {
+          if (foodPaidDays < 1) {
+            showAlert('Only Sundays / Sirf Sunday', 'These dates are only Sundays. Tick the Sunday if you will work, or change the dates. / Kaam karenge to Sunday tick karein.');
+            return false;
+          }
           if (forOthers && !forOthersNames.trim()) {
             showAlert('Zaroori', 'Jinke liye khana hai unke naam bharein. / Enter the names of the people this food is for.');
             return false;
@@ -422,7 +451,7 @@ export default function ImprestScreen() {
     if (!validateCurrentStep()) return;
     // Special side effects on transition
     if (currentStep === 'food_dates' && category === 'Food Expense') {
-      loadFoodRate(site, dateFrom, dateTo, peopleCount);
+      loadFoodRate(site, foodPaidDays, peopleCount);
     }
     setStepIndex((i) => Math.min(i + 1, totalSteps - 1));
   };
@@ -443,7 +472,7 @@ export default function ImprestScreen() {
       // EA (Ritu) can override the amount even for configured sites
       const foodLocked = category === 'Food Expense' && effectiveFoodRate && !canOverrideFoodRate;
       const finalAmount = foodLocked
-        ? effectiveFoodRate * (parseInt(peopleCount) || 1) * daysBetween(dateFrom, dateTo)
+        ? effectiveFoodRate * (parseInt(peopleCount) || 1) * foodPaidDays
         : parseAmt(amountRequested);
 
       const payload = {
@@ -459,6 +488,7 @@ export default function ImprestScreen() {
         perPersonRate: effectiveFoodRate || undefined,
         forOthers: category === 'Food Expense' && forOthers ? true : undefined,
         forOthersNames: category === 'Food Expense' && forOthers ? forOthersNames.trim() : undefined,
+        foodSundaysWorked: category === 'Food Expense' ? workedSundays : undefined,
         // Travel
         travelSubtype: travelSubtype || undefined,
         travelFrom: travelFrom.trim() || undefined,
@@ -485,6 +515,8 @@ export default function ImprestScreen() {
       const errMsg = e?.response?.data?.error || '';
       if (errMsg.startsWith('FOOD_DATES_TAKEN:')) {
         showAlert('Dates already taken / Dates pehle se li gayi', errMsg.replace('FOOD_DATES_TAKEN:', '').trim());
+      } else if (errMsg.startsWith('FOOD_AMOUNT:')) {
+        showAlert('Food amount / Khane ki rashi', errMsg.replace('FOOD_AMOUNT:', '').trim());
       } else if (e?.response?.status === 429 || errMsg.startsWith('WEEKLY_LIMIT:')) {
         showAlert(
           'Weekly Emergency Limit / साप्ताहिक सीमा',
@@ -509,7 +541,7 @@ export default function ImprestScreen() {
     setPurpose('');
     setDateFrom(''); setDateTo('');
     setFoodRate(null); setFoodRateError('');
-    setFoodTaken([]); setForOthers(false); setForOthersNames('');
+    setFoodTaken([]); setForOthers(false); setForOthersNames(''); setSundaysWorked([]);
     setTravelSubtype(TRAVEL_SUBTYPES[0]);
     setTravelFrom(''); setTravelTo(''); setTravelDate('');
     setAiEstimate(null); setUserEditedAmount(false); setEstimating(false);
@@ -655,6 +687,38 @@ export default function ImprestScreen() {
             {dateFrom && dateTo && new Date(dateTo) >= new Date(dateFrom) && (
               <View style={styles.infoBox}>
                 <Text style={styles.infoText}>{'Kul Din / Duration: '}{daysBetween(dateFrom, dateTo)}{' din'}</Text>
+                {foodSundays.length > 0 && (
+                  <Text style={styles.infoHint}>
+                    {`Paid days / Bhugtan din: ${foodPaidDays}`}
+                    {foodSundays.length - workedSundays.length > 0
+                      ? ` (${foodSundays.length - workedSundays.length} Sunday not paid)`
+                      : ''}
+                  </Text>
+                )}
+              </View>
+            )}
+
+            {foodSundays.length > 0 && (
+              <View style={{ marginTop: 16 }}>
+                <Text style={styles.label}>{'Sunday is a holiday — food is not paid for it. / Sunday chhutti hai, khana nahi milega.'}</Text>
+                <Text style={styles.infoHint}>{'Tick only the Sundays you will work at site. / Sirf un Sundays ko tick karein jab site par kaam karenge.'}</Text>
+                {foodSundays.map((s) => {
+                  const on = sundaysWorked.includes(s);
+                  return (
+                    <TouchableOpacity
+                      key={s}
+                      onPress={() => toggleSunday(s)}
+                      style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, gap: 10 }}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: on }}
+                    >
+                      <Text style={{ fontSize: 22 }}>{on ? '☑' : '☐'}</Text>
+                      <Text style={[styles.label, { flex: 1, marginTop: 0, marginBottom: 0 }]}>
+                        {`I will work on ${fmtSunday(s)} / Kaam karunga`}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             )}
 
@@ -705,13 +769,19 @@ export default function ImprestScreen() {
       case 'food_amount': {
         const rateToUse = foodRate || 0;
         const hasRate = rateToUse > 0;
-        const days = daysBetween(dateFrom, dateTo);
+        const days = foodPaidDays; // Sundays not ticked as working are excluded
         const people = parseInt(peopleCount) || 1;
         const computed = hasRate ? rateToUse * people * days : 0;
+        const unpaidSundays = foodSundays.length - workedSundays.length;
 
         return (
           <View style={styles.stepContent}>
             <Text style={styles.stepTitle}>{'Khane Ki Rashi / Food Amount'}</Text>
+            {unpaidSundays > 0 && (
+              <Text style={styles.infoHint}>
+                {`${unpaidSundays} Sunday${unpaidSundays > 1 ? 's' : ''} not counted (holiday). / ${unpaidSundays} Sunday ka khana nahi juda.`}
+              </Text>
+            )}
 
             {foodRateLoading && <ActivityIndicator color="#e8a24a" style={{ marginVertical: 16 }} />}
             {foodRateError ? <Text style={styles.errorText}>{foodRateError}</Text> : null}
@@ -1157,6 +1227,12 @@ export default function ImprestScreen() {
               {category !== 'Conveyance' && <SummaryRow label={'People / लोग'} value={peopleCount} />}
               {['Food Expense', 'Site Room Rent', 'Hotel Expense'].includes(category) && (dateFrom || dateTo) && (
                 <SummaryRow label={'Duration / अवधि'} value={`${dateFrom} → ${dateTo} (${daysBetween(dateFrom, dateTo)} days)`} />
+              )}
+              {category === 'Food Expense' && (dateFrom || dateTo) && (
+                <SummaryRow
+                  label={'Paid days / भुगतान दिन'}
+                  value={`${foodPaidDays}${workedSundays.length ? ` (working Sunday: ${workedSundays.map(fmtSunday).join(', ')})` : ''}`}
+                />
               )}
               {category === 'Food Expense' && forOthers && (
                 <SummaryRow label={'For / किसके लिए'} value={forOthersNames.trim()} />

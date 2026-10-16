@@ -18,6 +18,7 @@ import ProcurementQueuePage from './pages/ProcurementQueuePage';
 import PaymentRequestQueuePage from './pages/PaymentRequestQueuePage';
 import AdjustmentSettlementsPage from './pages/AdjustmentSettlementsPage';
 import WeeklyOverridesPage from './pages/WeeklyOverridesPage';
+import SundayCheckPage from './pages/SundayCheckPage';
 import HeadDashboardPage from './pages/HeadDashboardPage';
 import HeadKanbanPage from './pages/HeadKanbanPage';
 import HeadProjectSpendPage from './pages/HeadProjectSpendPage';
@@ -90,6 +91,7 @@ function AppRoutes() {
       <Route path="/reports" element={<ProtectedLayout><EmployeeReportPage /></ProtectedLayout>} />
       <Route path="/adjustments" element={<ProtectedLayout><AdjustmentSettlementsPage /></ProtectedLayout>} />
       <Route path="/weekly-overrides" element={<ProtectedLayout><WeeklyOverridesPage /></ProtectedLayout>} />
+      <Route path="/sunday-check" element={<ProtectedLayout><SundayCheckPage /></ProtectedLayout>} />
       <Route path="/s1-queue" element={<ProtectedLayout><S1QueuePage /></ProtectedLayout>} />
       <Route path="/s2-queue" element={<ProtectedLayout><S2QueuePage /></ProtectedLayout>} />
       <Route path="/imprest-board" element={<ProtectedLayout><S2QueuePage /></ProtectedLayout>} />

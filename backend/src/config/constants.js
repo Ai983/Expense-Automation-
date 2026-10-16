@@ -111,6 +111,10 @@ export const DIRECTOR_APPROVAL_THRESHOLD = 9999;
 // (Head Office is exempt). Finance can grant a one-week override per site.
 export const WEEKLY_EMERGENCY_THRESHOLD = 20000;
 
+// Accounts that may enter any food amount instead of the site's fixed rate
+// (mirrors canOverrideFoodRate in mobile-app imprest.jsx).
+export const FOOD_RATE_OVERRIDE_EMAILS = ['ea@hagerstone.com', 'facade@hagerstone.com'];
+
 export const EXPENSE_STATUSES = [
   'pending',
   'verified',

@@ -206,6 +206,11 @@ function KanbanCard({ req, onView, onForward, onReject, actionable, payable, onP
         {req.for_others && (
           <span className="text-[11px] px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded font-medium" title={req.for_others_names || ''}>For others</span>
         )}
+        {req.food_sundays_worked?.length > 0 && (
+          <span className="text-[11px] px-1.5 py-0.5 bg-orange-50 text-orange-700 rounded font-medium" title={`Working Sundays: ${req.food_sundays_worked.join(', ')}`}>
+            ☀ {req.food_sundays_worked.length} Sunday{req.food_sundays_worked.length > 1 ? 's' : ''}
+          </span>
+        )}
         {req.food_overlaps?.length > 0 && (
           <span className="text-[11px] px-1.5 py-0.5 bg-red-50 text-red-700 rounded font-medium" title="Food dates overlap other requests — open for details">
             ⚠ Dates overlap ({req.food_overlaps.length})
@@ -593,6 +598,17 @@ export default function S2QueuePage() {
                 <div className="flex justify-between"><span className="text-gray-500">Site</span><span>{selected.site}</span></div>
                 {(selected.date_from || selected.date_to) && (
                   <div className="flex justify-between"><span className="text-gray-500">Dates</span><span>{fmtDate(selected.date_from)} – {fmtDate(selected.date_to)}</span></div>
+                )}
+                {selected.food_billable_days != null && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Paid days</span>
+                    <span className="text-right">
+                      {selected.food_billable_days}
+                      {selected.food_sundays_worked?.length > 0 && (
+                        <span className="text-orange-700"> · incl. working Sunday {selected.food_sundays_worked.map((s) => fmtDate(s)).join(', ')}</span>
+                      )}
+                    </span>
+                  </div>
                 )}
                 {selected.for_others && (
                   <div className="flex justify-between"><span className="text-gray-500">Food for</span><span className="text-right max-w-[280px] text-blue-700">{selected.for_others_names}</span></div>

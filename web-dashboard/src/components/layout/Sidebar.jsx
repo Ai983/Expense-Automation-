@@ -59,6 +59,7 @@ function baseNavItems(role) {
         { to: '/reports', label: 'Employee Report', icon: '👥' },
         { to: '/adjustments', label: 'Pending Settlements', icon: '⚠️' },
         { to: '/weekly-overrides', label: 'Weekly Overrides', icon: '🔓' },
+        { to: '/sunday-check', label: 'Sunday Check', icon: '☀️' },
       ];
   }
 }

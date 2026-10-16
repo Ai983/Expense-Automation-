@@ -18,8 +18,9 @@ import { buildAmountTrail, describeAmountChange } from '../utils/imprestAmountTr
 import { ok, fail } from '../utils/responseHelper.js';
 import { isValidSite } from '../config/sites.js';
 import { FOOD_CATEGORY, foodDateError, checkFoodDates, foodConflictMessage, takenFoodRanges } from '../utils/foodDateLock.js';
+import { foodPaidDays, foodRateFor } from '../utils/foodSundayRule.js';
 import { tryGetEmployeeBalances, balanceFor } from '../utils/employeeBalance.js';
-import { FINANCE_ROLES, FINANCE_HEAD_ROLES, S1_ROLES, S2_ROLES, FOUNDER_ROLES, VIEWER_ROLES, DIRECTOR_APPROVAL_THRESHOLD, WEEKLY_EMERGENCY_THRESHOLD } from '../config/constants.js';
+import { FINANCE_ROLES, FINANCE_HEAD_ROLES, S1_ROLES, S2_ROLES, FOUNDER_ROLES, VIEWER_ROLES, DIRECTOR_APPROVAL_THRESHOLD, WEEKLY_EMERGENCY_THRESHOLD, FOOD_RATE_OVERRIDE_EMAILS } from '../config/constants.js';
 import { broadcastNewImprest } from '../index.js';
 import { sendImprestApprovalReminder, notifyS2, notifyFinance, notifyImprestPaymentDeclined, notifyFounderPaymentChange } from '../services/whatsappService.js';
 import { sendImprestRejectionNotice } from '../utils/imprestRejectionNotice.js';
@@ -226,6 +227,19 @@ router.get('/food-taken-dates', authMiddleware, roleGuard(['employee']), async (
   } catch (err) { next(err); }
 });
 
+// ── GET /api/imprest/sunday-check ─────────────────────────────────────────────
+// Every paid food Sunday that has passed, with the employee's HR punch-in, so
+// Finance can see Sundays paid but not worked. Read-only — nothing is deducted.
+router.get('/sunday-check', authMiddleware, roleGuard(FINANCE_HEAD_ROLES), async (req, res, next) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days) || 120, 7), 400);
+    const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    const { data, error } = await supabaseAdmin.rpc('food_sunday_check', { p_since: since });
+    if (error) throw error;
+    return ok(res, { since, rows: data || [] });
+  } catch (err) { next(err); }
+});
+
 // ── GET /api/imprest/places-autocomplete ─────────────────────────────────────
 const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
 router.get('/places-autocomplete', authMiddleware, async (req, res, next) => {
@@ -317,6 +331,7 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       // Food
       perPersonRate,
       forOthers, forOthersNames,
+      foodSundaysWorked,
       // Travel
       travelSubtype, travelFrom, travelTo, travelDate,
       aiEstimatedAmount, aiEstimatedDistanceKm, userEditedAmount,
@@ -350,6 +365,29 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       });
       if (conflicts.length) return fail(res, `FOOD_DATES_TAKEN: ${foodConflictMessage(conflicts)}`, 409);
       if (overlaps.length) foodOverlaps = overlaps;
+    }
+
+    // Food Sunday rule: Sundays are paid only when ticked as working days (see utils/foodSundayRule.js)
+    let foodSunday = null;
+    if (isFood) {
+      foodSunday = foodPaidDays(dateFrom, dateTo, foodSundaysWorked);
+      if (foodSunday.paidDays < 1) {
+        return fail(res, 'These dates are only Sundays. Tick the Sunday you will work, or change the dates. / Sirf Sunday chuna hai — kaam karenge to tick karein.');
+      }
+      const rate = FOOD_RATE_OVERRIDE_EMAILS.includes(req.user.email) ? null : await foodRateFor(site);
+      if (rate) {
+        const people = parseInt(peopleCount) || 1;
+        const maxAmount = rate * people * foodSunday.paidDays;
+        if (parseFloat(amountRequested) > maxAmount + 0.5) {
+          const excluded = foodSunday.sundays.length - foodSunday.worked.length;
+          return fail(
+            res,
+            `FOOD_AMOUNT: Food is paid for ${foodSunday.paidDays} day(s): ₹${rate} × ${people} × ${foodSunday.paidDays} = ₹${maxAmount}`
+            + `${excluded ? ` (${excluded} Sunday${excluded > 1 ? 's' : ''} not paid — tick a Sunday only if you will work)` : ''}. `
+            + 'Please refresh the app and submit again. / Kripya app refresh karke dobara bharein.'
+          );
+        }
+      }
     }
 
     // Weekly site emergency limit: only one imprest > ₹20,000 per site per calendar week
@@ -415,6 +453,7 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
         rate_source: rateSource,
         ...(forOthersFlag && { for_others: true, for_others_names: forOthersNames.trim() }),
         ...(foodOverlaps && { food_overlaps: foodOverlaps }),
+        ...(foodSunday && { food_sundays_worked: foodSunday.worked, food_billable_days: foodSunday.paidDays }),
         travel_from: travelFrom || null,
         travel_to: travelTo || null,
         ai_estimated_amount: aiEstimatedAmount ? parseFloat(aiEstimatedAmount) : null,
@@ -489,6 +528,7 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
         refId, amount: amountRequested, site, category, status: 'pending',
         ...(forOthersFlag && { forOthers: true, forOthersNames: forOthersNames.trim() }),
         ...(foodOverlaps && { foodOverlapRefs: foodOverlaps.map((o) => o.ref_id) }),
+        ...(foodSunday && { foodPaidDays: foodSunday.paidDays, foodSundaysWorked: foodSunday.worked }),
       },
       ipAddress: req.ip,
     });
