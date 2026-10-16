@@ -16,6 +16,8 @@ import { resolveImprestRouting, isDirectorRoute } from '../utils/imprestRouting.
 import { imprestSpendLimit, imprestSettlementTarget, isImprestSettled, IMPREST_SPEND_LIMIT_COLUMNS } from '../utils/imprestSpendLimit.js';
 import { buildAmountTrail, describeAmountChange } from '../utils/imprestAmountTrail.js';
 import { ok, fail } from '../utils/responseHelper.js';
+import { isValidSite } from '../config/sites.js';
+import { FOOD_CATEGORY, foodDateError, checkFoodDates, foodConflictMessage, takenFoodRanges } from '../utils/foodDateLock.js';
 import { tryGetEmployeeBalances, balanceFor } from '../utils/employeeBalance.js';
 import { FINANCE_ROLES, FINANCE_HEAD_ROLES, S1_ROLES, S2_ROLES, FOUNDER_ROLES, VIEWER_ROLES, DIRECTOR_APPROVAL_THRESHOLD, WEEKLY_EMERGENCY_THRESHOLD } from '../config/constants.js';
 import { broadcastNewImprest } from '../index.js';
@@ -214,6 +216,16 @@ router.get('/food-rates', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── GET /api/imprest/food-taken-dates ─────────────────────────────────────────
+// The employee's own-food date ranges that are still live (last 60 days onward),
+// so the app can show them on the date step before the submit refuses an overlap.
+router.get('/food-taken-dates', authMiddleware, roleGuard(['employee']), async (req, res, next) => {
+  try {
+    const since = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
+    return ok(res, await takenFoodRanges(req.user.id, since));
+  } catch (err) { next(err); }
+});
+
 // ── GET /api/imprest/places-autocomplete ─────────────────────────────────────
 const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
 router.get('/places-autocomplete', authMiddleware, async (req, res, next) => {
@@ -304,6 +316,7 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       dateFrom, dateTo,
       // Food
       perPersonRate,
+      forOthers, forOthersNames,
       // Travel
       travelSubtype, travelFrom, travelTo, travelDate,
       aiEstimatedAmount, aiEstimatedDistanceKm, userEditedAmount,
@@ -317,6 +330,26 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
 
     if (!site || !category || !peopleCount || !amountRequested) {
       return fail(res, 'site, category, peopleCount, and amountRequested are required');
+    }
+    if (!(await isValidSite(site))) {
+      return fail(res, 'Invalid site. Please pick a project from the list.');
+    }
+
+    // Food date lock: no two own-food requests may cover the same day (see utils/foodDateLock.js)
+    const isFood = category === FOOD_CATEGORY;
+    const forOthersFlag = isFood && (forOthers === true || forOthers === 'true');
+    let foodOverlaps = null;
+    if (isFood) {
+      const dateErr = foodDateError(dateFrom, dateTo);
+      if (dateErr) return fail(res, dateErr);
+      if (forOthersFlag && !forOthersNames?.trim()) {
+        return fail(res, 'Enter the names of the people this food is for.');
+      }
+      const { conflicts, overlaps } = await checkFoodDates({
+        employeeId: req.user.id, site, dateFrom, dateTo, forOthers: forOthersFlag,
+      });
+      if (conflicts.length) return fail(res, `FOOD_DATES_TAKEN: ${foodConflictMessage(conflicts)}`, 409);
+      if (overlaps.length) foodOverlaps = overlaps;
     }
 
     // Weekly site emergency limit: only one imprest > ₹20,000 per site per calendar week
@@ -380,6 +413,8 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
         purpose: purpose || null,
         per_person_rate: perPersonRate ? parseFloat(perPersonRate) : null,
         rate_source: rateSource,
+        ...(forOthersFlag && { for_others: true, for_others_names: forOthersNames.trim() }),
+        ...(foodOverlaps && { food_overlaps: foodOverlaps }),
         travel_from: travelFrom || null,
         travel_to: travelTo || null,
         ai_estimated_amount: aiEstimatedAmount ? parseFloat(aiEstimatedAmount) : null,
@@ -450,7 +485,11 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       action: 'submit_imprest',
       entityType: 'expense',
       entityId: imprest.id,
-      newValue: { refId, amount: amountRequested, site, category, status: 'pending' },
+      newValue: {
+        refId, amount: amountRequested, site, category, status: 'pending',
+        ...(forOthersFlag && { forOthers: true, forOthersNames: forOthersNames.trim() }),
+        ...(foodOverlaps && { foodOverlapRefs: foodOverlaps.map((o) => o.ref_id) }),
+      },
       ipAddress: req.ip,
     });
 

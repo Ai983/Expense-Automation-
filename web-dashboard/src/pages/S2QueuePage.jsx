@@ -203,6 +203,14 @@ function KanbanCard({ req, onView, onForward, onReject, actionable, payable, onP
       <div className="flex flex-wrap gap-1 mt-1.5">
         <span className="text-[11px] px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded font-medium">{req.category}</span>
         <span className="text-[11px] px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">{req.site}</span>
+        {req.for_others && (
+          <span className="text-[11px] px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded font-medium" title={req.for_others_names || ''}>For others</span>
+        )}
+        {req.food_overlaps?.length > 0 && (
+          <span className="text-[11px] px-1.5 py-0.5 bg-red-50 text-red-700 rounded font-medium" title="Food dates overlap other requests — open for details">
+            ⚠ Dates overlap ({req.food_overlaps.length})
+          </span>
+        )}
       </div>
       {req.purpose && <p className="text-[11px] text-gray-500 mt-1.5 line-clamp-2">{req.purpose}</p>}
       {(req.s1_note || req.s1_notes) && (
@@ -583,12 +591,42 @@ export default function S2QueuePage() {
                 )}
                 <div className="flex justify-between"><span className="text-gray-500">Category</span><span>{selected.category}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Site</span><span>{selected.site}</span></div>
+                {(selected.date_from || selected.date_to) && (
+                  <div className="flex justify-between"><span className="text-gray-500">Dates</span><span>{fmtDate(selected.date_from)} – {fmtDate(selected.date_to)}</span></div>
+                )}
+                {selected.for_others && (
+                  <div className="flex justify-between"><span className="text-gray-500">Food for</span><span className="text-right max-w-[280px] text-blue-700">{selected.for_others_names}</span></div>
+                )}
                 {selected.purpose && <div className="flex justify-between"><span className="text-gray-500">Purpose</span><span className="text-right max-w-[280px]">{selected.purpose}</span></div>}
                 <div className="flex justify-between"><span className="text-gray-500">Submitted</span><span>{fmtDate(selected.submitted_at)} {fmtTime(selected.submitted_at)}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Total Unsettled</span>{selected.employee_total_balance == null
                   ? <span className="text-gray-400 italic">Unavailable — refresh</span>
                   : <span className={`font-bold ${selected.employee_total_balance > 0 ? 'text-red-600' : 'text-gray-900'}`}>{fmt(selected.employee_total_balance)}</span>}</div>
               </div>
+
+              {/* Food date overlaps found at submit (utils/foodDateLock.js) — a warning, not a block */}
+              {selected.food_overlaps?.length > 0 && (
+                <div className="border border-red-200 bg-red-50 rounded-xl p-4 text-sm">
+                  <p className="text-xs font-bold text-red-700 uppercase tracking-wide mb-1">⚠ Food dates overlap</p>
+                  <p className="text-xs text-red-700 mb-2">
+                    Food money for these dates was already requested below. Check each one is for different people.
+                  </p>
+                  <div className="divide-y divide-red-100">
+                    {selected.food_overlaps.map((o) => (
+                      <div key={o.ref_id} className="py-1.5 flex items-center justify-between text-xs">
+                        <div>
+                          <span className="font-mono text-gray-600">{o.ref_id}</span>
+                          <span className="text-gray-700"> · {o.same_employee ? 'Same employee' : (o.employee_name || '—')}</span>
+                          {o.for_others && <span className="text-blue-700"> · for others</span>}
+                        </div>
+                        <div className="text-right text-gray-700">
+                          {fmtDate(o.date_from)} – {fmtDate(o.date_to)} · {o.people_count} {o.people_count === 1 ? 'person' : 'people'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Employee's past paid imprest — visible immediately, no extra clicks */}
               <div className="border rounded-xl p-4 text-sm">

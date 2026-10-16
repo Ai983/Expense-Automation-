@@ -8,11 +8,11 @@ import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../src/context/AuthContext';
 import { useSites } from '../../src/hooks/useSites';
 import {
-  IMPREST_SITES, IMPREST_CATEGORIES,
+  IMPREST_CATEGORIES,
   CONVEYANCE_MODES, OWN_VEHICLE_TYPES, TRAVEL_SUBTYPES, LABOUR_SUBCATEGORIES,
 } from '../../src/constants';
 import {
-  getFoodRates, estimateTravelCost, scanConveyanceReceipt, submitImprest,
+  getFoodRates, getFoodTakenDates, estimateTravelCost, scanConveyanceReceipt, submitImprest,
 } from '../../src/services/imprestService';
 import PlacesInput from '../../src/components/PlacesInput';
 
@@ -57,6 +57,12 @@ function daysBetween(from, to) {
   if (!from || !to) return 0;
   const ms = new Date(to) - new Date(from);
   return Math.max(1, Math.round(ms / 86400000) + 1);
+}
+
+// "2026-10-01" → "1 Oct"
+function fmtYmd(ymd) {
+  if (!ymd) return '';
+  return new Date(`${ymd}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }
 
 // Simple date input that works on both web and native
@@ -139,8 +145,14 @@ export default function ImprestScreen() {
   const [stepIndex, setStepIndex] = useState(0);
 
   // Common fields
-  const [site, setSite] = useState(IMPREST_SITES[0]);
   const sites = useSites();
+  const [site, setSite] = useState(sites[0]);
+  // Keep the selected site inside the live list. The Picker *shows* its first item
+  // when selectedValue isn't in the list but leaves state untouched, so an
+  // employee who never touched it used to submit a stale default site.
+  useEffect(() => {
+    if (sites.length && !sites.includes(site)) setSite(sites[0]);
+  }, [sites, site]);
   const [category, setCategory] = useState(IMPREST_CATEGORIES[0]);
   const [peopleCount, setPeopleCount] = useState('1');
   const [amountRequested, setAmountRequested] = useState('');
@@ -152,6 +164,10 @@ export default function ImprestScreen() {
   const [foodRate, setFoodRate] = useState(null);
   const [foodRateLoading, setFoodRateLoading] = useState(false);
   const [foodRateError, setFoodRateError] = useState('');
+  // Food date lock — own-food ranges already taken, and the "for other people" exception
+  const [foodTaken, setFoodTaken] = useState([]);
+  const [forOthers, setForOthers] = useState(false);
+  const [forOthersNames, setForOthersNames] = useState('');
 
   // Travelling
   const [travelSubtype, setTravelSubtype] = useState(TRAVEL_SUBTYPES[0]);
@@ -184,6 +200,31 @@ export default function ImprestScreen() {
   const totalSteps = steps.length;
   const currentStep = steps[stepIndex];
   const progress = totalSteps > 1 ? (stepIndex / (totalSteps - 1)) * 100 : 100;
+
+  // ── Food date lock ──────────────────────────────────────────────────────────
+  // Fetch the employee's taken food dates when they reach the date step. The
+  // server is the authority; this only lets us warn before they fill the rest.
+  useEffect(() => {
+    if (currentStep !== 'food_dates') return;
+    let alive = true;
+    getFoodTakenDates()
+      .then((rows) => { if (alive) setFoodTaken(rows || []); })
+      .catch(() => { /* non-fatal — submit still checks */ });
+    return () => { alive = false; };
+  }, [currentStep]);
+
+  // Own-food requests the chosen dates collide with (YYYY-MM-DD compares as text)
+  const foodClashes = (!forOthers && dateFrom && dateTo)
+    ? foodTaken.filter((r) => r.date_from <= dateTo && r.date_to >= dateFrom)
+    : [];
+  const nextFreeFoodDate = foodClashes.length
+    ? (() => {
+      const last = foodClashes.reduce((m, r) => (r.date_to > m ? r.date_to : m), foodClashes[0].date_to);
+      const d = new Date(`${last}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + 1);
+      return d.toISOString().slice(0, 10);
+    })()
+    : null;
 
   // ── Food rate loader ─────────────────────────────────────────────────────────
   const loadFoodRate = useCallback(async (selectedSite, currentDateFrom, currentDateTo, currentPeopleCount) => {
@@ -312,6 +353,21 @@ export default function ImprestScreen() {
         if (!dateFrom) { showAlert('Zaroori', 'Shuru ki date chunein.'); return false; }
         if (!dateTo) { showAlert('Zaroori', 'Khatam ki date chunein.'); return false; }
         if (new Date(dateTo) < new Date(dateFrom)) { showAlert('Galat Date', 'Khatam ki date, shuru ki date ke baad honi chahiye.'); return false; }
+        if (currentStep === 'food_dates') {
+          if (forOthers && !forOthersNames.trim()) {
+            showAlert('Zaroori', 'Jinke liye khana hai unke naam bharein. / Enter the names of the people this food is for.');
+            return false;
+          }
+          if (foodClashes.length) {
+            showAlert(
+              'Dates already taken / Dates pehle se li gayi',
+              `You already have food money for ${foodClashes.map((r) => `${fmtYmd(r.date_from)} – ${fmtYmd(r.date_to)} (${r.ref_id})`).join(', ')}. `
+              + `Start from ${fmtYmd(nextFreeFoodDate)}, or tick "For other people" if this is for contractors / labour. `
+              + `/ Agla request ${fmtYmd(nextFreeFoodDate)} se shuru karein.`
+            );
+            return false;
+          }
+        }
         return true;
       case 'food_amount':
         if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Zaroori', 'Rashi zaroori hai.'); return false; }
@@ -401,6 +457,8 @@ export default function ImprestScreen() {
         dateTo: dateTo || undefined,
         // Food
         perPersonRate: effectiveFoodRate || undefined,
+        forOthers: category === 'Food Expense' && forOthers ? true : undefined,
+        forOthersNames: category === 'Food Expense' && forOthers ? forOthersNames.trim() : undefined,
         // Travel
         travelSubtype: travelSubtype || undefined,
         travelFrom: travelFrom.trim() || undefined,
@@ -425,7 +483,9 @@ export default function ImprestScreen() {
       }, 1500);
     } catch (e) {
       const errMsg = e?.response?.data?.error || '';
-      if (e?.response?.status === 429 || errMsg.startsWith('WEEKLY_LIMIT:')) {
+      if (errMsg.startsWith('FOOD_DATES_TAKEN:')) {
+        showAlert('Dates already taken / Dates pehle se li gayi', errMsg.replace('FOOD_DATES_TAKEN:', '').trim());
+      } else if (e?.response?.status === 429 || errMsg.startsWith('WEEKLY_LIMIT:')) {
         showAlert(
           'Weekly Emergency Limit / साप्ताहिक सीमा',
           'Your site\'s weekly emergency advance (>₹20,000) has already been raised this week. First fill the expense against it and then you will get the amount after this week. / इस सप्ताह आपकी साइट का आपातकालीन अग्रिम पहले ही लिया जा चुका है। पहले उस खर्च को जमा करें।'
@@ -442,13 +502,14 @@ export default function ImprestScreen() {
   const resetForm = () => {
     setStepIndex(0);
     setResult(null);
-    setSite(IMPREST_SITES[0]);
+    setSite(sites[0]);
     setCategory(IMPREST_CATEGORIES[0]);
     setPeopleCount('1');
     setAmountRequested('');
     setPurpose('');
     setDateFrom(''); setDateTo('');
     setFoodRate(null); setFoodRateError('');
+    setFoodTaken([]); setForOthers(false); setForOthersNames('');
     setTravelSubtype(TRAVEL_SUBTYPES[0]);
     setTravelFrom(''); setTravelTo(''); setTravelDate('');
     setAiEstimate(null); setUserEditedAmount(false); setEstimating(false);
@@ -594,6 +655,48 @@ export default function ImprestScreen() {
             {dateFrom && dateTo && new Date(dateTo) >= new Date(dateFrom) && (
               <View style={styles.infoBox}>
                 <Text style={styles.infoText}>{'Kul Din / Duration: '}{daysBetween(dateFrom, dateTo)}{' din'}</Text>
+              </View>
+            )}
+
+            {foodTaken.length > 0 && (
+              <View style={styles.infoBox}>
+                <Text style={styles.infoText}>{'Already taken / Pehle se liya hua:'}</Text>
+                {foodTaken.map((r) => (
+                  <Text key={r.ref_id} style={styles.infoHint}>
+                    {fmtYmd(r.date_from)} {'–'} {fmtYmd(r.date_to)}  ({r.ref_id})
+                  </Text>
+                ))}
+              </View>
+            )}
+
+            {foodClashes.length > 0 && (
+              <Text style={styles.errorText}>
+                {`These dates are already taken. Start from ${fmtYmd(nextFreeFoodDate)}. / Agla request ${fmtYmd(nextFreeFoodDate)} se shuru karein.`}
+              </Text>
+            )}
+
+            <TouchableOpacity
+              onPress={() => setForOthers((v) => !v)}
+              style={{ flexDirection: 'row', alignItems: 'center', marginTop: 16, gap: 10 }}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: forOthers }}
+            >
+              <Text style={{ fontSize: 22 }}>{forOthers ? '☑' : '☐'}</Text>
+              <Text style={[styles.label, { flex: 1, marginTop: 0, marginBottom: 0 }]}>
+                {'For other people (contractors / labour) / Doosre logon ke liye'}
+              </Text>
+            </TouchableOpacity>
+            {forOthers && (
+              <View style={{ marginTop: 8 }}>
+                <Text style={styles.label}>{'Names / Naam *'}</Text>
+                <TextInput
+                  style={styles.input}
+                  value={forOthersNames}
+                  onChangeText={setForOthersNames}
+                  placeholder={'e.g. Ramesh, Suresh (electrical contractor)'}
+                  placeholderTextColor="#9ca3af"
+                />
+                <Text style={styles.infoHint}>{'S2 will see this request next to your other food requests. / S2 ko yeh dikhega.'}</Text>
               </View>
             )}
           </View>
@@ -1054,6 +1157,9 @@ export default function ImprestScreen() {
               {category !== 'Conveyance' && <SummaryRow label={'People / लोग'} value={peopleCount} />}
               {['Food Expense', 'Site Room Rent', 'Hotel Expense'].includes(category) && (dateFrom || dateTo) && (
                 <SummaryRow label={'Duration / अवधि'} value={`${dateFrom} → ${dateTo} (${daysBetween(dateFrom, dateTo)} days)`} />
+              )}
+              {category === 'Food Expense' && forOthers && (
+                <SummaryRow label={'For / किसके लिए'} value={forOthersNames.trim()} />
               )}
               {category === 'Travelling' && travelFrom && (
                 <SummaryRow label={'Route / मार्ग'} value={`${travelFrom} → ${travelTo}`} />

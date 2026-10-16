@@ -6,6 +6,12 @@ export async function getFoodRates() {
   return data.data;
 }
 
+// The employee's own-food date ranges already taken (food date lock, migration 044)
+export async function getFoodTakenDates() {
+  const { data } = await api.get('/api/imprest/food-taken-dates');
+  return data.data;
+}
+
 export async function estimateTravelCost({ from, to, peopleCount, mode, travelDate, vehicleType }) {
   const { data } = await api.post('/api/imprest/estimate-travel', {
     from, to, peopleCount, mode, travelDate, vehicleType,
