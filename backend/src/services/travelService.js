@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { completeJSON } from './llmClient.js';
+import { OWN_VEHICLE_RATE_PER_KM } from '../config/constants.js';
 
 const MAPS_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
@@ -102,6 +103,11 @@ Return ONLY this JSON:
 
 // ── Claude fallback: estimate distance when Google Maps fails ─────────────────
 
+/** Road distance in km between two places (Google Maps, model estimate as fallback), or null. */
+export async function roadDistanceKm(from, to) {
+  return getDistanceKmWithFallback(from, to);
+}
+
 async function getDistanceKmWithFallback(from, to) {
   const mapsResult = await getDistanceKm(from, to);
   if (mapsResult) return mapsResult;
@@ -148,7 +154,7 @@ export async function estimateContractualCabCost({ from, to, peopleCount = 1 }) 
 // ── Own Vehicle (Bike/Car) — distance × fixed rate ────────────────────────────
 
 export async function estimateOwnVehicleCost({ from, to, vehicleType = 'Bike' }) {
-  const RATE = vehicleType === 'Car' ? 10 : 5;
+  const RATE = OWN_VEHICLE_RATE_PER_KM[vehicleType] ?? OWN_VEHICLE_RATE_PER_KM.Bike;
   const distanceKm = await getDistanceKmWithFallback(from, to);
 
   const estimatedAmount = distanceKm

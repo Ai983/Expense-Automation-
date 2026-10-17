@@ -142,8 +142,11 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
             {/* AI Auditor — the review that replaced the manual expense check */}
             {expense.ai_verdict && <AiAuditPanel expense={expense} />}
 
+            {/* Own-vehicle trip — no bill; proof is odometer start/end + site photo */}
+            {meta.ownVehicle && <OwnVehiclePanel trip={meta.ownVehicle} amount={expense.amount} />}
+
             {/* OCR / AI Verification Data */}
-            <div>
+            {!meta.ownVehicle && <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-3">OCR Extraction</h3>
               {meta.attachmentType === 'pdf' && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mb-3 text-xs text-blue-800">
@@ -157,7 +160,7 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
                 <Row label="Receipt Date" value={meta.date || '—'} />
                 <Row label="Payment Status" value={meta.paymentStatus || '—'} highlight={meta.paymentStatus === 'SUCCESS' ? 'green' : meta.paymentStatus === 'FAILED' ? 'red' : null} />
               </div>
-            </div>
+            </div>}
 
             {/* Verification Checks */}
             {expense.verification_logs?.length > 0 && (
@@ -183,9 +186,11 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
             {(expense.allScreenshotUrls?.length > 0 || expense.screenshotSignedUrl) && (
               <div>
                 <h3 className="text-sm font-semibold text-gray-700 mb-3">
-                  {meta.screenshotCount > 1
-                    ? `Payment Proofs (${meta.screenshotCount} attachments)`
-                    : meta.attachmentType === 'pdf' ? 'PDF Attachment' : 'Payment Screenshot'}
+                  {meta.ownVehicle
+                    ? 'Trip Photos — odometer start, odometer end, site'
+                    : meta.screenshotCount > 1
+                      ? `Payment Proofs (${meta.screenshotCount} attachments)`
+                      : meta.attachmentType === 'pdf' ? 'PDF Attachment' : 'Payment Screenshot'}
                 </h3>
                 {meta.totalExtractedAmount > 0 && meta.screenshotCount > 1 && (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 mb-3 text-xs text-blue-800">
@@ -200,6 +205,9 @@ export default function ExpenseDetailModal({ expenseId, onClose, onAction }) {
                 <div className={`${(expense.allScreenshotUrls?.length || 0) > 1 ? 'grid grid-cols-2 gap-3' : ''}`}>
                   {(expense.allScreenshotUrls || [expense.screenshotSignedUrl]).map((url, i) => (
                     <div key={i} className="relative">
+                      {meta.ownVehicle && (
+                        <p className="text-xs font-semibold text-gray-600 mb-1">{TRIP_PHOTO_LABELS[meta.ownVehicle.photoRoles?.[i]] || `Photo ${i + 1}`}</p>
+                      )}
                       {!url ? (
                         <div className="flex items-center justify-center gap-2 bg-gray-100 border border-gray-200 rounded-lg px-4 py-6 text-gray-400 text-xs">
                           <span>🖼️</span>
@@ -372,7 +380,9 @@ function AiAuditPanel({ expense }) {
   return (
     <div className={`border rounded-lg p-4 ${style.box}`}>
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-        <h3 className="text-sm font-semibold text-gray-800">🤖 AI Auditor</h3>
+        <h3 className="text-sm font-semibold text-gray-800">
+          {expense.ai_model === 'odometer-rules' ? '📏 Trip Rules Check (no AI)' : '🤖 AI Auditor'}
+        </h3>
         <div className="flex items-center gap-2">
           {expense.ai_auto_approved && (
             <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">
@@ -446,6 +456,53 @@ function AiAuditPanel({ expense }) {
         {expense.ai_audited_at ? ` · ${new Date(expense.ai_audited_at).toLocaleString()}` : ''}
         {' · the AI never rejects on its own — a person confirms every rejection'}
       </p>
+    </div>
+  );
+}
+
+const TRIP_PHOTO_LABELS = {
+  odometer_start: 'Odometer — start',
+  odometer_end: 'Odometer — end',
+  site: 'At the site',
+};
+
+// Own-vehicle conveyance: paid per km, no bill. The readings are typed by the
+// employee — compare them with the two odometer photos before approving.
+function OwnVehiclePanel({ trip, amount }) {
+  return (
+    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+      <h3 className="text-sm font-semibold text-amber-900 mb-2">🛵 Own {trip.vehicleType} trip — no bill, odometer proof</h3>
+      <div className="bg-white/70 rounded-lg p-3 space-y-2 text-sm">
+        <Row label="Odometer readings" value={`${trip.startKm} → ${trip.endKm} km`} />
+        <Row label="Distance ridden" value={`${trip.km} km`} />
+        <Row label="Planned route" value={trip.plannedKm ? `${trip.plannedKm} km` : 'Not saved on the imprest'} highlight={trip.plannedKm ? null : 'orange'} />
+        <Row label="Allowed" value={`${trip.km} km × ₹${trip.rate}/km = ₹${Number(trip.maxAmount).toLocaleString('en-IN')}`} />
+        <Row label="Claimed" value={`₹${Number(amount).toLocaleString('en-IN')}`} highlight={Number(amount) <= trip.maxAmount ? 'green' : 'red'} />
+      </div>
+      {trip.photos?.length > 0 && (
+        <div className="mt-3">
+          <p className="text-xs font-semibold text-amber-900 mb-1">What the GPS-camera stamp on each photo says</p>
+          <div className="space-y-1.5">
+            {trip.photos.map((p) => (
+              <div key={p.role} className="bg-white/70 rounded px-3 py-2 text-xs border border-amber-100">
+                <span className="font-semibold text-gray-800">{TRIP_PHOTO_LABELS[p.role] || p.role}: </span>
+                {!p.read ? (
+                  <span className="text-orange-700">could not be read — check by eye</span>
+                ) : !p.hasStamp ? (
+                  <span className="text-red-700">no date/location stamp</span>
+                ) : (
+                  <span className="text-gray-700">
+                    {p.takenAt}{p.address ? ` · ${p.address}` : ''}
+                    {p.odometerKm != null ? ` · meter reads ${p.odometerKm} km` : ''}
+                    {p.role === 'site' && p.distanceToSiteKm != null ? ` · ${p.distanceToSiteKm} km from site` : ''}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <p className="text-xs text-amber-800 mt-2">Check that the readings on the two odometer photos match {trip.startKm} and {trip.endKm} km, and that the site photo is from the site.</p>
     </div>
   );
 }

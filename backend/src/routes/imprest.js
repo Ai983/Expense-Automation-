@@ -351,6 +351,13 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
     }
 
     // Food date lock: no two own-food requests may cover the same day (see utils/foodDateLock.js)
+    // Own-vehicle trips are settled against odometer photos, checked against the
+    // planned route — so the route and trip date must be on the request.
+    const isOwnVehicleTrip = category === 'Conveyance' && conveyanceMode === 'Own Vehicle';
+    if (isOwnVehicleTrip && (!travelFrom?.trim() || !travelTo?.trim() || !travelDate)) {
+      return fail(res, 'Bike/car trip ke liye trip date, kahan se aur kahan tak bharein. App refresh karke dobara try karein. / Enter the trip date, from and to for an own-vehicle trip.');
+    }
+
     const isFood = category === FOOD_CATEGORY;
     const forOthersFlag = isFood && (forOthers === true || forOthers === 'true');
     let foodOverlaps = null;
@@ -506,7 +513,7 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       if (dateFrom) extraFields.date_from = dateFrom;
       if (dateTo) extraFields.date_to = dateTo;
       if (category === 'Travelling' && travelSubtype) extraFields.travel_subtype = travelSubtype;
-      if (category === 'Travelling' && travelDate) extraFields.travel_date = travelDate;
+      if ((category === 'Travelling' || isOwnVehicleTrip) && travelDate) extraFields.travel_date = travelDate;
       if (category === 'Conveyance' && conveyanceMode) extraFields.conveyance_mode = conveyanceMode;
       if (category === 'Conveyance' && vehicleType) extraFields.vehicle_type = vehicleType;
       if (category === 'Labour Expense' && labourSubcategory) extraFields.labour_subcategory = labourSubcategory;
@@ -596,7 +603,7 @@ router.get('/my-reminders/:employeeId', authMiddleware, async (req, res, next) =
       .from('imprest_expense_reminders')
       .select(`
         *,
-        imprest:imprest_id (id, ref_id, site, category, approved_at, ${IMPREST_SPEND_LIMIT_COLUMNS})
+        imprest:imprest_id (id, ref_id, site, category, approved_at, conveyance_mode, vehicle_type, ai_estimated_distance_km, travel_from, travel_to, travel_date, ${IMPREST_SPEND_LIMIT_COLUMNS})
       `)
       .eq('employee_id', employeeId)
       .in('status', ['pending', 'expired'])
@@ -613,7 +620,7 @@ router.get('/my-reminders/:employeeId', authMiddleware, async (req, res, next) =
 
     const { data: orphanedPaid } = await supabaseAdmin
       .from('imprest_requests')
-      .select(`id, ref_id, net_approved_amount, site, category, paid_at, ${IMPREST_SPEND_LIMIT_COLUMNS}`)
+      .select(`id, ref_id, net_approved_amount, site, category, paid_at, conveyance_mode, vehicle_type, ai_estimated_distance_km, travel_from, travel_to, travel_date, ${IMPREST_SPEND_LIMIT_COLUMNS}`)
       .eq('employee_id', employeeId)
       .eq('paid', true)
       .eq('current_stage', 'paid')
