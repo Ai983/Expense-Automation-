@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Sidebar from './components/layout/Sidebar';
@@ -62,12 +63,18 @@ function PageWrapper({ children }) {
 
 function ProtectedLayout({ children }) {
   const { user, loading } = useAuth();
+  // Phones: the sidebar is a slide-in menu behind a top bar. md and up: fixed, as before.
+  const [menuOpen, setMenuOpen] = useState(false);
   if (loading) return <HagerstoneLoader />;
   if (!user) return <Navigate to="/login" replace />;
   return (
     <div className="flex h-screen">
-      <Sidebar />
-      <main className="ml-64 flex-1 overflow-y-auto p-8 bg-gray-50">
+      <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
+      <div className="md:hidden fixed top-0 inset-x-0 z-30 h-14 bg-gray-900 text-white flex items-center gap-3 px-4">
+        <button onClick={() => setMenuOpen(true)} aria-label="Open menu" className="text-2xl leading-none px-1">☰</button>
+        <span className="font-bold text-brand-500">HagerStone</span>
+      </div>
+      <main className="md:ml-64 flex-1 min-w-0 overflow-y-auto p-4 pt-[4.5rem] md:p-8 bg-gray-50">
         <PageWrapper>{children}</PageWrapper>
       </main>
     </div>

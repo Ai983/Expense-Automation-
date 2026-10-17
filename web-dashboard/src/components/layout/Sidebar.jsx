@@ -64,22 +64,30 @@ function baseNavItems(role) {
   }
 }
 
-export default function Sidebar() {
+// md and up: always shown. Phones: a slide-in menu opened from the top bar in
+// ProtectedLayout (App.jsx), closed by the backdrop or by picking a page.
+export default function Sidebar({ open = false, onClose = () => {} }) {
   const { user, logout } = useAuth();
   const navItems = getNavItems(user?.role, user?.permissions);
 
   return (
-    <aside className="w-64 bg-gray-900 text-white flex flex-col h-screen fixed left-0 top-0">
-      <div className="px-6 py-5 border-b border-gray-700">
-        <h1 className="text-lg font-bold text-brand-500">HagerStone</h1>
-        <p className="text-xs text-gray-400 mt-0.5">Expense Management</p>
+    <>
+    {open && <div className="md:hidden fixed inset-0 z-40 bg-black/50" onClick={onClose} aria-hidden="true" />}
+    <aside className={`w-64 bg-gray-900 text-white flex flex-col h-screen fixed left-0 top-0 z-50 md:z-auto transition-transform duration-200 md:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
+      <div className="px-6 py-5 border-b border-gray-700 flex items-start justify-between">
+        <div>
+          <h1 className="text-lg font-bold text-brand-500">HagerStone</h1>
+          <p className="text-xs text-gray-400 mt-0.5">Expense Management</p>
+        </div>
+        <button onClick={onClose} aria-label="Close menu" className="md:hidden text-gray-400 hover:text-white text-2xl leading-none">&times;</button>
       </div>
 
-      <nav className="flex-1 px-3 py-4 space-y-1">
+      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
+            onClick={onClose}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                 isActive
@@ -107,5 +115,6 @@ export default function Sidebar() {
         </button>
       </div>
     </aside>
+    </>
   );
 }

@@ -597,10 +597,10 @@ export default function S2QueuePage() {
                 <div className="flex justify-between"><span className="text-gray-500">Category</span><span>{selected.category}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Site</span><span>{selected.site}</span></div>
                 {(selected.date_from || selected.date_to) && (
-                  <div className="flex justify-between"><span className="text-gray-500">Dates</span><span>{fmtDate(selected.date_from)} – {fmtDate(selected.date_to)}</span></div>
+                  <div className="flex justify-between gap-4"><span className="text-gray-500">Dates</span><span>{fmtDate(selected.date_from)} – {fmtDate(selected.date_to)}</span></div>
                 )}
                 {selected.food_billable_days != null && (
-                  <div className="flex justify-between">
+                  <div className="flex justify-between gap-4">
                     <span className="text-gray-500">Paid days</span>
                     <span className="text-right">
                       {selected.food_billable_days}
@@ -611,7 +611,7 @@ export default function S2QueuePage() {
                   </div>
                 )}
                 {selected.for_others && (
-                  <div className="flex justify-between"><span className="text-gray-500">Food for</span><span className="text-right max-w-[280px] text-blue-700">{selected.for_others_names}</span></div>
+                  <div className="flex justify-between gap-4"><span className="text-gray-500">Food for</span><span className="text-right max-w-[280px] text-blue-700">{selected.for_others_names}</span></div>
                 )}
                 {selected.purpose && <div className="flex justify-between"><span className="text-gray-500">Purpose</span><span className="text-right max-w-[280px]">{selected.purpose}</span></div>}
                 <div className="flex justify-between"><span className="text-gray-500">Submitted</span><span>{fmtDate(selected.submitted_at)} {fmtTime(selected.submitted_at)}</span></div>
@@ -629,7 +629,7 @@ export default function S2QueuePage() {
                   </p>
                   <div className="divide-y divide-red-100">
                     {selected.food_overlaps.map((o) => (
-                      <div key={o.ref_id} className="py-1.5 flex items-center justify-between text-xs">
+                      <div key={o.ref_id} className="py-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-xs">
                         <div>
                           <span className="font-mono text-gray-600">{o.ref_id}</span>
                           <span className="text-gray-700"> · {o.same_employee ? 'Same employee' : (o.employee_name || '—')}</span>
