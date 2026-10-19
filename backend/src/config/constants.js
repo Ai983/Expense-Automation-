@@ -115,11 +115,9 @@ export const WEEKLY_EMERGENCY_THRESHOLD = 20000;
 // (mirrors canOverrideFoodRate in mobile-app imprest.jsx).
 export const FOOD_RATE_OVERRIDE_EMAILS = ['ea@hagerstone.com', 'facade@hagerstone.com'];
 
-// Own-vehicle conveyance: paid per km, so there is no bill. Proof is odometer
-// start + end photos and a photo at the site (utils/ownVehicleProof.js).
+// Own-vehicle conveyance: paid per km, so there is no bill — those expenses go
+// to Finance for review instead of receipt OCR (utils/ownVehicleProof.js).
 export const OWN_VEHICLE_RATE_PER_KM = { Bike: 5, Car: 10 };
-// Ridden km may exceed the planned route distance by this much before Finance must look.
-export const OWN_VEHICLE_KM_TOLERANCE = 0.2;
 
 export const EXPENSE_STATUSES = [
   'pending',

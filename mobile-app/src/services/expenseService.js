@@ -6,7 +6,7 @@ import api from './api';
  * `images` is an array of { uri, mimeType, name? } objects.
  * Also supports legacy single-image via imageUri/imageMimeType.
  */
-export async function submitExpense({ site, amount, category, description, images, imageUri, imageMimeType, imprestId, settlementForExpenseId, odometerStartKm, odometerEndKm }) {
+export async function submitExpense({ site, amount, category, description, images, imageUri, imageMimeType, imprestId, settlementForExpenseId }) {
   const formData = new FormData();
   formData.append('site', site);
   formData.append('amount', String(amount));
@@ -14,9 +14,6 @@ export async function submitExpense({ site, amount, category, description, image
   if (description) formData.append('description', description);
   if (imprestId) formData.append('imprestId', imprestId);
   if (settlementForExpenseId) formData.append('settlementForExpenseId', settlementForExpenseId);
-  // Own-vehicle trip: odometer readings that go with the start/end photos
-  if (odometerStartKm != null) formData.append('odometerStartKm', String(odometerStartKm));
-  if (odometerEndKm != null) formData.append('odometerEndKm', String(odometerEndKm));
 
   // Normalize to array: support both new `images` array and legacy single image
   const imageList = images?.length ? images : (imageUri ? [{ uri: imageUri, mimeType: imageMimeType || 'image/jpeg' }] : []);

@@ -103,11 +103,6 @@ Return ONLY this JSON:
 
 // ── Claude fallback: estimate distance when Google Maps fails ─────────────────
 
-/** Road distance in km between two places (Google Maps, model estimate as fallback), or null. */
-export async function roadDistanceKm(from, to) {
-  return getDistanceKmWithFallback(from, to);
-}
-
 async function getDistanceKmWithFallback(from, to) {
   const mapsResult = await getDistanceKm(from, to);
   if (mapsResult) return mapsResult;

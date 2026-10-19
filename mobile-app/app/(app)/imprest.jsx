@@ -1,7 +1,7 @@
 ﻿import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
-  StyleSheet, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Image, Animated, Modal, useWindowDimensions,
+  StyleSheet, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Image, Animated,
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -74,62 +74,6 @@ function sundaysBetween(from, to) {
 // "2026-10-05" → "Sun 5 Oct"
 function fmtSunday(ymd) {
   return new Date(`${ymd}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
-}
-
-// Own-vehicle trips have no bill — the expense is settled with these three
-// photos (backend utils/ownVehicleProof.js), so say so before the trip starts.
-function OwnVehiclePhotoNotice() {
-  return (
-    <View style={[styles.infoBox, { marginTop: 16 }]}>
-      <Text style={styles.infoText}>{'📸 Zaroori — teeno photo lena compulsory hai:'}</Text>
-      <Text style={styles.infoHint}>{'1. Trip shuru karte waqt bike/car ke meter (odometer) ki photo lein.'}</Text>
-      <Text style={styles.infoHint}>{'2. Trip khatam hone par meter (odometer) ki photo lein.'}</Text>
-      <Text style={styles.infoHint}>{'3. Site par pahunch kar site ki ek photo lein.'}</Text>
-      <Text style={[styles.infoHint, { fontWeight: '700' }]}>{'Teeno photo GPS camera se lein — photo par date, time aur location likhi honi chahiye (jaise WhatsApp group me bhejte hain).'}</Text>
-      <Text style={[styles.infoHint, { fontWeight: '700' }]}>{'Expense bharte waqt teeno photo upload karni hogi — inke bina expense submit nahi hoga.'}</Text>
-    </View>
-  );
-}
-
-// Shown once per request when Own Vehicle is chosen; the employee must tap OK
-// to continue, so nobody starts a bike/car trip without knowing the photos are
-// needed afterwards. Same rules the server checks (backend tripPhotoService.js).
-const TRIP_RULES = [
-  'Trip shuru karte waqt bike/car ke meter (odometer) ki photo lein.',
-  'Trip khatam hone par meter (odometer) ki photo lein.',
-  'Site par pahunch kar site ki ek photo lein.',
-  'Teeno photo GPS camera se lein — photo par date, time aur location likhi honi chahiye (jaise WhatsApp group me bhejte hain).',
-  'Teeno photo trip wale din ki honi chahiye. Site ki photo site par hi li jaye.',
-  'Start aur end ki photo alag-alag honi chahiye — ek hi photo do baar nahi chalegi.',
-  'Paisa meter reading ke hisaab se milega: Bike ₹5/km, Car ₹10/km.',
-  'Teeno photo ke bina expense submit nahi hoga.',
-];
-
-function TripRulesPopup({ visible, onOk }) {
-  // The rule list scrolls inside the card so the OK button always stays on
-  // screen, even on a small phone or in landscape.
-  const { height } = useWindowDimensions();
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={() => { /* OK is required */ }}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalCard}>
-          <Text style={styles.modalTitle}>{'🛵 Bike/Car Trip — Zaroori Niyam'}</Text>
-          <Text style={styles.modalSubtitle}>{'Trip ke baad expense bharne ke liye yeh photo chahiye. Dhyan se padhein:'}</Text>
-          <ScrollView style={{ maxHeight: Math.max(160, height - 280) }}>
-            {TRIP_RULES.map((rule, i) => (
-              <View key={i} style={styles.modalRuleRow}>
-                <Text style={styles.modalRuleNum}>{i + 1}.</Text>
-                <Text style={styles.modalRuleText}>{rule}</Text>
-              </View>
-            ))}
-          </ScrollView>
-          <TouchableOpacity style={[styles.primaryBtn, { marginTop: 16 }]} onPress={onOk}>
-            <Text style={styles.primaryBtnText}>{'OK, samajh gaya'}</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
 }
 
 // "2026-10-01" → "1 Oct"
@@ -243,9 +187,6 @@ export default function ImprestScreen() {
   const [forOthersNames, setForOthersNames] = useState('');
   // Food Sunday rule — the Sundays the employee ticked as working days
   const [sundaysWorked, setSundaysWorked] = useState([]);
-  // Own-vehicle photo rules popup — must be OK'd once per request
-  const [showTripRules, setShowTripRules] = useState(false);
-  const [tripRulesAccepted, setTripRulesAccepted] = useState(false);
 
   // Travelling
   const [travelSubtype, setTravelSubtype] = useState(TRAVEL_SUBTYPES[0]);
@@ -488,7 +429,6 @@ export default function ImprestScreen() {
         }
         if (conveyanceMode === 'Own Vehicle') {
           if (!convFrom.trim() || !convTo.trim()) { showAlert('Zaroori', 'Kahan Se aur Kahan Tak dono bharein.'); return false; }
-          if (!travelDate) { showAlert('Zaroori', 'Trip ki date bharein.'); return false; }
           if (!amountRequested || parseAmt(amountRequested) <= 0) { showAlert('Zaroori', 'Andaza lein ya rashi bharein.'); return false; }
         }
         if (conveyanceMode === 'Public Transport') {
@@ -511,11 +451,6 @@ export default function ImprestScreen() {
 
   const handleNext = () => {
     if (!validateCurrentStep()) return;
-    // Own Vehicle: the photo rules must be read and OK'd before going on
-    if (currentStep === 'conveyance_mode' && conveyanceMode === 'Own Vehicle' && !tripRulesAccepted) {
-      setShowTripRules(true);
-      return;
-    }
     // Special side effects on transition
     if (currentStep === 'food_dates' && category === 'Food Expense') {
       loadFoodRate(site, foodPaidDays, peopleCount);
@@ -524,12 +459,6 @@ export default function ImprestScreen() {
   };
 
   const handleBack = () => setStepIndex((i) => Math.max(i - 1, 0));
-
-  const acceptTripRules = () => {
-    setTripRulesAccepted(true);
-    setShowTripRules(false);
-    setStepIndex((i) => Math.min(i + 1, totalSteps - 1));
-  };
 
   // ── Submit ───────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
@@ -565,10 +494,10 @@ export default function ImprestScreen() {
         // Travel
         travelSubtype: travelSubtype || undefined,
         // An own-vehicle trip's route lives in the conveyance fields; send it as the
-        // travel route so it is saved and the expense can be checked against it.
+        // travel route so it is saved and Finance can see where they went.
         travelFrom: (isOwnVehicleTrip ? convFrom : travelFrom).trim() || undefined,
         travelTo: (isOwnVehicleTrip ? convTo : travelTo).trim() || undefined,
-        travelDate: (category === 'Travelling' || isOwnVehicleTrip) ? (travelDate || undefined) : undefined,
+        travelDate: category === 'Travelling' ? (travelDate || undefined) : undefined,
         aiEstimatedAmount: aiEstimate?.estimatedAmount ?? ownVehicleEstimate?.estimatedAmount ?? undefined,
         aiEstimatedDistanceKm: aiEstimate?.distanceKm ?? ownVehicleEstimate?.distanceKm ?? undefined,
         userEditedAmount,
@@ -617,7 +546,6 @@ export default function ImprestScreen() {
     setDateFrom(''); setDateTo('');
     setFoodRate(null); setFoodRateError('');
     setFoodTaken([]); setForOthers(false); setForOthersNames(''); setSundaysWorked([]);
-    setShowTripRules(false); setTripRulesAccepted(false);
     setTravelSubtype(TRAVEL_SUBTYPES[0]);
     setTravelFrom(''); setTravelTo(''); setTravelDate('');
     setAiEstimate(null); setUserEditedAmount(false); setEstimating(false);
@@ -1186,7 +1114,6 @@ export default function ImprestScreen() {
                 onChangeText={setConvTo}
                 placeholder="e.g. MAX Hospital, Delhi"
               />
-              <DateInput label={'Trip ki date / Trip Date'} value={travelDate} onChange={setTravelDate} />
               <TouchableOpacity
                 style={[styles.secondaryBtn, estimating && styles.btnDisabled, { marginTop: 12 }]}
                 onPress={handleEstimateOwnVehicle}
@@ -1210,7 +1137,6 @@ export default function ImprestScreen() {
                 placeholder="0"
                 placeholderTextColor="#9ca3af"
               />
-              <OwnVehiclePhotoNotice />
             </View>
           );
         }
@@ -1281,11 +1207,16 @@ export default function ImprestScreen() {
         return (
           <View style={styles.stepContent}>
             <Text style={styles.stepTitle}>Purpose / {'\u0909\u0926\u094D\u0926\u0947\u0936\u094D\u092F'} *</Text>
+            {isOwnVehicleTrip && (
+              <Text style={styles.stepSubtitle}>{'Bike/car trip: detail me likhein \u2014 kahan se kahan jaa rahe hain aur kis kaam se.'}</Text>
+            )}
             <TextInput
               style={[styles.input, styles.textarea]}
               value={purpose}
               onChangeText={setPurpose}
-              placeholder={'e.g. Site visit expenses / \u0938\u093E\u0907\u091F \u0935\u093F\u091C\u093F\u091F \u0916\u0930\u094D\u091A'}
+              placeholder={isOwnVehicleTrip
+                ? 'e.g. Greater Noida office se Metalman site Bhiwadi \u2014 window frame submit karne'
+                : 'e.g. Site visit expenses / \u0938\u093E\u0907\u091F \u0935\u093F\u091C\u093F\u091F \u0916\u0930\u094D\u091A'}
               placeholderTextColor="#9ca3af"
               multiline
               numberOfLines={4}
@@ -1327,9 +1258,6 @@ export default function ImprestScreen() {
               {isOwnVehicleTrip && (
                 <SummaryRow label={'Route / मार्ग'} value={`${convFrom} → ${convTo}`} />
               )}
-              {isOwnVehicleTrip && travelDate && (
-                <SummaryRow label={'Trip Date / तिथि'} value={travelDate} />
-              )}
               {category === 'Conveyance' && (
                 <SummaryRow label={'Mode / प्रकार'} value={conveyanceMode} />
               )}
@@ -1348,7 +1276,6 @@ export default function ImprestScreen() {
               <SummaryRow label={'Amount / राशि'} value={`₹${amountRequested}`} highlight />
               {purpose ? <SummaryRow label={'Purpose / उद्देश्य'} value={purpose} /> : null}
             </View>
-            {isOwnVehicleTrip && <OwnVehiclePhotoNotice />}
             <TouchableOpacity
               style={[styles.primaryBtn, submitting && styles.btnDisabled]}
               onPress={handleSubmit}
@@ -1402,7 +1329,6 @@ export default function ImprestScreen() {
           <Text style={styles.backBtnText}>{'\u2190 Wapas / Back'}</Text>
         </TouchableOpacity>
       )}
-      <TripRulesPopup visible={showTripRules} onOk={acceptTripRules} />
     </KeyboardAvoidingView>
   );
 }
@@ -1489,15 +1415,6 @@ const styles = StyleSheet.create({
   infoBox: { backgroundColor: '#fef3c7', borderRadius: 8, padding: 12, marginTop: 12 },
   infoText: { fontSize: 14, fontWeight: '600', color: '#92400e' },
   infoHint: { fontSize: 12, color: '#b45309', marginTop: 4 },
-
-  // Own-vehicle photo rules popup
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 16 },
-  modalCard: { width: '100%', maxWidth: 440, backgroundColor: '#fff', borderRadius: 16, padding: 20 },
-  modalTitle: { fontSize: 18, fontWeight: '800', color: '#92400e' },
-  modalSubtitle: { fontSize: 13, color: '#6b7280', marginTop: 6, marginBottom: 10 },
-  modalRuleRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
-  modalRuleNum: { fontSize: 14, fontWeight: '700', color: '#b45309', width: 18 },
-  modalRuleText: { flex: 1, fontSize: 14, color: '#111827', lineHeight: 20 },
 
   deviationNote: { fontSize: 12, color: '#3b82f6', marginTop: 6, fontStyle: 'italic' },
   errorText: { color: '#ef4444', fontSize: 13, marginTop: 8 },

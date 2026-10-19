@@ -14,17 +14,10 @@ import { useSites } from '../../src/hooks/useSites';
 
 const INITIAL_FORM = { site: SITES[0], amount: '', category: CATEGORIES[0], description: '' };
 
-// Own-vehicle (bike/car) trips are paid per km and have no bill. They are settled
-// with three camera photos and the two odometer readings instead of a payment
-// screenshot (backend utils/ownVehicleProof.js). Order matters — the server reads
-// the photos in this order.
-const OWN_VEHICLE_RATE = { Bike: 5, Car: 10 };
-const TRIP_PHOTOS = [
-  { role: 'odometer_start', label: '1. Trip shuru — meter (odometer) ki photo' },
-  { role: 'odometer_end', label: '2. Trip khatam — meter (odometer) ki photo' },
-  { role: 'site', label: '3. Site par li gayi photo' },
-];
+// Own-vehicle (bike/car) trips are paid per km and have no bill, so Finance
+// reviews them from the employee's description (backend utils/ownVehicleProof.js).
 const isOwnVehicle = (imp) => imp?.category === 'Conveyance' && imp?.conveyance_mode === 'Own Vehicle';
+const OWN_VEHICLE_MIN_DESCRIPTION = 20;
 
 // The confirmation card is written at submit time, but the AI auditor settles
 // most expenses seconds later. These map the refreshed status onto the card so
@@ -65,11 +58,7 @@ export default function SubmitExpenseScreen() {
   const [activeAdjustmentId, setActiveAdjustmentId] = useState(null);
   const [settlementForExpenseId, setSettlementForExpenseId] = useState(null);
   const [imprestSiteExtra, setImprestSiteExtra] = useState(null); // site from imprest when not in SITES list
-  // Own-vehicle trip proof — set only when the selected imprest is a bike/car trip
-  const [ownTrip, setOwnTrip] = useState(null);
-  const [tripPhotos, setTripPhotos] = useState({});
-  const [startKm, setStartKm] = useState('');
-  const [endKm, setEndKm] = useState('');
+  const [ownTrip, setOwnTrip] = useState(false); // selected imprest is a bike/car trip
   const sites = useSites();
   const { user } = useAuth();
 
@@ -116,11 +105,15 @@ export default function SubmitExpenseScreen() {
       ? mappedCategory
       : (imp?.category && CATEGORIES.includes(imp.category) ? imp.category : CATEGORIES[0]);
 
+    const trip = isOwnVehicle(imp);
+    setOwnTrip(trip);
     setForm({
       site,
       amount: remainingBalance > 0 ? String(remainingBalance) : (approvedAmt ? String(approvedAmt) : ''),
       category,
-      description: `Expense for imprest ${imp?.ref_id || ''}`,
+      // A bike/car trip is reviewed from what the employee writes here, so it
+      // starts empty instead of with the generic "Expense for imprest …" line.
+      description: trip ? '' : `Expense for imprest ${imp?.ref_id || ''}`,
     });
     setActiveReminderId(reminder.id);
     setActiveImprestId(imp?.id || null);
@@ -128,59 +121,6 @@ export default function SubmitExpenseScreen() {
     setImprestRemainingBalance(claimRemaining > 0 ? claimRemaining : claimLimit);
     setImages([]);
     setResult(null);
-    resetTrip(isOwnVehicle(imp) ? {
-      vehicleType: imp.vehicle_type || 'Bike',
-      rate: OWN_VEHICLE_RATE[imp.vehicle_type] || OWN_VEHICLE_RATE.Bike,
-      plannedKm: imp.ai_estimated_distance_km ? parseFloat(imp.ai_estimated_distance_km) : null,
-      from: imp.travel_from, to: imp.travel_to, date: imp.travel_date,
-    } : null);
-  }
-
-  function resetTrip(trip) {
-    setOwnTrip(trip);
-    setTripPhotos({});
-    setStartKm('');
-    setEndKm('');
-  }
-
-  // Trip photos come from a GPS / timestamp camera app (the same ones posted in the
-  // site WhatsApp groups), so they are usually picked from the gallery. The date,
-  // time and location printed on the photo are what the server checks — not how
-  // it was picked. Full quality keeps that printed stamp readable.
-  async function takeTripPhoto(role, source) {
-    const options = { mediaTypes: ['images'], quality: 1, allowsEditing: false };
-    let picked;
-    if (source === 'camera') {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') return Alert.alert('Permission', 'Camera ki permission chahiye / Camera access is required');
-      picked = await ImagePicker.launchCameraAsync(options);
-    } else {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') return Alert.alert('Permission', 'Gallery ki permission chahiye / Gallery access is required');
-      picked = await ImagePicker.launchImageLibraryAsync(options);
-    }
-    if (!picked.canceled && picked.assets?.[0]) {
-      const asset = picked.assets[0];
-      setTripPhotos((p) => ({ ...p, [role]: { uri: asset.uri, mimeType: asset.mimeType || 'image/jpeg' } }));
-      setResult(null);
-    }
-  }
-
-  // km ridden and the most that may be claimed for it (null until both readings make sense)
-  const tripKm = ownTrip && startKm !== '' && endKm !== '' && parseFloat(endKm) > parseFloat(startKm)
-    ? Math.round((parseFloat(endKm) - parseFloat(startKm)) * 10) / 10
-    : null;
-  const tripMaxAmount = tripKm != null ? Math.round(tripKm * ownTrip.rate) : null;
-
-  function setReading(which, value) {
-    const clean = value.replace(/[^0-9.]/g, '');
-    const s = which === 'start' ? clean : startKm;
-    const e = which === 'end' ? clean : endKm;
-    if (which === 'start') setStartKm(clean); else setEndKm(clean);
-    // Fill the claim with km × rate as soon as both readings are in
-    if (s !== '' && e !== '' && parseFloat(e) > parseFloat(s)) {
-      set('amount', String(Math.round((parseFloat(e) - parseFloat(s)) * ownTrip.rate)));
-    }
   }
 
   function applyAdjustment(adj) {
@@ -199,7 +139,7 @@ export default function SubmitExpenseScreen() {
     setActiveReminderId(null);
     setImages([]);
     setResult(null);
-    resetTrip(null);
+    setOwnTrip(false);
   }
 
   function clearImprest() {
@@ -212,7 +152,7 @@ export default function SubmitExpenseScreen() {
     setImprestSiteExtra(null);
     setForm(INITIAL_FORM);
     setImages([]);
-    resetTrip(null);
+    setOwnTrip(false);
   }
 
   async function pickPdf() {
@@ -268,11 +208,9 @@ export default function SubmitExpenseScreen() {
         amount: expenseAmount,
         category: form.category,
         description: form.description,
-        // Own-vehicle trip: the three photos in the fixed order the server expects
-        images: ownTrip ? TRIP_PHOTOS.map((p) => tripPhotos[p.role]) : images,
+        images,
         imprestId: activeImprestId,
         settlementForExpenseId,
-        ...(ownTrip && { odometerStartKm: startKm, odometerEndKm: endKm }),
       });
       setResult(res);
       setImages([]);
@@ -330,18 +268,10 @@ export default function SubmitExpenseScreen() {
     if (!form.amount || isNaN(parseFloat(form.amount)) || parseFloat(form.amount) <= 0) {
       return Alert.alert('Error', 'Enter a valid amount');
     }
-    if (ownTrip) {
-      const missing = TRIP_PHOTOS.filter((p) => !tripPhotos[p.role]);
-      if (missing.length) {
-        return Alert.alert('Photo zaroori hai', `Ye photo abhi baaki hai:\n${missing.map((p) => p.label).join('\n')}\n\nTeeno photo compulsory hain.`);
-      }
-      if (tripKm == null) {
-        return Alert.alert('Reading galat hai', 'Start aur end odometer reading bharein. End reading start se zyada honi chahiye.');
-      }
-      if (parseFloat(form.amount) > tripMaxAmount + 1) {
-        return Alert.alert('Amount zyada hai', `${tripKm} km × ₹${ownTrip.rate}/km = ₹${tripMaxAmount}. Isse zyada claim nahi kar sakte.`);
-      }
-    } else if (images.length === 0) {
+    if (ownTrip && form.description.trim().length < OWN_VEHICLE_MIN_DESCRIPTION) {
+      return Alert.alert('Detail likhein', 'Bike/car trip: description me likhein — kahan se kahan gaye, kis kaam se, kitne km.');
+    }
+    if (images.length === 0) {
       return Alert.alert('Error', 'Upload at least one payment screenshot or PDF');
     }
 
@@ -586,11 +516,18 @@ export default function SubmitExpenseScreen() {
               </Picker>
             </View>
 
-            {/* Description */}
-            <Text style={styles.label}>Description</Text>
+            {/* Description — required in detail for a bike/car trip, which has no bill */}
+            <Text style={styles.label}>Description{ownTrip ? ' *' : ''}</Text>
+            {ownTrip && (
+              <Text style={styles.tripHint}>
+                {'Bike/car trip ka bill nahi hota — Finance aapka likha hua padh kar approve karega. Detail me likhein: kahan se kahan gaye, kis kaam se, kitne km.'}
+              </Text>
+            )}
             <TextInput
               style={[styles.input, styles.textarea]}
-              placeholder="Optional details about this expense..."
+              placeholder={ownTrip
+                ? 'e.g. Greater Noida office se Metalman site Bhiwadi aur wapas — window frame submit karne, 236 km'
+                : 'Optional details about this expense...'}
               placeholderTextColor="#9ca3af"
               value={form.description}
               onChangeText={(v) => set('description', v)}
@@ -598,67 +535,6 @@ export default function SubmitExpenseScreen() {
               numberOfLines={3}
             />
 
-            {/* Own-vehicle trip proof — replaces the payment screenshot */}
-            {ownTrip && (
-              <View style={styles.tripBox}>
-                <Text style={styles.tripTitle}>{`🛵 ${ownTrip.vehicleType} trip — bill ki zaroorat nahi`}</Text>
-                <Text style={styles.tripHint}>
-                  {`Aapko ₹${ownTrip.rate}/km milta hai. Teeno photo compulsory hain.`}
-                </Text>
-                <Text style={[styles.tripHint, { fontWeight: '700' }]}>
-                  {'GPS camera wali photo lagayein — jis par date, time aur location likhi ho (jaise WhatsApp group me bhejte hain). Bina location wali photo accept nahi hogi.'}
-                </Text>
-                {(ownTrip.from || ownTrip.to) && (
-                  <Text style={styles.tripHint}>
-                    {`Route: ${ownTrip.from || '?'} → ${ownTrip.to || '?'}${ownTrip.plannedKm ? ` (${ownTrip.plannedKm} km)` : ''}${ownTrip.date ? ` · ${ownTrip.date}` : ''}`}
-                  </Text>
-                )}
-
-                {TRIP_PHOTOS.map((p) => {
-                  const photo = tripPhotos[p.role];
-                  return (
-                    <View key={p.role} style={styles.tripPhotoRow}>
-                      <Text style={styles.label}>{p.label} *</Text>
-                      {photo ? (
-                        <View style={styles.imagePreview}>
-                          <Image source={{ uri: photo.uri }} style={styles.previewImg} resizeMode="contain" />
-                          <TouchableOpacity onPress={() => setTripPhotos((t) => ({ ...t, [p.role]: undefined }))} style={styles.removeImg}>
-                            <Text style={styles.removeImgText}>Hatayein / Change</Text>
-                          </TouchableOpacity>
-                        </View>
-                      ) : (
-                        <View style={styles.imageButtons}>
-                          <TouchableOpacity style={styles.imgBtn} onPress={() => takeTripPhoto(p.role, 'gallery')}>
-                            <Text style={styles.imgBtnText}>🖼 Gallery</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity style={styles.imgBtn} onPress={() => takeTripPhoto(p.role, 'camera')}>
-                            <Text style={styles.imgBtnText}>📷 Camera</Text>
-                          </TouchableOpacity>
-                        </View>
-                      )}
-                      {p.role === 'odometer_start' && (
-                        <TextInput style={styles.input} placeholder="Start reading (km) — e.g. 12400" placeholderTextColor="#9ca3af"
-                          value={startKm} onChangeText={(v) => setReading('start', v)} keyboardType="numeric" />
-                      )}
-                      {p.role === 'odometer_end' && (
-                        <TextInput style={styles.input} placeholder="End reading (km) — e.g. 12636" placeholderTextColor="#9ca3af"
-                          value={endKm} onChangeText={(v) => setReading('end', v)} keyboardType="numeric" />
-                      )}
-                    </View>
-                  );
-                })}
-
-                {tripKm != null ? (
-                  <Text style={styles.tripTotal}>
-                    {`${tripKm} km × ₹${ownTrip.rate}/km = ₹${tripMaxAmount.toLocaleString('en-IN')} (maximum claim)`}
-                  </Text>
-                ) : (startKm !== '' && endKm !== '') ? (
-                  <Text style={[styles.tripTotal, { color: '#dc2626' }]}>End reading start reading se zyada honi chahiye</Text>
-                ) : null}
-              </View>
-            )}
-
-            {!ownTrip && (<>
             {/* Payment proof */}
             <Text style={styles.label}>Payment Proof * {images.length > 0 && `(${images.length} attached)`}</Text>
 
@@ -700,7 +576,6 @@ export default function SubmitExpenseScreen() {
                 You can add up to {5 - images.length} more screenshot{5 - images.length !== 1 ? 's' : ''}
               </Text>
             )}
-            </>)}
 
             <TouchableOpacity
               style={[styles.submitBtn, loading && styles.btnDisabled]}
@@ -777,6 +652,7 @@ const styles = StyleSheet.create({
 
   // Form fields
   label: { fontSize: 13, fontWeight: '600', color: '#374151', marginTop: 16, marginBottom: 6 },
+  tripHint: { fontSize: 12, color: '#b45309', marginBottom: 6 },
   input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: '#111827', backgroundColor: '#fff' },
   textarea: { height: 80, textAlignVertical: 'top' },
 
@@ -802,11 +678,6 @@ const styles = StyleSheet.create({
   // Image upload
   imageButtons: { flexDirection: 'row', gap: 12 },
   imgBtn: { flex: 1, borderWidth: 2, borderColor: '#e8a24a', borderStyle: 'dashed', borderRadius: 12, paddingVertical: 20, alignItems: 'center' },
-  tripBox: { marginTop: 16, backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a', borderRadius: 12, padding: 14 },
-  tripTitle: { fontSize: 15, fontWeight: '700', color: '#92400e' },
-  tripHint: { fontSize: 12, color: '#b45309', marginTop: 4 },
-  tripPhotoRow: { marginTop: 4, gap: 8 },
-  tripTotal: { marginTop: 14, fontSize: 14, fontWeight: '700', color: '#065f46' },
   imgBtnText: { color: '#e8a24a', fontWeight: '600', fontSize: 15 },
   imagePreview: { alignItems: 'center' },
   previewImg: { width: '100%', height: 200, borderRadius: 12, marginBottom: 8 },

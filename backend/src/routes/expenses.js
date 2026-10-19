@@ -26,8 +26,7 @@ import { runAuditAndPersist, sweepPendingAudits } from '../services/aiAuditServi
 import { notifyExpenseRejected } from '../services/whatsappService.js';
 import { imprestSpendLimit, IMPREST_SPEND_LIMIT_COLUMNS } from '../utils/imprestSpendLimit.js';
 import { isValidSite } from '../config/sites.js';
-import { isOwnVehicleImprest, evaluateOwnVehicleClaim, ownVehicleReasoning, OWN_VEHICLE_PHOTO_ROLES } from '../utils/ownVehicleProof.js';
-import { checkTripPhotos } from '../services/tripPhotoService.js';
+import { isOwnVehicleImprest, ownVehicleReview, OWN_VEHICLE_MIN_DESCRIPTION } from '../utils/ownVehicleProof.js';
 import { broadcastNewExpense } from '../index.js';
 
 const router = Router();
@@ -41,7 +40,7 @@ router.post(
   upload.fields([{ name: 'screenshots', maxCount: 5 }, { name: 'screenshot', maxCount: 1 }]),
   async (req, res, next) => {
     try {
-      const { site, amount, category, description, imprestId, settlementForExpenseId, odometerStartKm, odometerEndKm } = req.body;
+      const { site, amount, category, description, imprestId, settlementForExpenseId } = req.body;
       // Support both multi-file (screenshots) and legacy single-file (screenshot)
       const files = [
         ...(req.files?.screenshots || []),
@@ -80,7 +79,7 @@ router.post(
 
       const { data: linkedImprest, error: imprestFetchErr } = await supabaseAdmin
         .from('imprest_requests')
-        .select(`id, ref_id, employee_id, current_stage, paid_at, site, category, conveyance_mode, vehicle_type, ai_estimated_distance_km, travel_to, travel_date, ${IMPREST_SPEND_LIMIT_COLUMNS}`)
+        .select(`id, ref_id, employee_id, current_stage, paid_at, category, conveyance_mode, vehicle_type, ai_estimated_distance_km, travel_from, travel_to, ${IMPREST_SPEND_LIMIT_COLUMNS}`)
         .eq('id', imprestId)
         .single();
 
@@ -110,36 +109,16 @@ router.post(
       // Track overspend but allow the submission — finance reconciles the balance
       const overspendAmount = Math.max(0, parsedAmount - remainingBalance);
 
-      // Own-vehicle trips have no bill: proof is odometer start/end + site photo,
-      // checked by fixed rules instead of receipt OCR and the AI auditor
-      // (utils/ownVehicleProof.js). Settlements of a finance cut keep the normal flow.
+      // Own-vehicle trips have no bill, so receipt OCR and the AI auditor would
+      // block them. They go straight to a person, who reviews the employee's
+      // description of the trip (utils/ownVehicleProof.js). Settlements of a
+      // finance cut keep the normal flow.
       let ownVehicle = null;
       if (isOwnVehicleImprest(linkedImprest) && !settlementForExpenseId) {
-        ownVehicle = evaluateOwnVehicleClaim({
-          startKm: odometerStartKm,
-          endKm: odometerEndKm,
-          amount: parsedAmount,
-          vehicleType: linkedImprest.vehicle_type,
-          plannedKm: linkedImprest.ai_estimated_distance_km,
-          files,
-        });
-        if (ownVehicle.error) return fail(res, ownVehicle.error);
-
-        // Read the GPS-camera stamp (date, time, address) and odometer digits on
-        // each photo and check them (services/tripPhotoService.js).
-        const photoCheck = await checkTripPhotos({
-          files,
-          roles: OWN_VEHICLE_PHOTO_ROLES,
-          imprest: linkedImprest,
-          employeeId: req.user.id,
-          startKm: ownVehicle.startKm,
-          endKm: ownVehicle.endKm,
-        });
-        if (photoCheck.error) return fail(res, photoCheck.error);
-        ownVehicle.flags.push(...photoCheck.flags);
-        ownVehicle.checks.push(...photoCheck.checks);
-        ownVehicle.photos = photoCheck.photos;
-        ownVehicle.reasoning = ownVehicleReasoning(ownVehicle);
+        if ((description || '').trim().length < OWN_VEHICLE_MIN_DESCRIPTION) {
+          return fail(res, 'Bike/car trip: description me detail likhein — kahan se kahan gaye, kis kaam se, kitne km. / Describe the trip: from where, to where, why and how many km.');
+        }
+        ownVehicle = ownVehicleReview(linkedImprest);
       }
 
       const submittedAt = new Date().toISOString();
@@ -269,7 +248,9 @@ router.post(
         else autoAction = 'blocked';
       }
 
-      if (ownVehicle) verificationChecks = ownVehicle.checks;
+      if (ownVehicle) {
+        verificationChecks = [{ step: 'own_vehicle_trip', result: 'warn', score: 0.5, detail: `Own ${ownVehicle.vehicleType} trip — no bill to check; Finance reviews the description` }];
+      }
 
       // 4. Run duplicate detection
       const duplicateResult = await checkDuplicates({
@@ -331,35 +312,29 @@ router.post(
         blockReason,
         ...(ownVehicle && {
           ownVehicle: {
-            vehicleType: linkedImprest.vehicle_type || 'Bike',
-            startKm: ownVehicle.startKm,
-            endKm: ownVehicle.endKm,
-            km: ownVehicle.km,
+            vehicleType: ownVehicle.vehicleType,
             rate: ownVehicle.rate,
-            maxAmount: ownVehicle.maxAmount,
+            from: ownVehicle.from,
+            to: ownVehicle.to,
             plannedKm: ownVehicle.plannedKm,
-            flags: ownVehicle.flags,
-            photoRoles: OWN_VEHICLE_PHOTO_ROLES,
-            // What the GPS-camera stamp on each photo says (date/time, address, odometer)
-            photos: ownVehicle.photos || [],
+            estimate: ownVehicle.estimate,
           },
         }),
       };
 
-      // Own-vehicle claims are judged by the rules above, not the AI auditor —
-      // which looks for a payment that does not exist. Recording the verdict
-      // here also keeps the audit sweep (ai_verdict IS NULL) away from them.
+      // Own-vehicle claims go to a person, not the AI auditor — which looks for
+      // a payment that does not exist. Recording the verdict here also keeps the
+      // audit sweep (ai_verdict IS NULL) away from them.
       const ownVehicleAudit = ownVehicle ? {
-        ai_verdict: ownVehicle.flags.length ? 'needs_human' : 'approve',
+        ai_verdict: 'needs_human',
         ai_confidence: null,
         ai_auto_approved: false,
-        ai_model: 'odometer-rules',
+        ai_model: 'own-vehicle-review',
         ai_audited_at: submittedAt,
         ai_audit: {
-          verdict: ownVehicle.flags.length ? 'needs_human' : 'approve',
+          verdict: 'needs_human',
           reasoning: ownVehicle.reasoning,
-          fraud_signals: ownVehicle.flags,
-          attachment_quality: 'odometer_photos',
+          fraud_signals: [],
           suggested_adjusted_amount: null,
         },
       } : {};
@@ -426,7 +401,7 @@ router.post(
         entityId: expense.id,
         newValue: {
           refId, amount: parsedAmount, site, category, status: finalStatus,
-          ...(ownVehicle && { ownVehicleKm: ownVehicle.km, odometer: [ownVehicle.startKm, ownVehicle.endKm], flags: ownVehicle.flags }),
+          ...(ownVehicle && { ownVehicleTrip: true }),
         },
         ipAddress: req.ip,
       });
@@ -470,7 +445,7 @@ router.post(
         blockReason,
         receiptUnreadable,
         message: ownVehicle && finalStatus !== 'blocked'
-          ? `Trip ki photos mil gayi (${ownVehicle.km} km). Finance check karke approve karega. / Trip photos received — Finance will review and approve.`
+          ? 'Bike/car trip ka expense mil gaya. Finance aapka description padh kar approve karega. / Received — Finance will review your trip description.'
           : getStatusMessage(finalStatus, {
             aiAuditOn: AI_AUDIT_MODE !== 'off',
             receiptUnreadable,
