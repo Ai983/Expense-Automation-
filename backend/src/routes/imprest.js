@@ -70,6 +70,47 @@ async function maybeClearImprestBlock(employeeId, actorUserId = null, ip = null)
   });
 }
 
+// The employee's other paid imprests whose 7-day deadline has passed without
+// enough expenses filed. Shown to Finance before paying them again — the
+// system cannot tell "not spent" from "spent, bill not filed yet", so a person
+// decides with these facts instead of the payout being cut automatically.
+// Filed means submitted and not rejected/blocked, same as the reminders screen.
+async function overdueUnfiledImprests(employeeId, excludeImprestId) {
+  const { data: reminders, error } = await supabaseAdmin
+    .from('imprest_expense_reminders')
+    .select(`imprest_id, imprest_ref_id, status, deadline, imprest:imprest_id (${IMPREST_SPEND_LIMIT_COLUMNS})`)
+    .eq('employee_id', employeeId)
+    .in('status', ['pending', 'expired']);
+  if (error) throw error;
+
+  const now = Date.now();
+  const overdue = (reminders || []).filter((r) => r.imprest_id !== excludeImprestId
+    && (r.status === 'expired' || new Date(r.deadline).getTime() <= now));
+  if (overdue.length === 0) return [];
+
+  const { data: exps, error: expErr } = await supabaseAdmin
+    .from('expenses').select('imprest_id, amount')
+    .in('imprest_id', overdue.map((r) => r.imprest_id))
+    .not('status', 'in', '(rejected,blocked)');
+  if (expErr) throw expErr;
+  const filedBy = {};
+  for (const e of exps || []) filedBy[e.imprest_id] = (filedBy[e.imprest_id] || 0) + parseFloat(e.amount || 0);
+
+  return overdue
+    .filter((r) => !isImprestSettled(r.imprest, filedBy[r.imprest_id] || 0))
+    .map((r) => {
+      const paid = imprestSettlementTarget(r.imprest);
+      const filed = Math.round((filedBy[r.imprest_id] || 0) * 100) / 100;
+      return {
+        refId: r.imprest_ref_id,
+        paid,
+        filed,
+        unfiled: Math.round((paid - filed) * 100) / 100,
+        deadline: r.deadline,
+      };
+    });
+}
+
 // Notes sent with the founder-gate WhatsApp. Every amount change on the way is
 // spelled out next to the stage that made it, so the founder sees why the figure
 // in front of them differs from what the employee asked for.
@@ -470,35 +511,12 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
     const amount = parseFloat(amountRequested);
     const { approvalRoute, startingStage } = resolveImprestRouting(site, amount);
 
-    // Calculate old balance deduction if employee has expired reminders
-    let oldBalanceDeduction = 0;
-    try {
-      const { data: expiredReminders } = await supabaseAdmin
-        .from('imprest_expense_reminders')
-        .select('id')
-        .eq('employee_id', req.user.id)
-        .eq('status', 'expired');
-
-      if (expiredReminders?.length > 0) {
-        const { data: balanceData } = await supabaseAdmin
-          .from('imprest_requests')
-          .select('id, approved_amount, amount_requested')
-          .eq('employee_id', req.user.id)
-          .in('status', ['approved', 'partially_approved']);
-
-        if (balanceData?.length) {
-          const bIds = balanceData.map((b) => b.id);
-          const { data: bExp } = await supabaseAdmin
-            .from('expenses').select('imprest_id, amount, status')
-            .in('imprest_id', bIds).not('status', 'in', '("rejected","blocked")');
-          const bExpMap = {};
-          for (const e of (bExp || [])) { bExpMap[e.imprest_id] = (bExpMap[e.imprest_id] || 0) + parseFloat(e.amount); }
-          for (const b of balanceData) {
-            oldBalanceDeduction += Math.max(0, parseFloat(b.approved_amount || b.amount_requested) - (bExpMap[b.id] || 0));
-          }
-        }
-      }
-    } catch (e) { console.warn('Balance deduction calc failed:', e.message); }
+    // No old-balance deduction is taken here. It used to treat every unfiled
+    // rupee as cash still in the employee's pocket, but "no bill yet" does not
+    // mean "not spent" — Yashvant's ₹465 of bike trips was cut from his ₹1,024
+    // software payout and never given back once he filed them. Each imprest is
+    // now paid in full and settled by its own expenses; an overdue one is shown
+    // to Finance at Pay instead (overdueUnfiledImprests).
 
     // If insert succeeded, patch with extra columns
     if (!error && imprest?.id) {
@@ -513,7 +531,6 @@ router.post('/submit', authMiddleware, roleGuard(['employee']), async (req, res,
       // Set starting stage based on approval route
       extraFields.current_stage = startingStage;
       extraFields.approval_route = approvalRoute;
-      extraFields.old_balance_deducted = Math.round(oldBalanceDeduction * 100) / 100;
       await supabaseAdmin.from('imprest_requests').update(extraFields).eq('id', imprest.id);
     }
 
@@ -995,7 +1012,8 @@ router.post('/:id/approve', authMiddleware, roleGuard(FINANCE_ROLES), async (req
 
     const isPartial = finalAmount < imp.amount_requested;
     const approvedAt = new Date().toISOString();
-    const netAmount = Math.max(0, finalAmount - parseFloat(imp.old_balance_deducted || 0));
+    // Paid in full — no old-balance deduction (see the submit handler).
+    const netAmount = finalAmount;
 
     // Update: set to founder_review_pending, not s3_approved
     const updateData = {
@@ -1798,11 +1816,20 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
     if (imp.current_stage !== 'founder_approved') return fail(res, 'Founder approval required before payment.');
     if (imp.paid) return fail(res, 'This imprest is already marked paid.');
 
-    // If the founder adjusted the amount at the gate, that is the EXACT payout
-    // (old-balance deduction is ignored). Otherwise fall back to the net/approved.
+    // Bills for earlier advances come first. Finance may still pay, but must
+    // say why — the reason goes to the audit trail, not to the employee.
+    const overdue = await overdueUnfiledImprests(imp.employee_id, imp.id);
+    const overdueReason = req.body?.overdueReason?.trim() || null;
+    if (overdue.length > 0 && !overdueReason) {
+      const list = overdue.map((o) => `${o.refId} (₹${o.unfiled.toLocaleString('en-IN')} not filed)`).join(', ');
+      return fail(res, `OVERDUE_EXPENSES: Employee has overdue imprests without expenses: ${list}. Give a reason to pay anyway.`, 409);
+    }
+
+    // The founder's adjusted figure if they set one, else the approved amount.
+    // net_approved_amount is not used: older rows carry a frozen old-balance cut.
     const approvedPayout = imp.founder_adjusted_amount != null
       ? parseFloat(imp.founder_adjusted_amount)
-      : parseFloat(imp.net_approved_amount || imp.approved_amount);
+      : parseFloat(imp.approved_amount);
     const paymentRemark = req.body?.paymentRemark?.trim() || null;
 
     // Finance may pay a different amount: anything up to what the founder signed
@@ -1889,11 +1916,25 @@ router.post('/:id/pay', authMiddleware, roleGuard(FINANCE_ROLES), upload.single(
       newValue: {
         paid: true, paidAmount, current_stage: 'paid',
         ...(financeAdjusted !== null && { financeAdjustedFrom: approvedPayout, reason: paymentRemark }),
+        ...(overdue.length > 0 && { paidDespiteOverdue: overdue, overdueReason }),
       },
       ipAddress: req.ip,
     });
 
     return ok(res, { refId: imp.ref_id, status: 'paid', paidAmount: Math.round(paidAmount * 100) / 100 });
+  } catch (err) { next(err); }
+});
+
+// ── GET /api/imprest/:id/pay-check ───────────────────────────────────────────
+// What the Pay popup shows before payment: the employee's overdue imprests
+// without expenses. Pay refuses without a reason while this list is non-empty.
+router.get('/:id/pay-check', authMiddleware, roleGuard(FINANCE_ROLES), async (req, res, next) => {
+  try {
+    const { data: imp, error } = await supabaseAdmin
+      .from('imprest_requests').select('id, employee_id').eq('id', req.params.id).single();
+    if (error || !imp) return fail(res, 'Imprest not found', 404);
+    const overdue = await overdueUnfiledImprests(imp.employee_id, imp.id);
+    return ok(res, { overdue });
   } catch (err) { next(err); }
 });
 
@@ -1953,7 +1994,7 @@ router.post('/:id/decline-payment', authMiddleware, roleGuard(FINANCE_ROLES), as
 
     const payout = imp.founder_adjusted_amount != null
       ? parseFloat(imp.founder_adjusted_amount)
-      : parseFloat(imp.net_approved_amount || imp.approved_amount);
+      : parseFloat(imp.approved_amount);
     try {
       const { data: emp } = await supabaseAdmin
         .from('employees').select('name, phone').eq('id', imp.employee_id).single();

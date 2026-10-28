@@ -527,7 +527,11 @@ async function loadContext(expenseId, providedFiles) {
         amountRequested: imp.amount_requested,
         approvedAmount: imp.approved_amount,
         paidAmount: imp.paid_amount,
-        oldBalanceDeducted: parseFloat(imp.old_balance_deducted ?? 0) || 0,
+        // Only when it really came off the payout — older requests carry a
+        // frozen figure that was never taken (they were paid in full).
+        oldBalanceDeducted: Number(imp.paid_amount) < Number(imp.approved_amount)
+          ? (parseFloat(imp.old_balance_deducted ?? 0) || 0)
+          : 0,
         founderAdjustedAmount: imp.founder_adjusted_amount,
         paidAt: imp.paid_at,
         peopleCount: imp.people_count,

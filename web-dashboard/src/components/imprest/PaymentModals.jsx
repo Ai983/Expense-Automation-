@@ -10,10 +10,10 @@ function fmt(amount) {
 }
 
 // What Pay records unless finance changes it — mirrors the backend /pay route:
-// the founder's figure if they set one, else net after old-balance deduction
-// (a net of 0 falls back to the approved amount).
+// the founder's figure if they set one, else the approved amount. No old-balance
+// deduction: overdue advances are shown in the popup for Finance to decide.
 export function defaultPayout(req) {
-  return Number(req.founder_adjusted_amount ?? (req.net_approved_amount || req.approved_amount));
+  return Number(req.founder_adjusted_amount ?? req.approved_amount);
 }
 
 // The most finance may pay: what the founder signed off.
@@ -47,10 +47,22 @@ export function PayImprestModal({ req, onClose, onDone }) {
   const [receipt, setReceipt] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // Earlier advances of this employee past their 7-day deadline without bills.
+  // null = still loading.
+  const [overdue, setOverdue] = useState(null);
+  const [overdueReason, setOverdueReason] = useState('');
 
   useEffect(() => {
     setAmount(req ? String(defaultPayout(req)) : '');
     setRemark(''); setReceipt(null); setError('');
+    setOverdue(null); setOverdueReason('');
+    if (!req?.id) return;
+    let live = true;
+    api.get(`/api/imprest/${req.id}/pay-check`)
+      .then(({ data }) => { if (live) setOverdue(data.data?.overdue || []); })
+      // The Pay route checks again, so a failed lookup only loses the preview.
+      .catch(() => { if (live) setOverdue([]); });
+    return () => { live = false; };
   }, [req?.id]);
 
   if (!req) return null;
@@ -59,6 +71,7 @@ export function PayImprestModal({ req, onClose, onDone }) {
   const cap = payoutCap(req);
   const amountNum = Number(amount);
   const changed = amount !== '' && Math.round(amountNum * 100) !== Math.round(payout * 100);
+  const hasOverdue = overdue?.length > 0;
 
   const handlePay = async () => {
     if (amount === '' || !(amountNum > 0)) { setError('Enter the amount you are paying.'); return; }
@@ -66,12 +79,14 @@ export function PayImprestModal({ req, onClose, onDone }) {
       setError(`Cannot pay more than the Founder approved (${fmt(cap)}).`); return;
     }
     if (changed && !remark.trim()) { setError('Add a reason for paying a different amount.'); return; }
+    if (hasOverdue && !overdueReason.trim()) { setError('Add a reason for paying while earlier expenses are overdue.'); return; }
     setLoading(true); setError('');
     try {
       const formData = new FormData();
       if (receipt) formData.append('receipt', receipt);
       if (remark.trim()) formData.append('paymentRemark', remark.trim());
       if (changed) formData.append('adjustedAmount', String(amountNum));
+      if (overdueReason.trim()) formData.append('overdueReason', overdueReason.trim());
       await api.post(`/api/imprest/${req.id}/pay`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -96,6 +111,31 @@ export function PayImprestModal({ req, onClose, onDone }) {
             <div className="flex justify-between"><span className="text-gray-500">Category</span><span>{req.category}</span></div>
             <div className="flex justify-between"><span className="text-gray-500">Site</span><span>{req.site}</span></div>
           </div>
+          {overdue === null && (
+            <p className="text-xs text-gray-400">Checking the employee's earlier advances…</p>
+          )}
+          {hasOverdue && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 space-y-2 text-sm">
+              <p className="font-semibold text-red-800">⚠ Earlier advances overdue without expenses</p>
+              {overdue.map((o) => (
+                <div key={o.refId} className="flex justify-between text-xs">
+                  <span className="text-gray-700">{o.refId} — paid {fmt(o.paid)}, filed {fmt(o.filed)}</span>
+                  <span className="font-bold text-red-700">{fmt(o.unfiled)} not filed</span>
+                </div>
+              ))}
+              <p className="text-xs text-red-700">
+                Not filed does not mean not spent — best is to get these bills first. To pay now anyway, give a reason.
+              </p>
+              <textarea
+                value={overdueReason}
+                onChange={(e) => setOverdueReason(e.target.value)}
+                rows={2}
+                placeholder="e.g. Bills submitted on paper, will be uploaded today…"
+                className="w-full border border-red-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 resize-none"
+              />
+              <p className="text-xs text-gray-400">Kept in the audit trail; not sent to the employee.</p>
+            </div>
+          )}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">Amount to Pay (₹)</label>
             <input type="number" min="1" step="0.01" max={cap}
@@ -137,9 +177,9 @@ export function PayImprestModal({ req, onClose, onDone }) {
         <div className="p-5 border-t flex justify-end gap-3">
           <button onClick={onClose}
             className="px-4 py-2 text-sm text-gray-600 border rounded-lg hover:bg-gray-50 active:scale-95 transition-all">Cancel</button>
-          <button onClick={handlePay} disabled={loading}
+          <button onClick={handlePay} disabled={loading || overdue === null}
             className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60 active:scale-95 transition-all">
-            {loading ? 'Processing…' : changed ? `Confirm Payment of ${fmt(amountNum || 0)}` : 'Confirm Payment'}
+            {loading ? 'Processing…' : hasOverdue ? 'Pay Anyway' : changed ? `Confirm Payment of ${fmt(amountNum || 0)}` : 'Confirm Payment'}
           </button>
         </div>
       </div>

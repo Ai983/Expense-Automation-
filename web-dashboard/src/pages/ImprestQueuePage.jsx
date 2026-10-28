@@ -45,6 +45,14 @@ function fmt(amount) {
   return `₹${Number(amount).toLocaleString('en-IN')}`;
 }
 
+// Old-balance cuts are history only — they are no longer taken. Show one only
+// where it really came off a payout: many rows carry a figure never applied.
+function oldBalanceCut(r) {
+  return r.paid && r.old_balance_deducted > 0
+    && r.founder_adjusted_amount == null && r.finance_adjusted_amount == null
+    && Number(r.paid_amount) < Number(r.approved_amount);
+}
+
 function statusLabel(req) {
   if (req.payment_declined_at) return 'Payment Declined';
   return STATUS_LABELS[req.status] || req.status;
@@ -705,14 +713,14 @@ export default function ImprestQueuePage() {
               </div>
 
               {/* Balance Adjustment + Approval Info — side by side if both exist */}
-              {(detailReq.old_balance_deducted > 0 || detailReq.approved_amount != null || detailReq.rejection_reason) && (
+              {(oldBalanceCut(detailReq) || detailReq.approved_amount != null || detailReq.rejection_reason) && (
                 <div className="grid grid-cols-2 gap-4">
-                  {detailReq.old_balance_deducted > 0 && (
+                  {oldBalanceCut(detailReq) && (
                     <div className="bg-orange-50 rounded-xl p-3 text-sm">
                       <p className="text-[10px] font-bold text-orange-400 uppercase tracking-wider mb-2 flex items-center gap-1.5"><span className="w-1 h-3 rounded-full bg-orange-400 inline-block" />Balance Adjustment</p>
                       <CompactRow label="Approved" value={fmt(detailReq.approved_amount || detailReq.amount_requested)} />
-                      <CompactRow label="Deducted" value={`−${fmt(detailReq.old_balance_deducted)}`} className="text-orange-600" />
-                      <CompactRow label="Net Pay" value={fmt(detailReq.net_approved_amount || 0)} bold className="text-green-700" />
+                      <CompactRow label="Deducted" value={`−${fmt(Number(detailReq.approved_amount) - Number(detailReq.paid_amount))}`} className="text-orange-600" />
+                      <CompactRow label="Net Pay" value={fmt(detailReq.paid_amount || 0)} bold className="text-green-700" />
                     </div>
                   )}
                   {(detailReq.approved_amount != null || detailReq.rejection_reason) && (
@@ -840,9 +848,6 @@ export default function ImprestQueuePage() {
                     )}
                     {selected?.director_approved_amount && (
                       <p className="text-xs text-orange-600 mt-1">Director approved {fmt(selected.director_approved_amount)} — you cannot exceed this amount.</p>
-                    )}
-                    {selected?.old_balance_deducted > 0 && (
-                      <p className="text-xs text-amber-600 mt-1">Old balance deduction: {fmt(selected.old_balance_deducted)} will be subtracted.</p>
                     )}
                   </div>
                   {approveAmountChanged && (
