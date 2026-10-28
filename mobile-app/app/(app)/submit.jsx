@@ -271,7 +271,7 @@ export default function SubmitExpenseScreen() {
     if (ownTrip && form.description.trim().length < OWN_VEHICLE_MIN_DESCRIPTION) {
       return Alert.alert('Detail likhein', 'Bike/car trip: description me likhein — kahan se kahan gaye, kis kaam se, kitne km.');
     }
-    if (images.length === 0) {
+    if (!ownTrip && images.length === 0) {
       return Alert.alert('Error', 'Upload at least one payment screenshot or PDF');
     }
 
@@ -536,7 +536,9 @@ export default function SubmitExpenseScreen() {
             />
 
             {/* Payment proof */}
-            <Text style={styles.label}>Payment Proof * {images.length > 0 && `(${images.length} attached)`}</Text>
+            <Text style={styles.label}>
+              {ownTrip ? 'Photo / Proof (optional)' : 'Payment Proof *'} {images.length > 0 && `(${images.length} attached)`}
+            </Text>
 
             {images.length > 0 && (
               <View style={{ marginBottom: 12 }}>

@@ -68,10 +68,6 @@ router.post(
       if (isNaN(parsedAmount) || parsedAmount <= 0) {
         return fail(res, 'Amount must be a positive number');
       }
-      if (files.length === 0) {
-        return fail(res, 'At least one payment screenshot is required');
-      }
-
       // Expenses must be linked to a paid Imprest Request
       if (!imprestId) {
         return fail(res, 'An approved Imprest Request is required before submitting an expense. Please raise an Imprest Request and get it paid first.');
@@ -120,6 +116,10 @@ router.post(
         }
         ownVehicle = ownVehicleReview(linkedImprest);
       }
+      // A bike/car trip has no bill, so an attachment is optional there.
+      if (files.length === 0 && !ownVehicle) {
+        return fail(res, 'At least one payment screenshot is required');
+      }
 
       const submittedAt = new Date().toISOString();
 
@@ -150,7 +150,7 @@ router.post(
       let hasForeignCurrency = false;
       const allOcrResults = [];
 
-      const isPdf = primaryFile.mimetype === 'application/pdf';
+      const isPdf = primaryFile?.mimetype === 'application/pdf';
 
       // Run OCR on each screenshot to extract amounts — not for own-vehicle
       // photos, which carry no payment to read.
@@ -293,7 +293,7 @@ router.post(
 
       // 6. Build screenshot_metadata JSONB
       const screenshotMetadata = {
-        attachmentType: isPdf ? 'pdf' : 'image',
+        attachmentType: files.length === 0 ? 'none' : isPdf ? 'pdf' : 'image',
         screenshotCount: files.length,
         screenshots: screenshotPaths,
         allOcrResults,
