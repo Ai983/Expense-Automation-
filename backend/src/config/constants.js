@@ -162,6 +162,10 @@ export const IMPREST_CATEGORIES = [
 
 export const STORAGE_BUCKET = 'expense-screenshots';
 
+// Files per expense, on submit and on fix. Was 5: employees with more bills
+// split one claim into several expenses. The app mirrors this in submit.jsx.
+export const MAX_EXPENSE_ATTACHMENTS = 10;
+
 export const SIGNED_URL_EXPIRY_SECONDS = 3600; // 1 hour
 
 // ── Deterministic verification thresholds ─────────────────────────────────────

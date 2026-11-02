@@ -1,5 +1,8 @@
 import { Platform } from 'react-native';
 
+// Files per expense. Must match MAX_EXPENSE_ATTACHMENTS in backend/src/config/constants.js.
+export const MAX_ATTACHMENTS = 10;
+
 export const SITES = [
   'Head Office',
   'Andritz',

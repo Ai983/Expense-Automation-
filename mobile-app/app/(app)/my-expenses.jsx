@@ -6,6 +6,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../src/context/AuthContext';
 import { getMyExpenses, fixExpense } from '../../src/services/expenseService';
 import ExpenseCard from '../../src/components/ExpenseCard';
+import { MAX_ATTACHMENTS } from '../../src/constants';
 
 export default function MyExpensesScreen() {
   const [expenses, setExpenses] = useState([]);
@@ -56,6 +57,7 @@ export default function MyExpensesScreen() {
         quality: 0.85,
         allowsEditing: false,
         allowsMultipleSelection: true,
+        selectionLimit: MAX_ATTACHMENTS,
       });
       if (picked.canceled || !picked.assets?.length) return;
 

@@ -9,7 +9,7 @@ import { useAuth } from '../../src/context/AuthContext';
 import { submitExpense, getMyAdjustments, waitForAuditResult } from '../../src/services/expenseService';
 import { getMyReminders, fulfillReminder } from '../../src/services/imprestService';
 import { Picker } from '@react-native-picker/picker';
-import { SITES, CATEGORIES, IMPREST_TO_EXPENSE_CATEGORY } from '../../src/constants';
+import { SITES, CATEGORIES, IMPREST_TO_EXPENSE_CATEGORY, MAX_ATTACHMENTS } from '../../src/constants';
 import { useSites } from '../../src/hooks/useSites';
 
 const INITIAL_FORM = { site: SITES[0], amount: '', category: CATEGORIES[0], description: '' };
@@ -560,7 +560,7 @@ export default function SubmitExpenseScreen() {
               </View>
             )}
 
-            {images.length < 5 && (
+            {images.length < MAX_ATTACHMENTS && (
               <View style={styles.imageButtons}>
                 <TouchableOpacity style={styles.imgBtn} onPress={() => pickImage('camera')}>
                   <Text style={styles.imgBtnText}>📷 Camera</Text>
@@ -573,9 +573,9 @@ export default function SubmitExpenseScreen() {
                 </TouchableOpacity>
               </View>
             )}
-            {images.length > 0 && images.length < 5 && (
+            {images.length > 0 && images.length < MAX_ATTACHMENTS && (
               <Text style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 4 }}>
-                You can add up to {5 - images.length} more screenshot{5 - images.length !== 1 ? 's' : ''}
+                You can add up to {MAX_ATTACHMENTS - images.length} more screenshot{MAX_ATTACHMENTS - images.length !== 1 ? 's' : ''}
               </Text>
             )}
 

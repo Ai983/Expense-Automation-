@@ -21,6 +21,7 @@ import {
   AI_AUDITABLE_STATUSES,
   FIX_WINDOW_DAYS,
   MAX_FIX_ATTEMPTS,
+  MAX_EXPENSE_ATTACHMENTS,
   FIX_NOTIFY_MAX_PER_EMPLOYEE_DAY,
   FIX_NOTIFY_MAX_PER_DAY,
   EXPENSE_NOTIFY_ENABLED,
@@ -39,7 +40,8 @@ import { notifyExpenseNeedsFix, notifyExpenseRejected } from './whatsappService.
 const MAX_INLINE_FILE_BYTES = parseFloat(
   process.env.AI_AUDIT_MAX_FILE_MB || (LLM_PROVIDER === 'anthropic' ? '4.5' : '12'),
 ) * 1024 * 1024;
-const MAX_FILES_PER_AUDIT = 5;
+// Every attachment the employee could send, so none goes unread.
+const MAX_FILES_PER_AUDIT = MAX_EXPENSE_ATTACHMENTS;
 const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
 // ── Structured output contract ────────────────────────────────────────────────

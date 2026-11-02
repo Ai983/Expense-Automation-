@@ -21,6 +21,7 @@ import {
   AMOUNT_TOLERANCE_INR,
   AI_AUDIT_MODE,
   MAX_FIX_ATTEMPTS,
+  MAX_EXPENSE_ATTACHMENTS,
 } from '../config/constants.js';
 import { runAuditAndPersist, sweepPendingAudits } from '../services/aiAuditService.js';
 import { notifyExpenseRejected } from '../services/whatsappService.js';
@@ -37,7 +38,7 @@ router.post(
   '/submit',
   authMiddleware,
   roleGuard(['employee']),
-  upload.fields([{ name: 'screenshots', maxCount: 5 }, { name: 'screenshot', maxCount: 1 }]),
+  upload.fields([{ name: 'screenshots', maxCount: MAX_EXPENSE_ATTACHMENTS }, { name: 'screenshot', maxCount: 1 }]),
   async (req, res, next) => {
     try {
       const { site, amount, category, description, imprestId, settlementForExpenseId } = req.body;
@@ -153,18 +154,27 @@ router.post(
       const isPdf = primaryFile?.mimetype === 'application/pdf';
 
       // Run OCR on each screenshot to extract amounts — not for own-vehicle
-      // photos, which carry no payment to read.
-      for (const file of (ownVehicle ? [] : files)) {
+      // photos, which carry no payment to read. In parallel: at ~4.5 s a file,
+      // ten in sequence would near the app's 120 s timeout, and the app retries
+      // a timed-out submit, which files the expense twice.
+      const ocrFiles = ownVehicle ? [] : files;
+      const ocrOutcomes = await Promise.allSettled(ocrFiles.map((file) =>
+        verifyExpense(file.buffer, {
+          amount: parsedAmount,
+          submittedAt,
+          mimeType: file.mimetype,
+          // Anchors the date check to the imprest period instead of the
+          // submission date, so batching receipts within the 7-day deadline
+          // is not treated as a failure.
+          imprestPaidAt: linkedImprest?.paid_at || null,
+        })
+      ));
+      for (let i = 0; i < ocrFiles.length; i++) {
+        const file = ocrFiles[i];
         try {
-          const v = await verifyExpense(file.buffer, {
-            amount: parsedAmount,
-            submittedAt,
-            mimeType: file.mimetype,
-            // Anchors the date check to the imprest period instead of the
-            // submission date, so batching receipts within the 7-day deadline
-            // is not treated as a failure.
-            imprestPaidAt: linkedImprest?.paid_at || null,
-          });
+          const outcome = ocrOutcomes[i];
+          if (outcome.status === 'rejected') throw outcome.reason;
+          const v = outcome.value;
           const currency = v.ocrData?.currency || 'INR';
           allOcrResults.push({
             extractedAmount: v.ocrData?.amount || null,
@@ -184,7 +194,7 @@ router.post(
             autoAction = filePdf && v.autoAction === 'blocked' ? 'manual_review' : v.autoAction;
           }
         } catch (visionErr) {
-          console.warn('Vision API failed for a screenshot:', visionErr.message);
+          console.warn('Vision API failed for a screenshot:', visionErr?.message);
           allOcrResults.push({ extractedAmount: null, transactionId: null, confidence: 0 });
           if (!verification) {
             verificationChecks = [{ step: 'ocr', result: 'warn', score: 0, detail: 'Vision API unavailable' }];
@@ -1007,7 +1017,7 @@ router.post(
 router.post(
   '/:expenseId/fix',
   authMiddleware,
-  upload.fields([{ name: 'screenshots', maxCount: 5 }, { name: 'screenshot', maxCount: 1 }]),
+  upload.fields([{ name: 'screenshots', maxCount: MAX_EXPENSE_ATTACHMENTS }, { name: 'screenshot', maxCount: 1 }]),
   async (req, res, next) => {
     try {
       const files = [...(req.files?.screenshots || []), ...(req.files?.screenshot || [])];
